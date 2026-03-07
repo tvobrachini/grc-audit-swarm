@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from src.swarm.state.schema import AuditState
 from src.swarm.llm_factory import get_llm
+from src.swarm.skill_loader import get_skill_by_id, get_focus_domains
 
 class ReviewOutput(BaseModel):
     is_approved: bool = Field(description="True if the control matrix is comprehensive, relevant, and non-contradictory. False if it needs revision.")
@@ -132,6 +133,19 @@ def challenge_execution_findings(state: AuditState) -> dict:
         for f in findings
     ])
 
+    # Load skill focus domains for calibration context
+    skill_names = ", ".join(state.active_skill_names) if state.active_skill_names else "General ITGC"
+    focus_domain_context = ""
+    if state.active_skill_ids:
+        skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
+        domains = get_focus_domains(skills)
+        if domains:
+            focus_domain_context = (
+                f"\nPriority control domains for this audit specialization ({skill_names}):\n"
+                + ", ".join(domains)
+                + "\nApply domain-appropriate severity standards when calibrating findings in these areas."
+            )
+
     challenge_prompt = ChatPromptTemplate.from_messages([
         ("system",
          "You are a Senior Audit Partner conducting a quality review of AI-generated audit findings "
@@ -140,7 +154,8 @@ def challenge_execution_findings(state: AuditState) -> dict:
          "2. Have insufficient evidence (Pass with 0 evidence items = suspicious)\n"
          "3. Have miscalibrated severity (single occurrence marked High Risk needs justification)\n"
          "4. Have contradictions between controls in the same domain\n\n"
-         "Be rigorous but fair. If findings are well-calibrated, approve them."),
+         + focus_domain_context +
+         "\n\nBe rigorous but fair. If findings are well-calibrated, approve them."),
         ("human",
          "Audit Scope: {scope}\n"
          "Active Specializations: {skills}\n\n"
@@ -153,7 +168,7 @@ def challenge_execution_findings(state: AuditState) -> dict:
     try:
         result = chain.invoke({
             "scope": state.audit_scope_narrative[:400],
-            "skills": ", ".join(state.active_skill_names) if state.active_skill_names else "General ITGC",
+            "skills": skill_names,
             "findings": findings_text
         })
 
