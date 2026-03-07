@@ -2,7 +2,6 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
 import os
-from pydantic import ValidationError
 from typing import Dict, Any
 
 from src.swarm.state.schema import AuditState
@@ -11,104 +10,127 @@ from src.swarm.agents.researcher import generate_risk_context
 from src.swarm.agents.mapper import map_controls_and_design_tests
 from src.swarm.agents.specialist import inject_specialist_tests
 from src.swarm.agents.challenger import challenger_review
-# Initialize the StateGraph with our strict Pydantic schema
+from src.swarm.agents.worker import run_control_test
+from src.swarm.agents.concluder import produce_executive_summary
+
 workflow = StateGraph(AuditState)
 
-# Phase 1: Planning Nodes
-def orchestrator_node(state: dict) -> dict:
-    """Agent 1 Wrapper: Reads the raw scope and identifies themes & dynamic roles."""
+# ── Phase 1: Planning Nodes ───────────────────────────────────────────────────
+def orchestrator_node(state: AuditState) -> dict:
     return analyze_scope_and_themes(state)
 
 def researcher_node(state: AuditState) -> dict:
-    """Agent 6: Generates 1-Pager context using web search."""
     return generate_risk_context(state)
 
 def control_mapper_node(state: AuditState) -> dict:
-    """Agent 2 & 3: Pulls generic controls & designs baseline tests."""
     return map_controls_and_design_tests(state)
 
 def dynamic_specialist_node(state: AuditState) -> dict:
-    """Agent 4: Injects hyper-specific tests based on the dynamic roles."""
     return inject_specialist_tests(state)
 
 def challenger_node(state: AuditState) -> dict:
-    """Agent 5: Reviews the draft matrix for completeness and non-contradiction."""
     return challenger_review(state)
 
-def should_revise(state: AuditState) -> str:
-    """Conditional edge logic after the Challenger review."""
-    if state.revision_feedback != "":
-        print("Challenger requested revisions. Routing back to Mapper...")
-        return "revise"
-    print("Challenger approved. Routing to Human Review Checkpoint...")
-    return "proceed_to_human"
-
 def human_review_node(state: AuditState) -> dict:
-    """
-    Breakpoint: Halts execution so a human can review Phase 1 outputs.
-    Streamlit will inject revision_feedback into state before resuming.
-    """
+    """Phase 1 breakpoint: pauses for human review of the planning artifacts."""
     return {}
 
-def human_should_revise(state: AuditState) -> str:
+def should_revise(state: AuditState) -> str:
     if state.revision_feedback != "":
-        print("Human requested revisions. Routing back to Swarm...")
         return "revise"
-    print("Human approved. Ending Phase 1.")
+    return "proceed_to_human"
+
+def human_should_approve_phase1(state: AuditState) -> str:
+    if state.revision_feedback != "":
+        return "revise"
+    return "execute"
+
+# ── Phase 2: Execution Nodes ──────────────────────────────────────────────────
+def run_all_workers_node(state: AuditState) -> dict:
+    """
+    Executes audit tests for all controls in the matrix.
+    Runs Workers sequentially — one per control.
+    """
+    print(f"\n[Execution] Running workers for {len(state.control_matrix)} controls...")
+    findings = []
+    status_map = {}
+
+    for control in state.control_matrix:
+        cid = control.control_id
+        # Check if human left feedback specifically for this control
+        human_ctx = state.control_feedback.get(cid, "")
+        status_map[cid] = "executing"
+        finding = run_control_test(control, state, human_context=human_ctx)
+        findings.append(finding)
+        status_map[cid] = "awaiting_review"
+        print(f"  ✓ {cid}: {finding.status}")
+
+    return {
+        "testing_findings": findings,
+        "execution_status": status_map,
+        "audit_trail": state.audit_trail + [{
+            "agent_or_user_id": "Execution Engine",
+            "action_taken": f"Completed {len(findings)} control tests.",
+            "reasoning_snapshot": f"{sum(1 for f in findings if f.status=='Pass')} Pass / {sum(1 for f in findings if f.status=='Exception')} Exception / {sum(1 for f in findings if f.status=='Fail')} Fail",
+            "approval_status": "Pending Human Review"
+        }]
+    }
+
+def concluder_node(state: AuditState) -> dict:
+    return produce_executive_summary(state)
+
+def human_review_execution_node(state: AuditState) -> dict:
+    """Phase 2 breakpoint: pauses for human review of findings."""
+    return {}
+
+def human_should_approve_phase2(state: AuditState) -> str:
+    # Check if any control has feedback that needs re-running
+    has_feedback = any(v.strip() for v in state.control_feedback.values())
+    if has_feedback:
+        return "rerun"
     return "end"
 
-# Add nodes to the graph
+# ── Add nodes ─────────────────────────────────────────────────────────────────
 workflow.add_node("orchestrator", orchestrator_node)
 workflow.add_node("researcher", researcher_node)
 workflow.add_node("control_mapper", control_mapper_node)
 workflow.add_node("dynamic_specialists", dynamic_specialist_node)
 workflow.add_node("challenger", challenger_node)
 workflow.add_node("human_review", human_review_node)
+workflow.add_node("run_all_workers", run_all_workers_node)
+workflow.add_node("concluder", concluder_node)
+workflow.add_node("human_review_execution", human_review_execution_node)
 
-# Phase 1 Edges (The Flow)
+# ── Phase 1 Edges ─────────────────────────────────────────────────────────────
 workflow.set_entry_point("orchestrator")
 workflow.add_edge("orchestrator", "researcher")
 workflow.add_edge("researcher", "control_mapper")
 workflow.add_edge("control_mapper", "dynamic_specialists")
 workflow.add_edge("dynamic_specialists", "challenger")
+workflow.add_conditional_edges("challenger", should_revise,
+    {"revise": "researcher", "proceed_to_human": "human_review"})
+workflow.add_conditional_edges("human_review", human_should_approve_phase1,
+    {"revise": "researcher", "execute": "run_all_workers"})
 
-# The Challenger will either loop back or go to the Human Review
-workflow.add_conditional_edges(
-    "challenger",
-    should_revise,
-    {
-        "revise": "researcher", # Can loop back to researcher if feedback dictates
-        "proceed_to_human": "human_review"
-    }
-)
+# ── Phase 2 Edges ─────────────────────────────────────────────────────────────
+workflow.add_edge("run_all_workers", "concluder")
+workflow.add_edge("concluder", "human_review_execution")
+workflow.add_conditional_edges("human_review_execution", human_should_approve_phase2,
+    {"rerun": "run_all_workers", "end": END})
 
-# The Human Review node loops back if the user provides feedback in the UI
-workflow.add_conditional_edges(
-    "human_review",
-    human_should_revise,
-    {
-        "revise": "researcher",
-        "end": END
-    }
-)
-
-# Ensure data directory exists
+# ── Compile ───────────────────────────────────────────────────────────────────
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../data")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "audit_checkpoints.sqlite")
 
-# Compile the graph
-# We add a 'SqliteSaver' here to persist Human-in-the-loop pauses across sessions.
-# We must use checkpointer=memory in the compile signature, but since stream/invoke
-# can happen across different files, we configure the sqlite connection per execution.
-# For Streamlit compatibility where app.py imports swarm_app, we'll initialize the
-# sqlite connection in app.py and pass it to the RunnableConfig, or leave the 
-# checkpointer object attached here if it's thread-safe.
-
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 memory = SqliteSaver(conn)
 
-app = workflow.compile(checkpointer=memory, interrupt_before=["human_review"])
+app = workflow.compile(
+    checkpointer=memory,
+    interrupt_before=["human_review", "human_review_execution"]
+)
+
 
 if __name__ == "__main__":
     print("--- Swarm Architecture Graph Compiled Successfully ---")

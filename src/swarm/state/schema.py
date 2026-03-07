@@ -29,11 +29,15 @@ class ControlMatrixItem(BaseModel):
 # --- Phase 2: Execution Artifacts ---
 class AuditFinding(BaseModel):
     control_id: str
-    agent_role: str = Field(description="The Swarm Worker role that generated this finding (e.g., 'Cloud Security Worker').")
+    agent_role: str = Field(description="The Swarm Worker role that generated this finding.")
     status: str = Field(description="Must be exactly: 'Pass', 'Fail', or 'Exception'.")
     justification: str = Field(description="Detailed narrative explaining the status.")
-    evidence_extracted: List[str] = Field(description="Exact quotes or data points extracted from the raw evidence logs to ground the finding.")
-    risk_rating: Optional[str] = Field(None, description="Optional rating (e.g., 'High', 'Medium', 'Low') if the status is a Fail.")
+    evidence_extracted: List[str] = Field(description="Exact quotes or data points from evidence.")
+    risk_rating: Optional[str] = Field(None, description="'High', 'Medium', 'Low', or None for Pass.")
+    # Per-step results for the Findings Command Center UI
+    tod_result: Optional[str] = Field(None, description="'Pass' or 'Fail' for Test of Design.")
+    toe_result: Optional[str] = Field(None, description="'Pass', 'Fail', or 'Exception' for Test of Effectiveness.")
+    substantive_result: Optional[str] = Field(None, description="'Pass', 'Fail', or 'Exception' for Substantive Testing.")
 
 
 # --- Overall Workflow State ---
@@ -52,6 +56,12 @@ class AuditState(BaseModel):
     # Phase 2: Execution
     evidence_log: Dict[str, Any] = Field(default_factory=dict, description="Raw mocked JSON payloads or MCP tool outputs loaded for the workers to read.")
     testing_findings: List[AuditFinding] = Field(default_factory=list)
+    # Per-control execution status: 'pending' | 'executing' | 'awaiting_review' | 'clean' | 'flagged'
+    execution_status: Dict[str, str] = Field(default_factory=dict)
+    # Per-control human feedback, keyed by control_id
+    control_feedback: Dict[str, str] = Field(default_factory=dict)
+    # Executive summary produced by Concluder agent
+    executive_summary: str = Field(default="")
     
     # Cross-Phase State & Feedback Loop
     revision_feedback: str = Field(default="", description="Instructions from the Human or the Challenger to revise the current artifact.")
