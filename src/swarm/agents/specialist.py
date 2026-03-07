@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from src.swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
 from src.swarm.llm_factory import get_llm
+from src.swarm.skill_loader import get_skill_by_id, get_specialist_prompt
 
 class EnhancedProcedureOutput(BaseModel):
     tod_steps: List[str] = Field(description="Enriched Test of Design steps focusing on the specific specialist role context.")
@@ -32,12 +33,23 @@ def inject_specialist_tests(state: AuditState) -> dict:
         print("[Specialist] No LLM available. Emulating logic.")
         return _emulate_specialist(state)
 
+    # ─── Load Skill System Prompt ───────────────────────────────────────────────
+    # If the Orchestrator matched skills, use their combined expert system prompts.
+    # Fall back to a generic roles-based prompt if no skills are loaded.
+    if state.active_skill_ids:
+        loaded_skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
+        skill_system_prompt = get_specialist_prompt(loaded_skills)
+        print(f"[Specialist] Loaded skill prompts: {', '.join(state.active_skill_names)}")
+    else:
+        skill_system_prompt = (
+            f"You are acting as the following specialized IT Audit Roles: {', '.join(roles)}. "
+            "Enhance the provided audit procedures with highly technical, domain-specific checks. "
+            "Do not write generic procedures — write exactly what a specialist in this domain would check."
+        )
+        print("[Specialist] No skills loaded, using role-based prompt.")
+
     specialist_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are acting as the following specialized IT Audit Roles: {roles}. "
-                   "Your job is to take a generic baseline IT audit procedure and ENHANCE it "
-                   "with highly technical, domain-specific checks (e.g., specific AWS CLI commands, "
-                   "Kubernetes kubectl checks, or specific PCI-DSS parameters). "
-                   "Do not write a generic procedure; write exactly what your specialist persona would check."),
+        ("system", skill_system_prompt + "\n\nYour task: Take the baseline audit procedure provided and ENHANCE it with highly specific, technical steps."),
         ("human", "Control ID: {control_id}\n"
                   "Domain: {domain}\n"
                   "Description: {description}\n\n"
@@ -46,7 +58,7 @@ def inject_specialist_tests(state: AuditState) -> dict:
                   "TOE: {toe}\n"
                   "Substantive: {sub}\n"
                   "ERL: {erl}\n\n"
-                  "Rewrite and enhance these procedures through the lens of your specialized role.")
+                  "Rewrite and enhance these procedures through the lens of your specialized expertise.")
     ])
     
     structured_enhancer = llm.with_structured_output(EnhancedProcedureOutput)
@@ -62,7 +74,6 @@ def inject_specialist_tests(state: AuditState) -> dict:
         try:
             print(f"  -> Enhancing procedure for {item.control_id}...")
             result = enhancer_chain.invoke({
-                "roles": ", ".join(roles),
                 "control_id": item.control_id,
                 "domain": item.domain,
                 "description": item.description,
