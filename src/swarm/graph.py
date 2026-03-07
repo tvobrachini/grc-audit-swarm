@@ -6,10 +6,10 @@ from typing import Dict, Any
 
 from src.swarm.state.schema import AuditState
 from src.swarm.agents.orchestrator import analyze_scope_and_themes
-from src.swarm.agents.researcher import generate_risk_context
+from src.swarm.agents.researcher import generate_risk_context, research_failed_controls
 from src.swarm.agents.mapper import map_controls_and_design_tests
-from src.swarm.agents.specialist import inject_specialist_tests
-from src.swarm.agents.challenger import challenger_review
+from src.swarm.agents.specialist import inject_specialist_tests, annotate_findings_with_specialist
+from src.swarm.agents.challenger import challenger_review, challenge_execution_findings
 from src.swarm.agents.worker import run_control_test
 from src.swarm.agents.concluder import produce_executive_summary
 
@@ -98,6 +98,10 @@ workflow.add_node("dynamic_specialists", dynamic_specialist_node)
 workflow.add_node("challenger", challenger_node)
 workflow.add_node("human_review", human_review_node)
 workflow.add_node("run_all_workers", run_all_workers_node)
+# Phase 2 review pipeline nodes
+workflow.add_node("phase2_specialist", lambda s: annotate_findings_with_specialist(s))
+workflow.add_node("phase2_researcher", lambda s: research_failed_controls(s))
+workflow.add_node("phase2_challenger", lambda s: challenge_execution_findings(s))
 workflow.add_node("concluder", concluder_node)
 workflow.add_node("human_review_execution", human_review_execution_node)
 
@@ -113,7 +117,11 @@ workflow.add_conditional_edges("human_review", human_should_approve_phase1,
     {"revise": "researcher", "execute": "run_all_workers"})
 
 # ── Phase 2 Edges ─────────────────────────────────────────────────────────────
-workflow.add_edge("run_all_workers", "concluder")
+# Workers → Specialist annotation → Researcher breach context → Challenger QA → Concluder → Human
+workflow.add_edge("run_all_workers", "phase2_specialist")
+workflow.add_edge("phase2_specialist", "phase2_researcher")
+workflow.add_edge("phase2_researcher", "phase2_challenger")
+workflow.add_edge("phase2_challenger", "concluder")
 workflow.add_edge("concluder", "human_review_execution")
 workflow.add_conditional_edges("human_review_execution", human_should_approve_phase2,
     {"rerun": "run_all_workers", "end": END})

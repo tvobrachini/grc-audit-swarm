@@ -1,4 +1,5 @@
 import os
+from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -86,4 +87,124 @@ def _emulate_challenger(state: AuditState) -> dict:
     return {
         "revision_feedback": "",
         "audit_trail": state.audit_trail + audit_trail_entries
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PHASE 2: Challenger Reviews Execution Findings
+# ══════════════════════════════════════════════════════════════════════════════
+
+class FindingsChallengeOutput(BaseModel):
+    overall_quality: str = Field(description="'Approved' or 'Concerns Raised'.")
+    calibration_notes: List[str] = Field(
+        description="List of specific notes per finding where severity, classification, or evidence is inconsistent. "
+                    "Each note should reference the exact control ID. Empty list if no concerns."
+    )
+    summary: str = Field(
+        description="A 1-2 sentence summary of the overall findings quality review."
+    )
+
+def challenge_execution_findings(state: AuditState) -> dict:
+    """
+    Phase 2 Challenger: Acts as a senior audit partner reviewing all findings
+    BEFORE the human sees them. Checks for:
+    - Logical inconsistencies (e.g., TOD pass + TOE fail → should be Exception not Fail)
+    - Evidence sufficiency (Pass findings with no evidence)
+    - Severity calibration (single-sample exception marked High Risk)
+    - Contradictions across controls in the same domain
+    """
+    findings = state.testing_findings
+    if not findings:
+        return {}
+
+    print(f"[Phase2 Challenger] QA reviewing {len(findings)} findings for consistency and calibration...")
+
+    llm = get_llm(temperature=0)
+    if llm is None:
+        return _emulate_phase2_challenger(state)
+
+    # Serialize findings for LLM review
+    findings_text = "\n\n".join([
+        f"Control: {f.control_id} | Status: {f.status} | Risk: {f.risk_rating or 'N/A'}\n"
+        f"TOD: {f.tod_result or '—'} | TOE: {f.toe_result or '—'} | Substantive: {f.substantive_result or '—'}\n"
+        f"Evidence count: {len(f.evidence_extracted)} items\n"
+        f"Finding: {f.justification[:300]}..."
+        for f in findings
+    ])
+
+    challenge_prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "You are a Senior Audit Partner conducting a quality review of AI-generated audit findings "
+         "before they are presented to the Audit Committee. Your role is to challenge findings that:\n"
+         "1. Have logical inconsistencies (e.g., TOD=Pass, TOE=Fail but marked as 'Fail' instead of 'Exception')\n"
+         "2. Have insufficient evidence (Pass with 0 evidence items = suspicious)\n"
+         "3. Have miscalibrated severity (single occurrence marked High Risk needs justification)\n"
+         "4. Have contradictions between controls in the same domain\n\n"
+         "Be rigorous but fair. If findings are well-calibrated, approve them."),
+        ("human",
+         "Audit Scope: {scope}\n"
+         "Active Specializations: {skills}\n\n"
+         "Findings to Review:\n{findings}\n\n"
+         "Conduct your quality review.")
+    ])
+
+    chain = challenge_prompt | llm.with_structured_output(FindingsChallengeOutput)
+
+    try:
+        result = chain.invoke({
+            "scope": state.audit_scope_narrative[:400],
+            "skills": ", ".join(state.active_skill_names) if state.active_skill_names else "General ITGC",
+            "findings": findings_text
+        })
+
+        notes_text = ""
+        if result.calibration_notes:
+            notes_text = "\n\n**⚖️ Challenger Quality Notes:**\n" + "\n".join(
+                f"- {note}" for note in result.calibration_notes
+            )
+
+        print(f"[Phase2 Challenger] Quality review: {result.overall_quality}")
+        if result.calibration_notes:
+            print(f"  {len(result.calibration_notes)} calibration note(s) added to findings.")
+
+        return {
+            "audit_trail": state.audit_trail + [{
+                "agent_or_user_id": "Phase 2 Challenger (Senior Audit Partner)",
+                "action_taken": f"Findings QA Review: {result.overall_quality}. {result.summary}",
+                "reasoning_snapshot": notes_text or "No calibration concerns — findings meet quality standards.",
+                "approval_status": "Auto-Approved"
+            }],
+            # Append challenger notes to executive summary if concerns raised
+            "executive_summary": (
+                (state.executive_summary or "") +
+                (f"\n\n---\n**⚖️ Senior Audit Partner QA Notes:**\n{notes_text}" if notes_text else "")
+            )
+        }
+
+    except Exception as e:
+        print(f"[Phase2 Challenger] Failed: {e}")
+        return _emulate_phase2_challenger(state)
+
+
+def _emulate_phase2_challenger(state: AuditState) -> dict:
+    """Mock Phase 2 challenger."""
+    findings = state.testing_findings
+    concerns = []
+    for f in findings:
+        if f.status == "Pass" and len(f.evidence_extracted) == 0:
+            concerns.append(f"{f.control_id}: Marked Pass but no evidence extracted — recommend manual verification.")
+        if f.tod_result == "Pass" and f.toe_result == "Fail" and f.status == "Fail":
+            concerns.append(f"{f.control_id}: TOD=Pass + TOE=Fail pattern suggests 'Exception' may be more accurate than 'Fail'.")
+
+    quality = "Concerns Raised" if concerns else "Approved"
+    note = ("\n\n**⚖️ Challenger Quality Notes:**\n" + "\n".join(f"- {c}" for c in concerns)) if concerns else ""
+
+    return {
+        "audit_trail": state.audit_trail + [{
+            "agent_or_user_id": "Phase 2 Challenger Mock (Senior Audit Partner)",
+            "action_taken": f"Findings QA: {quality}. {len(concerns)} calibration note(s).",
+            "reasoning_snapshot": note or "No calibration concerns in mock review.",
+            "approval_status": "Auto-Approved"
+        }],
+        "executive_summary": (state.executive_summary or "") + (f"\n\n---\n{note}" if note else "")
     }
