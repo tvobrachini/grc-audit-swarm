@@ -7,6 +7,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 
 from src.swarm.state.schema import AuditState
 from src.swarm.llm_factory import get_llm
+from src.swarm.skill_loader import get_skill_by_id, get_researcher_context_hints
 
 class SearchQueries(BaseModel):
     queries: List[str] = Field(description="List of 2 to 3 specific search queries to find recent breaches and risk data.")
@@ -32,9 +33,21 @@ def generate_risk_context(state: AuditState) -> dict:
         print(f"[Researcher] Search tool setup failed: {e}. Emulating logic.")
         return _emulate_researcher(state)
 
+    # Load skill-specific research guidance
+    skill_hints = ""
+    if state.active_skill_ids:
+        skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
+        skill_hints = get_researcher_context_hints(skills)
+        if skill_hints:
+            print(f"[Researcher] Skill hints loaded for query guidance: {', '.join(state.active_skill_names)}")
+
     # Step 1: Generate optimal search queries
     query_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an IT Audit Researcher extracting specific search queries to find real-world evidence for an audit. Focus on recent data breaches, fines, or regulatory actions related to the provided themes. Return 2-3 specific queries."),
+        ("system",
+         "You are an IT Audit Researcher generating DuckDuckGo search queries to find real-world evidence. "
+         "Focus on recent data breaches, fines, and regulatory actions related to the provided themes. "
+         "Return 2-3 specific, targeted queries.\n\n"
+         + (f"Domain-specific research focus (from audit skill profile):\n{skill_hints}" if skill_hints else "")),
         ("human", "Themes: {themes}\nScope: {scope}")
     ])
     
@@ -157,18 +170,25 @@ def research_failed_controls(state: AuditState) -> dict:
         print(f"[Phase2 Researcher] Search tool unavailable: {e}")
         return _emulate_phase2_researcher(state, failed)
 
+    # Load skill-specific research hints for targeted queries
+    skill_hints = ""
+    if state.active_skill_ids:
+        skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
+        skill_hints = get_researcher_context_hints(skills)
+
     query_prompt = ChatPromptTemplate.from_messages([
         ("system",
          "You are an IT Audit Risk Researcher. Given a specific control failure, "
-         "generate ONE precise search query to find real-world data breaches, regulatory fines, "
-         "or enforcement actions that resulted from this exact type of control gap. "
-         "Then write a brief context paragraph citing the findings."),
+         "generate ONE precise DuckDuckGo search query to find real-world data breaches, regulatory fines, "
+         "or enforcement actions resulting from this exact type of control gap. "
+         "Then write a brief context paragraph citing the findings.\n\n"
+         + (f"Domain-specific research focus:\n{skill_hints}" if skill_hints else "")),
         ("human",
          "Control ID: {control_id}\n"
          "Domain: {domain}\n"
          "Finding: {justification}\n"
          "Themes: {themes}\n\n"
-         "Generate a search query and a context paragraph.")
+         "Generate a targeted search query and a context paragraph.")
     ])
 
     chain = query_prompt | llm.with_structured_output(FailedControlResearch)
