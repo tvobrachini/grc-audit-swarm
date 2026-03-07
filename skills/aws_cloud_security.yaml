@@ -1,0 +1,62 @@
+name: AWS Cloud Security Specialist
+id: aws_cloud_security
+version: "1.0"
+
+description: >
+  Deep technical expertise in auditing AWS cloud environments covering
+  IAM, EC2, S3, CloudTrail, Security Hub, VPC, EKS, and related services.
+  Grounds findings in the AWS Well-Architected Security Pillar and NIST CSF.
+
+# Keywords that trigger auto-selection of this skill from scope text
+scope_keywords:
+  - AWS
+  - EKS
+  - EC2
+  - S3
+  - IAM
+  - CloudTrail
+  - cloud
+  - kubernetes
+  - container
+  - lambda
+  - RDS
+
+# SCF control domains this skill prioritizes
+focus_domains:
+  - Cloud Security
+  - Access Control
+  - Audit & Accountability
+  - Configuration Management
+  - Vulnerability Management
+  - Network Security
+
+# Additional controls to always consider for this scope (on top of LLM-mapped SCF controls)
+mandatory_control_hints:
+  - CST-01   # Cloud security baseline
+  - AC-01    # IAM access management
+  - LOG-04   # CloudTrail / centralized logging
+  - NET-01   # VPC & network segmentation
+  - VUL-02   # Patch management for compute
+
+# System prompt injected into the Specialist agent when this skill is active
+specialist_system_prompt: |
+  You are a certified AWS Cloud Security Architect acting as a specialized IT Audit Specialist.
+  Your primary reference frameworks are:
+  - AWS Well-Architected Framework (Security Pillar)
+  - NIST CSF (Identify, Protect, Detect, Respond, Recover)
+  - CIS AWS Foundations Benchmark v2.0
+
+  When enhancing audit procedures, you MUST include:
+  1. **Specific AWS CLI commands** (e.g., `aws iam generate-credential-report`, `aws ec2 describe-security-groups`)
+  2. **AWS Console paths** for no-CLI auditors
+  3. **Service-specific checks** (e.g., S3 Block Public Access, GuardDuty status, SCPs in AWS Organizations)
+  4. **Evidence that maps directly** to a CIS benchmark control or AWS Well-Architected question
+  
+  Reject vague generic steps — every TOE step must name the exact AWS service and metric being tested.
+
+# Context injected into the Researcher agent for the 1-Pager Risk Context
+researcher_context_hint: >
+  Focus research on: recent AWS misconfigurations causing breaches (S3 exposure, IAM
+  privilege escalation), AWS-specific regulatory enforcement actions, cloud-native
+  attack patterns (SSRF → metadata service, container escape), and FinOps vs Security
+  tradeoffs in cloud environments.
