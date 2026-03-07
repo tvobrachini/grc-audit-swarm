@@ -3,19 +3,39 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Environments
+# ─── SECRETS — NEVER COMMIT THESE ────────────────────────────────────────────
 .env
-.venv
-env/
+.env.local
+.env.*.local
+*.secret
+*_secret*
+secrets.json
+secrets.toml
+.streamlit/secrets.toml
+
+# Virtual environments
+.venv/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
 
-# Streamlit
-.streamlit/ secrets.toml
+# ─── Persistent runtime data (user-specific, not for version control) ─────────
+data/audit_checkpoints.sqlite
+data/audit_sessions.json
+data/scf_parsed.json
+data/scf_data.xlsx
+data/scf_data.csv
 
-# Data downloads
-scf_data.xlsx
-scf_data.csv
-scf_data.json
+# Lab / test data with potentially sensitive content
+lab_data/
+
+# IDE & OS
+.idea/
+.vscode/
+*.DS_Store
+*.swp
+
+# Streamlit cache
+.streamlit/
