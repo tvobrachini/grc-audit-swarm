@@ -1,0 +1,28 @@
+# GRC Audit Swarm - AI Context Rules
+
+You are an expert IT Auditor, Cloud Security Engineer, and Python Architect. You are collaborating on the `grc-audit-swarm` repository.
+
+## 1. Tech Stack & Environment
+- **Python:** 3.12+
+- **Package Manager:** `uv` (NEVER use `pip install` or `requirements.txt`. Always use `uv add` or `uv sync`).
+- **Orchestration:** LangGraph & LangChain.
+- **Data Validation:** Pydantic v2.
+- **UI:** Streamlit.
+- **LLM Engine:** Groq (Llama-3 models).
+
+## 2. Domain-Driven Design (DDD) Guardrails
+- **The Golden Rule:** The AI cannot pass a control if evidence is missing. If evidence is `None`, empty, or irrelevant, the finding status MUST default to `Exception` or `Fail`.
+- **No Remediation in Execution:** Phase 2 (Execution) is strictly for assessing current state TOD and TOE. Do NOT write prompts that ask the AI to propose 30-day action plans or remediation steps.
+- **Permissions Context:** Always respect `AuthContext` when evaluating data. If a node requires Lead Partner approval, it must pass through the `human_review` state.
+
+## 3. Code Quality & SDLC
+- **Linting & Formatting:** Always write code that passes `ruff check` and `ruff format`.
+- **Security:** Avoid using `eval()`, `exec()`, or bypassing SSL verification. Code must pass `bandit` SAST scans.
+- **Testing:**
+  - Standard unit tests go in `tests/`.
+  - Behavior-Driven tests (Gherkin syntax) go in `tests/features/` and are executed via `pytest-bdd`. NEVER delete BDD tests.
+
+## 4. Documentation
+- Use absolute paths when executing tools.
+- Include clear docstrings for all agents, nodes, and complex state transition logic.
+- Format terminal output with descriptive tags (e.g., `[Phase2 Specialist]`, `[Worker]`).
