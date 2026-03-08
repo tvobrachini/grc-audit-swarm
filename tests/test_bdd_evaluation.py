@@ -54,6 +54,6 @@ def evaluate_missing_evidence(setup_control):
 @then('the AI evaluation must not return a "Pass" status')
 def verify_finding_status(evaluate_missing_evidence):
     finding = evaluate_missing_evidence
-    assert (
-        finding.status in ["Fail", "Exception"]
-    ), f"Domain Rule Violated: Agent passed a control with missing evidence! Got status: {finding.status}"
+    assert finding.status in ["Fail", "Exception"], (
+        f"Domain Rule Violated: Agent passed a control with missing evidence! Got status: {finding.status}"
+    )

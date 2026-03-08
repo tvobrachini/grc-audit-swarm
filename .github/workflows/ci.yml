@@ -23,22 +23,21 @@ jobs:
         python -m pip install --upgrade pip
         pip install uv
         uv sync --all-extras
-        uv pip install --system ruff bandit pytest pytest-bdd
 
     - name: Lint with Ruff
       run: |
-        ruff check .
-        ruff format --check .
+        uv run ruff check .
+        uv run ruff format --check .
 
     - name: Security SAST with Bandit
       run: |
-        bandit -c pyproject.toml -r .
+        uv run bandit -c pyproject.toml -r .
 
     - name: Verify AI Guardrails and Agent Constraints (Pytest & BDD)
       env:
         PYTHONPATH: .
       run: |
-        pytest tests/ -v
+        uv run pytest tests/ -v
 
     - name: Verify Docker Container Build
       run: |

@@ -126,7 +126,7 @@ def run_all_workers_node(state: AuditState) -> dict:
             {
                 "agent_or_user_id": "Execution Engine",
                 "action_taken": f"Completed {len(findings)} control tests.",
-                "reasoning_snapshot": f"{sum(1 for f in findings if f.status=='Pass')} Pass / {sum(1 for f in findings if f.status=='Exception')} Exception / {sum(1 for f in findings if f.status=='Fail')} Fail",
+                "reasoning_snapshot": f"{sum(1 for f in findings if f.status == 'Pass')} Pass / {sum(1 for f in findings if f.status == 'Exception')} Exception / {sum(1 for f in findings if f.status == 'Fail')} Fail",
                 "approval_status": "Pending Human Review",
             }
         ],

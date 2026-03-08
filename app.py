@@ -269,7 +269,7 @@ else:
                 desc = _get(ctrl, "description")
                 procs = _get(ctrl, "procedures")
                 with st.expander(f"**{cid}** — {str(desc)[:80]}…"):
-                    st.markdown(f"**Domain:** {_get(ctrl,'domain')}")
+                    st.markdown(f"**Domain:** {_get(ctrl, 'domain')}")
                     if procs:
                         tod = _get(procs, "tod_steps") or []
                         toe = _get(procs, "toe_steps") or []
