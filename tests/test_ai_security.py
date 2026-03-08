@@ -65,7 +65,7 @@ def test_no_hardcoded_keys_in_prompts():
         human_context="mock",
     )
 
-    assert (
-        "sk-" not in rendered.lower()
-    ), "Potential API key leakage detected in prompt!"
+    assert "sk-" not in rendered.lower(), (
+        "Potential API key leakage detected in prompt!"
+    )
     assert "gsk_" not in rendered.lower(), "Potential Groq API key leakage!"
