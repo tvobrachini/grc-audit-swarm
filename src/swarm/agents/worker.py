@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem
-from src.swarm.llm_factory import get_llm
-from src.swarm.skill_loader import get_skill_by_id, get_specialist_prompt
+from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem
+from swarm.llm_factory import get_llm
+from swarm.skill_loader import get_skill_by_id, get_specialist_prompt
 
 
 class WorkerFindingOutput(BaseModel):

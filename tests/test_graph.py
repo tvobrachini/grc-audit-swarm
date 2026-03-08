@@ -22,6 +22,7 @@ EXPECTED_NODES = [
     "dynamic_specialists",
     "challenger",
     "human_review",
+    "evidence_collector",
     # Phase 2 — Execution
     "run_all_workers",
     "phase2_specialist",

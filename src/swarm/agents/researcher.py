@@ -4,9 +4,9 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.tools import DuckDuckGoSearchRun
 
-from src.swarm.state.schema import AuditState
-from src.swarm.llm_factory import get_llm
-from src.swarm.skill_loader import get_skill_by_id, get_researcher_context_hints
+from swarm.state.schema import AuditState
+from swarm.llm_factory import get_llm
+from swarm.skill_loader import get_skill_by_id, get_researcher_context_hints
 
 
 class SearchQueries(BaseModel):
