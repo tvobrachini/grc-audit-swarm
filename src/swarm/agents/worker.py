@@ -38,6 +38,27 @@ class WorkerFindingOutput(BaseModel):
     )
 
 
+WORKER_SYSTEM_PROMPT = """{skill_prompt}
+
+You are executing an IT audit test for a specific control. Reason carefully against the provided evidence and determine if each test step passes, fails, or has an exception. Be specific, cite evidence, and be honest — do not force a Pass if evidence is missing or incomplete.
+CRITICAL INSTRUCTION: DO NOT propose remediation, action plans, or recommendations. Evaluate ONLY the current state based on evidence. EVALUATE THE EVIDENCE STRICTLY.
+{human_ctx_section}"""
+
+WORKER_HUMAN_PROMPT = """Control ID: {control_id}
+Domain: {domain}
+Description: {description}
+
+Procedures to execute:
+TOD Steps: {tod}
+TOE Steps: {toe}
+Substantive Steps: {sub}
+
+Available Evidence:
+{evidence}
+
+Execute these tests against the evidence and return your finding."""
+
+
 def run_control_test(
     control: ControlMatrixItem, state: AuditState, human_context: str = ""
 ) -> AuditFinding:
@@ -71,27 +92,8 @@ def run_control_test(
 
     worker_prompt = ChatPromptTemplate.from_messages(
         [
-            (
-                "system",
-                f"{skill_prompt}\n\n"
-                "You are executing an IT audit test for a specific control. "
-                "Reason carefully against the provided evidence and determine if each test step passes, fails, or has an exception. "
-                "Be specific, cite evidence, and be honest — do not force a Pass if evidence is missing or incomplete. "
-                "CRITICAL INSTRUCTION: DO NOT propose remediation, action plans, or recommendations. Evaluate ONLY the current state based on evidence."
-                f"{human_ctx_section}",
-            ),
-            (
-                "human",
-                "Control ID: {control_id}\n"
-                "Domain: {domain}\n"
-                "Description: {description}\n\n"
-                "Procedures to execute:\n"
-                "TOD Steps: {tod}\n"
-                "TOE Steps: {toe}\n"
-                "Substantive Steps: {sub}\n\n"
-                "Available Evidence:\n{evidence}\n\n"
-                "Execute these tests against the evidence and return your finding.",
-            ),
+            ("system", WORKER_SYSTEM_PROMPT),
+            ("human", WORKER_HUMAN_PROMPT),
         ]
     )
 
@@ -107,6 +109,8 @@ def run_control_test(
                 "toe": "\n".join(procs.toe_steps),
                 "sub": "\n".join(procs.substantive_steps),
                 "evidence": evidence_summary,
+                "skill_prompt": skill_prompt,
+                "human_ctx_section": human_ctx_section,
             }
         )
 

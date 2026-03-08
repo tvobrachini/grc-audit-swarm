@@ -31,26 +31,26 @@ class TestSkillDirectory:
             assert "name" in skill, f"Skill missing 'name': {skill}"
             assert "id" in skill, f"Skill missing 'id': {skill}"
             assert "scope_keywords" in skill, f"Skill missing 'scope_keywords': {skill}"
-            assert isinstance(
-                skill["scope_keywords"], list
-            ), f"scope_keywords must be a list: {skill['id']}"
-            assert (
-                len(skill["scope_keywords"]) > 0
-            ), f"scope_keywords cannot be empty: {skill['id']}"
+            assert isinstance(skill["scope_keywords"], list), (
+                f"scope_keywords must be a list: {skill['id']}"
+            )
+            assert len(skill["scope_keywords"]) > 0, (
+                f"scope_keywords cannot be empty: {skill['id']}"
+            )
 
     def test_all_skills_have_specialist_prompt(self):
         for skill in list_available_skills():
             prompt = skill.get("specialist_system_prompt", "")
-            assert (
-                len(prompt) > 50
-            ), f"Specialist prompt too short for skill: {skill['id']}"
+            assert len(prompt) > 50, (
+                f"Specialist prompt too short for skill: {skill['id']}"
+            )
 
     def test_all_skills_have_researcher_hint(self):
         for skill in list_available_skills():
             hint = skill.get("researcher_context_hint", "")
-            assert (
-                len(hint) > 20
-            ), f"researcher_context_hint missing or too short: {skill['id']}"
+            assert len(hint) > 20, (
+                f"researcher_context_hint missing or too short: {skill['id']}"
+            )
 
     def test_all_skills_have_focus_domains(self):
         for skill in list_available_skills():
