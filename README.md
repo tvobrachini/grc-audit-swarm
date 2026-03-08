@@ -69,9 +69,10 @@ graph TD
 - **📡 Live Research:** Integrated web search (DDGS) for grounding audits in current threat data.
 - **🔌 Loadable Skill Modules:** Define specialized audit logic in YAML files (`skills/`) for easy extensibility.
 - **📊 Findings Command Center:** Interactive UI with KPI bars, expandable control drill-downs, and per-step result badges (✅/❌/⚠️).
-- **🛡️ Guardrail Test Suite:** 69+ unit tests covering agent contracts, graph topology, and schema validation.
-- **💾 persistent JSON/SQLite Sessions:** Full history of past audits; resume any session from the sidebar.
-- **📥 Open-Source Power:** Built with **LangGraph**, **Pydantic**, and **Streamlit**; optimized for free **Groq Llama-3** models.
+- **🛡️ Guardrail Test Suite (BDD):** 69+ unit tests including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
+- **💾 Persistent Sessions:** Full history of past audits stored via decoupled `storage.py` abstraction.
+- **📥 Enterprise Ready:** Containerized with Docker, packaged with `uv`, and protected by SAST (`bandit`) and CI/CD pipelines.
+- **⚡ LLM Rate-Limit Optimized:** Dynamically degrades to `llama-3.1-8b-instant` during batch execution to conquer Groq's 6,000 TPM limit while maintaining quality.
 
 ---
 
@@ -82,14 +83,17 @@ graph TD
 git clone https://github.com/tvobrachini/grc-audit-swarm
 cd grc-audit-swarm
 
-# 2. Install Dependencies (uv recommended)
-uv sync
-
-# 3. Environment Setup
+# 2. Environment Setup
 cp .env.example .env
 # Edit .env and add your GROQ_API_KEY
 
-# 4. Launch the Command Center
+# 3. Launch the Command Center
+# Option A: Docker Compose (Recommended)
+docker-compose up --build -d
+# App accessible at http://localhost:8502
+
+# Option B: Native uv invocation
+uv sync
 uv run streamlit run app.py --server.port 8502
 ```
 
@@ -105,6 +109,7 @@ uv run pytest tests/ -v
 The suite covers:
 - **Agents:** Contract compliance for all 12+ agent nodes.
 - **Graph:** Topology validation (ensuring Phase 1 -> Phase 2 flow is unbroken).
+- **Behavior-Driven Development (BDD):** Enforces strict "Missing Evidence" constraints to preempt AI hallucinations.
 - **Skills:** Auto-detection accuracy across 5 key domains.
 - **Schema:** Strict Pydantic data modeling for findings and state.
 
