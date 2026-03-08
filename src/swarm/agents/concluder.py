@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.swarm.state.schema import AuditState
-from src.swarm.llm_factory import get_llm
+from swarm.state.schema import AuditState
+from swarm.llm_factory import get_llm
 
 
 class ConcluderOutput(BaseModel):

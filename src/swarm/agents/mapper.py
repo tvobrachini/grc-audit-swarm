@@ -5,8 +5,8 @@ from typing import List
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
-from src.swarm.llm_factory import get_llm
+from swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
+from swarm.llm_factory import get_llm
 
 
 # Helper function to get the SCF database path

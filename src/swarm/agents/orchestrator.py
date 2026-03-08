@@ -1,5 +1,5 @@
-from src.swarm.state.schema import AuditState
-from src.swarm.skill_loader import detect_skills_from_scope
+from swarm.state.schema import AuditState
+from swarm.skill_loader import detect_skills_from_scope
 
 # IMPORTANT: Future LLM configuration goes here.
 # For now, this is a placeholder function that simulates the structured JSON output
