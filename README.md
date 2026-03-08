@@ -4,6 +4,9 @@
 
 GRC Audit Swarm is a stateful, interactive AI platform designed to transform Audit narratives into actionable findings. Powered by **LangGraph**, it coordinates a "Swarm" of specialized agents that research real-world risks, map controls from the **Secure Controls Framework (SCF)**, and autonomously execute audit tests to generate a Findings Command Center.
 
+> [!NOTE]
+> **View the Complete Portfolio Case Study:** I've documented the architectural shift from static mapping to recursive autonomous auditing in **[CASE_STUDY.md](CASE_STUDY.md)**.
+
 ![Swarm Command Center](assets/ui_demo.png)
 
 ---
