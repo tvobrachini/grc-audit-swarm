@@ -26,3 +26,10 @@ You are an expert IT Auditor, Cloud Security Engineer, and Python Architect. You
 - Use absolute paths when executing tools.
 - Include clear docstrings for all agents, nodes, and complex state transition logic.
 - Format terminal output with descriptive tags (e.g., `[Phase2 Specialist]`, `[Worker]`).
+
+## 🛡️ AWS Ironclad Safeguards (Cost & Security)
+- **Read-Only Enforced**: Never implement or propose any logic that creates, modifies, or deletes AWS resources.
+- **Secret Hygiene**: Never hardcode credentials. Use `.env` only. Ensure `.env` is in `.gitignore`.
+- **Privacy First**: Always redact 12-digit AWS Account IDs using `_redact_aws_metadata` before logging or storing evidence.
+- **Cost Conscious**: Every audit run must prioritize the Free Tier. Be vigilant for any command that might trigger billing (e.g., intensive resource descriptive calls in loops).
+- **Safety Loop**: Always run `aws_safety_heartbeat.py` before and after conducting large-scale automated audits.
