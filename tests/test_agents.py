@@ -7,11 +7,13 @@ Verifies each agent returns the correct state update keys,
 findings have valid statuses, and Phase 2 enrichment functions
 modify findings without dropping or corrupting data.
 """
-import pytest
-import sys, os
+
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditProcedure
+from swarm.state.schema import AuditState, AuditFinding
 from swarm.agents.orchestrator import analyze_scope_and_themes
 from swarm.agents.worker import _emulate_finding, _mock_evidence
 from swarm.agents.concluder import _emulate_summary
@@ -38,7 +40,9 @@ class TestOrchestratorAgent:
         assert any("HIPAA" in t for t in result["risk_themes"])
 
     def test_gdpr_scope_returns_gdpr_theme(self):
-        state = AuditState(audit_scope_narrative="GDPR personal data controller processor review")
+        state = AuditState(
+            audit_scope_narrative="GDPR personal data controller processor review"
+        )
         result = analyze_scope_and_themes(state)
         assert any("GDPR" in t for t in result["risk_themes"])
 
@@ -106,28 +110,40 @@ class TestWorkerAgent:
 class TestConcluderAgent:
     def test_all_pass_returns_low_risk(self, aws_scope_state, pass_finding):
         aws_scope_state.testing_findings = [pass_finding, pass_finding]
-        result = _emulate_summary(aws_scope_state, passes=2, exceptions=0, fails=0, highs=0)
+        result = _emulate_summary(
+            aws_scope_state, passes=2, exceptions=0, fails=0, highs=0
+        )
         assert "executive_summary" in result
         assert "LOW" in result["executive_summary"].upper()
 
     def test_any_fail_returns_high_risk(self, aws_scope_state, fail_finding):
         aws_scope_state.testing_findings = [fail_finding]
-        result = _emulate_summary(aws_scope_state, passes=0, exceptions=0, fails=1, highs=1)
+        result = _emulate_summary(
+            aws_scope_state, passes=0, exceptions=0, fails=1, highs=1
+        )
         assert "HIGH" in result["executive_summary"].upper()
 
-    def test_exceptions_only_returns_medium_risk(self, aws_scope_state, exception_finding):
+    def test_exceptions_only_returns_medium_risk(
+        self, aws_scope_state, exception_finding
+    ):
         aws_scope_state.testing_findings = [exception_finding]
-        result = _emulate_summary(aws_scope_state, passes=0, exceptions=1, fails=0, highs=0)
+        result = _emulate_summary(
+            aws_scope_state, passes=0, exceptions=1, fails=0, highs=0
+        )
         assert "MEDIUM" in result["executive_summary"].upper()
 
     def test_summary_mentions_skill_names(self, aws_scope_state, pass_finding):
         aws_scope_state.testing_findings = [pass_finding]
-        result = _emulate_summary(aws_scope_state, passes=1, exceptions=0, fails=0, highs=0)
+        result = _emulate_summary(
+            aws_scope_state, passes=1, exceptions=0, fails=0, highs=0
+        )
         assert "AWS" in result["executive_summary"]
 
     def test_summary_has_audit_trail_entry(self, aws_scope_state, pass_finding):
         aws_scope_state.testing_findings = [pass_finding]
-        result = _emulate_summary(aws_scope_state, passes=1, exceptions=0, fails=0, highs=0)
+        result = _emulate_summary(
+            aws_scope_state, passes=1, exceptions=0, fails=0, highs=0
+        )
         assert "audit_trail" in result
         assert len(result["audit_trail"]) >= 1
 
@@ -136,7 +152,7 @@ class TestPhase2SpecialistAgent:
     def test_annotates_fail_findings(self, state_with_findings):
         result = _emulate_phase2_specialist(
             state_with_findings,
-            [f for f in state_with_findings.testing_findings if f.status == "Fail"]
+            [f for f in state_with_findings.testing_findings if f.status == "Fail"],
         )
         assert "testing_findings" in result
         for f in result["testing_findings"]:
@@ -146,7 +162,7 @@ class TestPhase2SpecialistAgent:
     def test_passes_are_not_annotated(self, state_with_findings):
         result = _emulate_phase2_specialist(
             state_with_findings,
-            [f for f in state_with_findings.testing_findings if f.status == "Fail"]
+            [f for f in state_with_findings.testing_findings if f.status == "Fail"],
         )
         for f in result["testing_findings"]:
             if f.status == "Pass":
@@ -156,7 +172,11 @@ class TestPhase2SpecialistAgent:
     def test_annotation_count_matches_findings(self, state_with_findings):
         result = _emulate_phase2_specialist(
             state_with_findings,
-            [f for f in state_with_findings.testing_findings if f.status in ("Fail","Exception")]
+            [
+                f
+                for f in state_with_findings.testing_findings
+                if f.status in ("Fail", "Exception")
+            ],
         )
         original_count = len(state_with_findings.testing_findings)
         assert len(result["testing_findings"]) == original_count
@@ -164,7 +184,11 @@ class TestPhase2SpecialistAgent:
 
 class TestPhase2ResearcherAgent:
     def test_appends_researcher_context_to_failures(self, state_with_findings):
-        failed = [f for f in state_with_findings.testing_findings if f.status in ("Fail","Exception")]
+        failed = [
+            f
+            for f in state_with_findings.testing_findings
+            if f.status in ("Fail", "Exception")
+        ]
         result = _emulate_phase2_researcher(state_with_findings, failed)
         assert "testing_findings" in result
         for f in result["testing_findings"]:
@@ -172,9 +196,15 @@ class TestPhase2ResearcherAgent:
                 assert "Researcher Context" in f.justification
 
     def test_total_finding_count_unchanged(self, state_with_findings):
-        failed = [f for f in state_with_findings.testing_findings if f.status in ("Fail","Exception")]
+        failed = [
+            f
+            for f in state_with_findings.testing_findings
+            if f.status in ("Fail", "Exception")
+        ]
         result = _emulate_phase2_researcher(state_with_findings, failed)
-        assert len(result["testing_findings"]) == len(state_with_findings.testing_findings)
+        assert len(result["testing_findings"]) == len(
+            state_with_findings.testing_findings
+        )
 
 
 class TestPhase2ChallengerAgent:
@@ -186,31 +216,41 @@ class TestPhase2ChallengerAgent:
     def test_flags_pass_with_no_evidence(self):
         """A Pass finding with zero evidence should be flagged."""
         finding = AuditFinding(
-            control_id="TEST-01", agent_role="Test",
-            status="Pass", justification="Looks fine.",
+            control_id="TEST-01",
+            agent_role="Test",
+            status="Pass",
+            justification="Looks fine.",
             evidence_extracted=[],
-            tod_result="Pass", toe_result="Pass", substantive_result="Pass"
+            tod_result="Pass",
+            toe_result="Pass",
+            substantive_result="Pass",
         )
         state = AuditState(
-            audit_scope_narrative="Generic audit",
-            testing_findings=[finding]
+            audit_scope_narrative="Generic audit", testing_findings=[finding]
         )
         result = _emulate_phase2_challenger(state)
-        assert "TEST-01" in (result.get("executive_summary", "") + str(result.get("audit_trail", "")))
+        assert "TEST-01" in (
+            result.get("executive_summary", "") + str(result.get("audit_trail", ""))
+        )
 
     def test_flags_tod_pass_toe_fail_misclassified_as_fail(self):
         """TOD=Pass + TOE=Fail but status=Fail should be challenged as possibly Exception."""
         finding = AuditFinding(
-            control_id="CHG-02", agent_role="Test",
-            status="Fail", justification="Control failed.",
+            control_id="CHG-02",
+            agent_role="Test",
+            status="Fail",
+            justification="Control failed.",
             evidence_extracted=["Evidence here."],
             risk_rating="High",
-            tod_result="Pass", toe_result="Fail", substantive_result="Fail"
+            tod_result="Pass",
+            toe_result="Fail",
+            substantive_result="Fail",
         )
         state = AuditState(
-            audit_scope_narrative="Change management audit",
-            testing_findings=[finding]
+            audit_scope_narrative="Change management audit", testing_findings=[finding]
         )
         result = _emulate_phase2_challenger(state)
-        combined = result.get("executive_summary","") + str(result.get("audit_trail",""))
+        combined = result.get("executive_summary", "") + str(
+            result.get("audit_trail", "")
+        )
         assert "CHG-02" in combined or "Exception" in combined

@@ -7,14 +7,14 @@ in a simple JSON file on disk so sessions survive Streamlit restarts.
 File: data/audit_sessions.json
 Schema: { "thread_id": {"name": "...", "created_at": "...", "scope_preview": "..."} }
 """
+
 import json
 import os
 from datetime import datetime
 from typing import Dict, Optional
 
 SESSIONS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "../../data/audit_sessions.json"
+    os.path.dirname(os.path.abspath(__file__)), "../../data/audit_sessions.json"
 )
 
 
@@ -40,7 +40,7 @@ def save_session(thread_id: str, name: str, scope_preview: str = "") -> None:
     data[thread_id] = {
         "name": name,
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "scope_preview": scope_preview[:200]   # keep it short for display
+        "scope_preview": scope_preview[:200],  # keep it short for display
     }
     _save(data)
 

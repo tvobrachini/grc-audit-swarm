@@ -5,13 +5,13 @@ Guardrails for the AuditState schema and Pydantic models.
 Ensures all fields have correct types, defaults are safe, and
 state objects can be created and mutated without validation errors.
 """
-import pytest
-import sys, os
+
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.state.schema import (
-    AuditState, AuditFinding, AuditProcedure, ControlMatrixItem, AuditAction
-)
+from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditAction
 
 
 class TestAuditStateDefaults:
@@ -59,7 +59,8 @@ class TestAuditFinding:
         """Status must be one of the three accepted values."""
         for valid_status in ("Pass", "Fail", "Exception"):
             f = AuditFinding(
-                control_id="TEST-01", agent_role="TestAgent",
+                control_id="TEST-01",
+                agent_role="TestAgent",
                 status=valid_status,
                 justification="Test.",
                 evidence_extracted=["Evidence item."],
@@ -71,7 +72,9 @@ class TestAuditFinding:
         assert len(pass_finding.evidence_extracted) >= 1
 
     def test_finding_copy_preserves_fields(self, fail_finding):
-        updated = fail_finding.model_copy(update={"justification": "Updated narrative."})
+        updated = fail_finding.model_copy(
+            update={"justification": "Updated narrative."}
+        )
         assert updated.justification == "Updated narrative."
         assert updated.control_id == fail_finding.control_id
         assert updated.status == fail_finding.status
@@ -90,7 +93,7 @@ class TestControlMatrixItem:
         ctrl = ControlMatrixItem(
             control_id="NET-01",
             domain="Network Security",
-            description="Firewall rule review."
+            description="Firewall rule review.",
         )
         assert ctrl.procedures is None
 
@@ -116,7 +119,7 @@ class TestAuditAction:
         action = AuditAction(
             agent_or_user_id="TestAgent",
             action_taken="Ran test.",
-            reasoning_snapshot="Checked something."
+            reasoning_snapshot="Checked something.",
         )
         assert action.timestamp != ""
         assert action.agent_or_user_id == "TestAgent"

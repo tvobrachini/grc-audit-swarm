@@ -53,7 +53,7 @@ specialist_system_prompt: |
   4. **Workforce training evidence** — annual HIPAA training completion records per § 164.530(b)
   5. **Breach risk assessment criteria** — the 4-factor test from the Breach Notification Rule
 
-  Flag any procedure that cannot produce objective evidence — HIPAA audits must generate 
+  Flag any procedure that cannot produce objective evidence — HIPAA audits must generate
   auditor-verifiable documentation, not management assertions.
 
 researcher_context_hint: >

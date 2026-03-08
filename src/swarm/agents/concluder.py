@@ -5,21 +5,23 @@ Runs after all Worker agents complete.
 Aggregates all AuditFindings, calculates the overall risk score,
 and drafts an Executive Summary paragraph for the findings dashboard.
 """
-from typing import List
+
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.swarm.state.schema import AuditState, AuditFinding
+from src.swarm.state.schema import AuditState
 from src.swarm.llm_factory import get_llm
 
 
 class ConcluderOutput(BaseModel):
     executive_summary: str = Field(
         description="A 2-3 paragraph executive summary of the audit findings, suitable for a CAO or CTO audience. "
-                    "Include: overall risk posture, top 3 findings requiring immediate action, and recommended next steps."
+        "Include: overall risk posture and top findings. DO NOT propose remediation action plans."
     )
-    overall_risk_score: str = Field(description="'Critical', 'High', 'Medium', or 'Low' based on the aggregate findings.")
+    overall_risk_score: str = Field(
+        description="'Critical', 'High', 'Medium', or 'Low' based on the aggregate findings."
+    )
 
 
 def produce_executive_summary(state: AuditState) -> dict:
@@ -28,7 +30,10 @@ def produce_executive_summary(state: AuditState) -> dict:
     """
     findings = state.testing_findings
     if not findings:
-        return {"executive_summary": "No findings were generated.", "audit_trail": state.audit_trail}
+        return {
+            "executive_summary": "No findings were generated.",
+            "audit_trail": state.audit_trail,
+        }
 
     total = len(findings)
     passes = sum(1 for f in findings if f.status == "Pass")
@@ -36,37 +41,51 @@ def produce_executive_summary(state: AuditState) -> dict:
     fails = sum(1 for f in findings if f.status == "Fail")
     highs = sum(1 for f in findings if f.risk_rating == "High")
 
-    print(f"[Concluder] Aggregating {total} findings: {passes} Pass, {exceptions} Exception, {fails} Fail")
+    print(
+        f"[Concluder] Aggregating {total} findings: {passes} Pass, {exceptions} Exception, {fails} Fail"
+    )
 
     llm = get_llm(temperature=0.4)
     if llm is None:
         return _emulate_summary(state, passes, exceptions, fails, highs)
 
-    findings_text = "\n\n".join([
-        f"Control: {f.control_id} | Status: {f.status} | Risk: {f.risk_rating or 'N/A'}\n"
-        f"Finding: {f.justification}\n"
-        f"Evidence: {'; '.join(f.evidence_extracted[:2])}"
-        for f in findings
-    ])
+    findings_text = "\n\n".join(
+        [
+            f"Control: {f.control_id} | Status: {f.status} | Risk: {f.risk_rating or 'N/A'}\n"
+            f"Finding: {f.justification}\n"
+            f"Evidence: {'; '.join(f.evidence_extracted[:2])}"
+            for f in findings
+        ]
+    )
 
     scope = state.audit_scope_narrative[:500]
-    skills = ", ".join(state.active_skill_names) if state.active_skill_names else "General ITGC"
+    skills = (
+        ", ".join(state.active_skill_names)
+        if state.active_skill_names
+        else "General ITGC"
+    )
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "You are a Chief Audit Executive drafting an executive summary for an IT audit engagement. "
-         "Your audience is the Audit Committee and CISO. Be direct, factual, and risk-focused. "
-         "Do not soften findings — use precise language about what failed and why it matters."),
-        ("human",
-         f"Audit Scope: {scope}\n"
-         f"Active Skill Specializations: {skills}\n\n"
-         f"Findings Summary:\n"
-         f"Total Controls Tested: {total}\n"
-         f"Pass: {passes} | Exception: {exceptions} | Fail: {fails}\n"
-         f"High Risk Findings: {highs}\n\n"
-         f"Detailed Findings:\n{findings_text}\n\n"
-         "Write the executive summary."),
-    ])
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a Chief Audit Executive drafting an executive summary for an IT audit engagement. "
+                "Your audience is the Audit Committee and CISO. Be direct, factual, and risk-focused. "
+                "Do not soften findings — use precise language about what failed and why it matters.",
+            ),
+            (
+                "human",
+                f"Audit Scope: {scope}\n"
+                f"Active Skill Specializations: {skills}\n\n"
+                f"Findings Summary:\n"
+                f"Total Controls Tested: {total}\n"
+                f"Pass: {passes} | Exception: {exceptions} | Fail: {fails}\n"
+                f"High Risk Findings: {highs}\n\n"
+                f"Detailed Findings:\n{findings_text}\n\n"
+                "Write the executive summary.",
+            ),
+        ]
+    )
 
     chain = prompt | llm.with_structured_output(ConcluderOutput)
     try:
@@ -81,30 +100,30 @@ def produce_executive_summary(state: AuditState) -> dict:
         "agent_or_user_id": "Concluder Agent",
         "action_taken": f"Executive Summary produced. Overall Risk: {overall_risk}. {passes}P/{exceptions}E/{fails}F.",
         "reasoning_snapshot": f"Aggregated {total} findings across {len(set(f.control_id.split('-')[0] for f in findings))} domains.",
-        "approval_status": "Auto-Approved"
+        "approval_status": "Auto-Approved",
     }
 
     return {
         "executive_summary": f"**Overall Risk: {overall_risk}**\n\n{summary}",
-        "audit_trail": state.audit_trail + [trail_entry]
+        "audit_trail": state.audit_trail + [trail_entry],
     }
 
 
-def _emulate_summary(state: AuditState, passes: int, exceptions: int, fails: int, highs: int) -> dict:
+def _emulate_summary(
+    state: AuditState, passes: int, exceptions: int, fails: int, highs: int
+) -> dict:
     total = passes + exceptions + fails
     if fails > 0 or highs > 0:
         posture = "**Overall Risk: HIGH**"
         assessment = (
             f"The audit identified **{fails} control failure(s)** and **{exceptions} exception(s)** "
-            f"across {total} controls tested. Immediate remediation is required for the {highs} high-risk finding(s). "
-            f"Management should prioritize these items in the next 30-day action plan."
+            f"across {total} controls tested. Management attention is required for the {highs} high-risk finding(s)."
         )
     elif exceptions > 0:
         posture = "**Overall Risk: MEDIUM**"
         assessment = (
             f"The audit identified **{exceptions} exception(s)** out of {total} controls tested. "
-            f"No critical failures were found, but {exceptions} controls require management attention "
-            f"and corrective action within the next 60 days."
+            f"No critical failures were found, but management attention is required for the {exceptions} exceptions."
         )
     else:
         posture = "**Overall Risk: LOW**"
@@ -115,7 +134,11 @@ def _emulate_summary(state: AuditState, passes: int, exceptions: int, fails: int
         )
 
     scope_preview = state.audit_scope_narrative[:120]
-    skills = ", ".join(state.active_skill_names) if state.active_skill_names else "General ITGC"
+    skills = (
+        ", ".join(state.active_skill_names)
+        if state.active_skill_names
+        else "General ITGC"
+    )
 
     summary = (
         f"{posture}\n\n"
@@ -128,10 +151,13 @@ def _emulate_summary(state: AuditState, passes: int, exceptions: int, fails: int
 
     return {
         "executive_summary": summary,
-        "audit_trail": state.audit_trail + [{
-            "agent_or_user_id": "Concluder Agent (Mock)",
-            "action_taken": f"Template summary produced. {passes}P/{exceptions}E/{fails}F.",
-            "reasoning_snapshot": "No LLM available; template-based summary generated.",
-            "approval_status": "Auto-Approved"
-        }]
+        "audit_trail": state.audit_trail
+        + [
+            {
+                "agent_or_user_id": "Concluder Agent (Mock)",
+                "action_taken": f"Template summary produced. {passes}P/{exceptions}E/{fails}F.",
+                "reasoning_snapshot": "No LLM available; template-based summary generated.",
+                "approval_status": "Auto-Approved",
+            }
+        ],
     }

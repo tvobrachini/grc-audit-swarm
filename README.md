@@ -29,6 +29,39 @@ Once approved, the swarm shifts from planning to testing:
 - **Execution Challenger:** Validates finding consistency (e.g., flags "Pass" statuses that have zero extracted evidence).
 - **Executive Concluder:** Aggregates all data into a high-level risk score and Executive Summary.
 
+### 🔄 Architecture Flow
+
+```mermaid
+graph TD
+    classDef init fill:#4f46e5,color:#fff,stroke:#fff
+    classDef human fill:#ea580c,color:#fff,stroke:#fff
+    classDef phase1 fill:#0ea5e9,color:#fff,stroke:#fff
+    classDef phase2 fill:#10b981,color:#fff,stroke:#fff
+
+    Start((Audit Scope)):::init --> Orch[Orchestrator]:::phase1
+    Orch --> Res[Researcher]:::phase1
+    Res --> Map[Control Mapper]:::phase1
+    Map --> Spec[Dynamic Specialist]:::phase1
+    Spec --> QA1[QA Challenger]:::phase1
+    QA1 --> Check1{Human Approval}:::human
+
+    Check1 -- Revisions Required --> Res
+    Check1 -- Approved --> Ev[External Evidence APIs / Mock Log]:::init
+
+    Ev --> Work1[Execution Worker - Control 1]:::phase2
+    Ev --> Work2[Execution Worker - Control 2]:::phase2
+    Ev --> WorkN[Execution Worker - Control N]:::phase2
+
+    Work1 --> Spec2[Specialist Annotator]:::phase2
+    Work2 --> Spec2
+    WorkN --> Spec2
+
+    Spec2 --> Res2[Foundations Researcher]:::phase2
+    Res2 --> QA2[Execution Challenger]:::phase2
+    QA2 --> Conc[Executive Concluder]:::phase2
+    Conc --> End((Final Artifacts)):::init
+```
+
 ---
 
 ## 🚀 Key Features

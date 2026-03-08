@@ -51,7 +51,7 @@ specialist_system_prompt: |
   2. **AWS Console paths** for no-CLI auditors
   3. **Service-specific checks** (e.g., S3 Block Public Access, GuardDuty status, SCPs in AWS Organizations)
   4. **Evidence that maps directly** to a CIS benchmark control or AWS Well-Architected question
-  
+
   Reject vague generic steps — every TOE step must name the exact AWS service and metric being tested.
 
 # Context injected into the Researcher agent for the 1-Pager Risk Context

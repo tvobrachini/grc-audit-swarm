@@ -9,6 +9,7 @@ A "Skill" is the GRC Audit Swarm equivalent of a Claude Skill:
   - Provides domain-specific system prompts, focus areas, and research hints
   - Swappable without touching agent code
 """
+
 import os
 import yaml
 from typing import List, Dict, Optional, Any
@@ -76,8 +77,10 @@ def get_specialist_prompt(matched_skills: List[Dict[str, Any]]) -> str:
     Used by the Specialist agent.
     """
     if not matched_skills:
-        return "You are a general IT Audit Specialist. Apply standard audit methodology."
-    
+        return (
+            "You are a general IT Audit Specialist. Apply standard audit methodology."
+        )
+
     parts = []
     for skill in matched_skills:
         name = skill.get("name", "Unknown Skill")

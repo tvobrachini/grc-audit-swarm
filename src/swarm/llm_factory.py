@@ -8,8 +8,8 @@ Priority order (fully open-source / free-tier compatible):
 
 Set either GROQ_API_KEY or OPENAI_API_KEY in your .env file.
 """
+
 import os
-from typing import Optional
 
 
 def get_llm(temperature: float = 0.1, prefer_fast: bool = False):
@@ -25,6 +25,7 @@ def get_llm(temperature: float = 0.1, prefer_fast: bool = False):
     if groq_key:
         try:
             from langchain_groq import ChatGroq
+
             model = "llama-3.1-8b-instant" if prefer_fast else "llama-3.3-70b-versatile"
             print(f"[LLM Factory] Using Groq → {model}")
             return ChatGroq(model=model, temperature=temperature, api_key=groq_key)
@@ -33,6 +34,7 @@ def get_llm(temperature: float = 0.1, prefer_fast: bool = False):
 
     if openai_key:
         from langchain_openai import ChatOpenAI
+
         model = "gpt-4o-mini" if prefer_fast else "gpt-4o"
         print(f"[LLM Factory] Using OpenAI → {model}")
         return ChatOpenAI(model=model, temperature=temperature, api_key=openai_key)
