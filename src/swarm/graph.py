@@ -29,15 +29,28 @@ def dynamic_specialist_node(state: AuditState) -> dict:
     return inject_specialist_tests(state)
 
 def challenger_node(state: AuditState) -> dict:
-    return challenger_review(state)
+    result = challenger_review(state)
+    # If the challenger provides feedback, increment the revision counter
+    if result.get("revision_feedback"):
+        result["revision_count"] = state.revision_count + 1
+    return result
 
 def human_review_node(state: AuditState) -> dict:
     """Phase 1 breakpoint: pauses for human review of the planning artifacts."""
     return {}
 
 def should_revise(state: AuditState) -> str:
-    if state.revision_feedback != "":
+    # Cap at 2 autonomous revisions to prevent infinite loops
+    MAX_REVISIONS = 2
+    if state.revision_feedback != "" and state.revision_count < MAX_REVISIONS:
+        print(f"[Graph] Challenger requested revision (Attempt {state.revision_count}/{MAX_REVISIONS})")
         return "revise"
+
+    if state.revision_count >= MAX_REVISIONS and state.revision_feedback != "":
+        print(f"[Graph] Max revisions ({MAX_REVISIONS}) reached. Proceeding to human review for final judgment.")
+        # Clear feedback so human starts fresh
+        return "proceed_to_human"
+
     return "proceed_to_human"
 
 def human_should_approve_phase1(state: AuditState) -> str:
@@ -142,13 +155,13 @@ app = workflow.compile(
 
 if __name__ == "__main__":
     print("--- Swarm Architecture Graph Compiled Successfully ---")
-    
+
     # Test a simple invocation
     initial_state = {
         "audit_scope_narrative": "We are migrating to AWS EKS and need an audit.",
         "audit_trail": []
     }
-    
+
     # Run the graph
     final_state = app.invoke(initial_state)
     print("\n--- Final Output State ---")

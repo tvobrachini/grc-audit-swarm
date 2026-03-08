@@ -62,10 +62,10 @@ class AuditState(BaseModel):
     control_feedback: Dict[str, str] = Field(default_factory=dict)
     # Executive summary produced by Concluder agent
     executive_summary: str = Field(default="")
-    
+
     # Cross-Phase State & Feedback Loop
     revision_feedback: str = Field(default="", description="Instructions from the Human or the Challenger to revise the current artifact.")
-    
+    revision_count: int = Field(default=0, description="Counter for planning revision loops to prevent infinite cycles.")
+
     # Global Audit Trail
     audit_trail: List[AuditAction] = Field(default_factory=list, description="Immutable log of all system and human actions.")
-
