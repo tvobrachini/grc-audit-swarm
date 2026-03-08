@@ -193,7 +193,7 @@ def _mock_evidence(control_id: str) -> str:
 def _emulate_finding(control: ControlMatrixItem) -> AuditFinding:
     """Mock finding generator for when no LLM is available."""
     # Weighted random: 60% Pass, 25% Exception, 15% Fail
-    outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]
+    outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]  # nosec B311
 
     # Use realistic mock evidence
 
