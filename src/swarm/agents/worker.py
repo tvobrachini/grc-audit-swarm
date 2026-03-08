@@ -47,7 +47,7 @@ def run_control_test(
     """
     print(f"[Worker] Testing control: {control.control_id} ({control.domain})")
 
-    llm = get_llm(temperature=0.3)
+    llm = get_llm(temperature=0.3, prefer_fast=True)
     if llm is None:
         return _emulate_finding(control)
 

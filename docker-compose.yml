@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  swarm-app:
+    build: .
+    ports:
+      - "8502:8501"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - ./checkpoints.sqlite:/app/checkpoints.sqlite
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped

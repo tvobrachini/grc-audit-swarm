@@ -45,7 +45,7 @@ def produce_executive_summary(state: AuditState) -> dict:
         f"[Concluder] Aggregating {total} findings: {passes} Pass, {exceptions} Exception, {fails} Fail"
     )
 
-    llm = get_llm(temperature=0.4)
+    llm = get_llm(temperature=0.4, prefer_fast=True)
     if llm is None:
         return _emulate_summary(state, passes, exceptions, fails, highs)
 
