@@ -1,7 +1,5 @@
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.sqlite import SqliteSaver
-import sqlite3
-import os
+from src.swarm.storage import get_checkpointer
 
 from src.swarm.state.schema import AuditState
 from src.swarm.agents.orchestrator import analyze_scope_and_themes
@@ -14,6 +12,10 @@ from src.swarm.agents.specialist import (
 from src.swarm.agents.challenger import challenger_review, challenge_execution_findings
 from src.swarm.agents.worker import run_control_test
 from src.swarm.agents.concluder import produce_executive_summary
+from src.swarm.auth.permissions import (
+    validate_execution_permissions,
+    PermissionDeniedError,
+)
 
 workflow = StateGraph(AuditState)
 
@@ -85,9 +87,32 @@ def run_all_workers_node(state: AuditState) -> dict:
 
     for control in state.control_matrix:
         cid = control.control_id
+        status_map[cid] = "executing"
+
+        # DDD Identity/Permissions Guardrail Execution Check
+        try:
+            # We mock the user_context here as an active auditor.
+            validate_execution_permissions({"role": "IT_AUDITOR"}, cid)
+        except PermissionDeniedError as e:
+            print(f"  ❌ Permission Blocked for {cid}: {e}")
+            from src.swarm.state.schema import Finding
+
+            findings.append(
+                Finding(
+                    control_id=cid,
+                    status="Fail",
+                    justification=f"Execution blocked by DDD Identity Context Guardrail: {e}",
+                    risk_rating="High",
+                    tod_result="Fail",
+                    toe_result="Fail",
+                    substantive_result="Fail",
+                )
+            )
+            status_map[cid] = "blocked_by_guardrail"
+            continue
+
         # Check if human left feedback specifically for this control
         human_ctx = state.control_feedback.get(cid, "")
-        status_map[cid] = "executing"
         finding = run_control_test(control, state, human_context=human_ctx)
         findings.append(finding)
         status_map[cid] = "awaiting_review"
@@ -170,13 +195,7 @@ workflow.add_conditional_edges(
     {"rerun": "run_all_workers", "end": END},
 )
 
-# ── Compile ───────────────────────────────────────────────────────────────────
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../data")
-os.makedirs(DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(DB_DIR, "audit_checkpoints.sqlite")
-
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-memory = SqliteSaver(conn)
+memory = get_checkpointer()
 
 app = workflow.compile(
     checkpointer=memory, interrupt_before=["human_review", "human_review_execution"]

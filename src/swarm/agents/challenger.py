@@ -145,7 +145,7 @@ def challenge_execution_findings(state: AuditState) -> dict:
         f"[Phase2 Challenger] QA reviewing {len(findings)} findings for consistency and calibration..."
     )
 
-    llm = get_llm(temperature=0)
+    llm = get_llm(temperature=0, prefer_fast=True)
     if llm is None:
         return _emulate_phase2_challenger(state)
 

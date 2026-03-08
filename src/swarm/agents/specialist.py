@@ -212,7 +212,7 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
         f"[Phase2 Specialist] Annotating {len(failed)} failed/exception findings with specialist context..."
     )
 
-    llm = get_llm(temperature=0.1)
+    llm = get_llm(temperature=0.1, prefer_fast=True)
     if llm is None:
         return _emulate_phase2_specialist(state, failed)
 

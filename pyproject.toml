@@ -1,3 +1,25 @@
+[project]
+name = "grc-audit-swarm"
+version = "0.1.0"
+description = "AI Multi-Agent Audit System"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.31.0",
+    "pandas>=2.2.0",
+    "pdfplumber>=0.10.3",
+    "langchain>=0.2.0",
+    "langchain-core>=0.2.0",
+    "langchain-groq>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langgraph>=0.1.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.1",
+    "pytest>=8.0.0",
+    "pytest-bdd>=7.1.2",
+    "openpyxl>=3.1.2",
+]
+
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 skips = ["B101"] # Skip assert usage checks

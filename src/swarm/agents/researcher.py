@@ -200,7 +200,7 @@ def research_failed_controls(state: AuditState) -> dict:
         f"[Phase2 Researcher] Researching real-world precedent for {len(failed)} failed controls..."
     )
 
-    llm = get_llm(temperature=0.1)
+    llm = get_llm(temperature=0.1, prefer_fast=True)
     if llm is None:
         return _emulate_phase2_researcher(state, failed)
 
