@@ -23,7 +23,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install uv
         uv sync --all-extras
-        uv pip install --system ruff bandit pytest pytest-bdd
 
     - name: Lint with Ruff
       run: |
