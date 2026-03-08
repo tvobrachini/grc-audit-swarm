@@ -7,7 +7,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from dotenv import load_dotenv
 
-from src.swarm.state.schema import AuditState
+from swarm.state.schema import AuditState
 
 load_dotenv()
 
