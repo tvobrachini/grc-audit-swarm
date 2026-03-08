@@ -21,11 +21,12 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3.0.3",
     "langchain-community>=0.4.1",
     "duckduckgo-search>=8.1.1",
+    "mcp[cli]>=1.26.0",
 ]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
-skips = ["B101", "B105"] # Skip assert usage checks and false-positive password flags
+skips = ["B101", "B105", "B404", "B603", "B607"] # Skip assert, password false-positives, and necessary subprocess calls
 
 [dependency-groups]
 dev = [
