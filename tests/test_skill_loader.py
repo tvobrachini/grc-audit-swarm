@@ -4,8 +4,10 @@ test_skill_loader.py
 Guardrails for the skill loading system.
 Verifies keyword detection, YAML structure, and prompt assembly.
 """
-import pytest
-import sys, os
+
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.skill_loader import (
@@ -29,18 +31,26 @@ class TestSkillDirectory:
             assert "name" in skill, f"Skill missing 'name': {skill}"
             assert "id" in skill, f"Skill missing 'id': {skill}"
             assert "scope_keywords" in skill, f"Skill missing 'scope_keywords': {skill}"
-            assert isinstance(skill["scope_keywords"], list), f"scope_keywords must be a list: {skill['id']}"
-            assert len(skill["scope_keywords"]) > 0, f"scope_keywords cannot be empty: {skill['id']}"
+            assert isinstance(
+                skill["scope_keywords"], list
+            ), f"scope_keywords must be a list: {skill['id']}"
+            assert (
+                len(skill["scope_keywords"]) > 0
+            ), f"scope_keywords cannot be empty: {skill['id']}"
 
     def test_all_skills_have_specialist_prompt(self):
         for skill in list_available_skills():
             prompt = skill.get("specialist_system_prompt", "")
-            assert len(prompt) > 50, f"Specialist prompt too short for skill: {skill['id']}"
+            assert (
+                len(prompt) > 50
+            ), f"Specialist prompt too short for skill: {skill['id']}"
 
     def test_all_skills_have_researcher_hint(self):
         for skill in list_available_skills():
             hint = skill.get("researcher_context_hint", "")
-            assert len(hint) > 20, f"researcher_context_hint missing or too short: {skill['id']}"
+            assert (
+                len(hint) > 20
+            ), f"researcher_context_hint missing or too short: {skill['id']}"
 
     def test_all_skills_have_focus_domains(self):
         for skill in list_available_skills():
@@ -60,12 +70,16 @@ class TestSkillDetection:
         assert "aws_cloud_security" in ids
 
     def test_pci_scope_detects_pci_skill(self):
-        skills = detect_skills_from_scope("PCI-DSS cardholder data environment payment processing")
+        skills = detect_skills_from_scope(
+            "PCI-DSS cardholder data environment payment processing"
+        )
         ids = [s["id"] for s in skills]
         assert "pci_dss" in ids
 
     def test_hipaa_scope_detects_hipaa_skill(self):
-        skills = detect_skills_from_scope("HIPAA ePHI EHR healthcare patient data audit")
+        skills = detect_skills_from_scope(
+            "HIPAA ePHI EHR healthcare patient data audit"
+        )
         ids = [s["id"] for s in skills]
         assert "hipaa_privacy" in ids
 
@@ -82,7 +96,9 @@ class TestSkillDetection:
 
     def test_multi_keyword_scope_can_match_multiple_skills(self):
         """A scope mentioning both AWS and PCI should match both skills."""
-        skills = detect_skills_from_scope("AWS S3 PCI cardholder payment cloud infrastructure")
+        skills = detect_skills_from_scope(
+            "AWS S3 PCI cardholder payment cloud infrastructure"
+        )
         ids = [s["id"] for s in skills]
         assert "aws_cloud_security" in ids
         assert "pci_dss" in ids

@@ -8,28 +8,39 @@ and returns a structured AuditFinding.
 In mock mode: generates realistic simulated findings.
 In LLM mode:  reasons against evidence using the loaded skill system prompt.
 """
+
 import random
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from src.swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditProcedure
+from src.swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem
 from src.swarm.llm_factory import get_llm
 from src.swarm.skill_loader import get_skill_by_id, get_specialist_prompt
 
 
 class WorkerFindingOutput(BaseModel):
     status: str = Field(description="Exactly one of: 'Pass', 'Fail', 'Exception'")
-    justification: str = Field(description="Detailed narrative explaining the status and what was found during testing.")
-    evidence_extracted: List[str] = Field(description="Exact data points or quotes from the evidence that support this finding.")
+    justification: str = Field(
+        description="Detailed narrative explaining the status and what was found during testing."
+    )
+    evidence_extracted: List[str] = Field(
+        description="Exact data points or quotes from the evidence that support this finding."
+    )
     risk_rating: str = Field(description="'High', 'Medium', 'Low', or 'N/A' (for Pass)")
     tod_result: str = Field(description="'Pass' or 'Fail' for the Test of Design step.")
-    toe_result: str = Field(description="'Pass', 'Fail', or 'Exception' for the Test of Effectiveness step.")
-    substantive_result: str = Field(description="'Pass', 'Fail', or 'Exception' for the Substantive Testing step.")
+    toe_result: str = Field(
+        description="'Pass', 'Fail', or 'Exception' for the Test of Effectiveness step."
+    )
+    substantive_result: str = Field(
+        description="'Pass', 'Fail', or 'Exception' for the Substantive Testing step."
+    )
 
 
-def run_control_test(control: ControlMatrixItem, state: AuditState, human_context: str = "") -> AuditFinding:
+def run_control_test(
+    control: ControlMatrixItem, state: AuditState, human_context: str = ""
+) -> AuditFinding:
     """
     Execute all test procedures for a single control.
     Returns an AuditFinding with full results.
@@ -52,39 +63,52 @@ def run_control_test(control: ControlMatrixItem, state: AuditState, human_contex
         return _emulate_finding(control)
 
     evidence_summary = _get_evidence_for_control(control.control_id, state.evidence_log)
-    human_ctx_section = f"\n\nAdditional human auditor context:\n{human_context}" if human_context else ""
+    human_ctx_section = (
+        f"\n\nAdditional human auditor context:\n{human_context}"
+        if human_context
+        else ""
+    )
 
-    worker_prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         f"{skill_prompt}\n\n"
-         "You are executing an IT audit test for a specific control. "
-         "Reason carefully against the provided evidence and determine if each test step passes, fails, or has an exception. "
-         "Be specific, cite evidence, and be honest — do not force a Pass if evidence is missing or incomplete."
-         f"{human_ctx_section}"),
-        ("human",
-         "Control ID: {control_id}\n"
-         "Domain: {domain}\n"
-         "Description: {description}\n\n"
-         "Procedures to execute:\n"
-         "TOD Steps: {tod}\n"
-         "TOE Steps: {toe}\n"
-         "Substantive Steps: {sub}\n\n"
-         "Available Evidence:\n{evidence}\n\n"
-         "Execute these tests against the evidence and return your finding.")
-    ])
+    worker_prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                f"{skill_prompt}\n\n"
+                "You are executing an IT audit test for a specific control. "
+                "Reason carefully against the provided evidence and determine if each test step passes, fails, or has an exception. "
+                "Be specific, cite evidence, and be honest — do not force a Pass if evidence is missing or incomplete. "
+                "CRITICAL INSTRUCTION: DO NOT propose remediation, action plans, or recommendations. Evaluate ONLY the current state based on evidence."
+                f"{human_ctx_section}",
+            ),
+            (
+                "human",
+                "Control ID: {control_id}\n"
+                "Domain: {domain}\n"
+                "Description: {description}\n\n"
+                "Procedures to execute:\n"
+                "TOD Steps: {tod}\n"
+                "TOE Steps: {toe}\n"
+                "Substantive Steps: {sub}\n\n"
+                "Available Evidence:\n{evidence}\n\n"
+                "Execute these tests against the evidence and return your finding.",
+            ),
+        ]
+    )
 
     chain = worker_prompt | llm.with_structured_output(WorkerFindingOutput)
 
     try:
-        result = chain.invoke({
-            "control_id": control.control_id,
-            "domain": control.domain,
-            "description": control.description,
-            "tod": "\n".join(procs.tod_steps),
-            "toe": "\n".join(procs.toe_steps),
-            "sub": "\n".join(procs.substantive_steps),
-            "evidence": evidence_summary
-        })
+        result = chain.invoke(
+            {
+                "control_id": control.control_id,
+                "domain": control.domain,
+                "description": control.description,
+                "tod": "\n".join(procs.tod_steps),
+                "toe": "\n".join(procs.toe_steps),
+                "sub": "\n".join(procs.substantive_steps),
+                "evidence": evidence_summary,
+            }
+        )
 
         return AuditFinding(
             control_id=control.control_id,
@@ -158,22 +182,20 @@ def _mock_evidence(control_id: str) -> str:
         ),
     }
     prefix = control_id.split("-")[0]
-    return mock_db.get(prefix, 
+    return mock_db.get(
+        prefix,
         f"Evidence log for {control_id}: Policy document retrieved. "
         "Last review date: 2025-10-12. No exceptions noted in management self-assessment. "
-        "Configuration screenshots provided. 8/10 sample items validated."
+        "Configuration screenshots provided. 8/10 sample items validated.",
     )
 
 
 def _emulate_finding(control: ControlMatrixItem) -> AuditFinding:
     """Mock finding generator for when no LLM is available."""
     # Weighted random: 60% Pass, 25% Exception, 15% Fail
-    outcome = random.choices(
-        ["Pass", "Exception", "Fail"],
-        weights=[60, 25, 15]
-    )[0]
+    outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]
 
-    prefix = control.control_id.split("-")[0]
+    # Use realistic mock evidence
 
     # Use realistic mock evidence
     evidence_text = _mock_evidence(control.control_id)
@@ -181,7 +203,7 @@ def _emulate_finding(control: ControlMatrixItem) -> AuditFinding:
     justifications = {
         "Pass": f"All test steps for {control.control_id} executed successfully. Evidence reviewed and aligned with control description. Population validated, sample selected and traced.",
         "Exception": f"Testing of {control.control_id} revealed a minor exception: one or more sample items could not be fully validated due to incomplete documentation. Control design appears sound but effectiveness evidence is partially missing.",
-        "Fail": f"Control {control.control_id} has FAILED. Evidence shows the control is either not designed or not operating effectively for the audit period. Specific deficiency identified and documented."
+        "Fail": f"Control {control.control_id} has FAILED. Evidence shows the control is either not designed or not operating effectively for the audit period. Specific deficiency identified and documented.",
     }
 
     risk_map = {"Pass": None, "Exception": "Medium", "Fail": "High"}
@@ -198,7 +220,7 @@ def _emulate_finding(control: ControlMatrixItem) -> AuditFinding:
         evidence_extracted=[
             evidence_text[:200] + "...",
             f"Control domain: {control.domain}",
-            "Evidence log reviewed and cross-referenced with procedure steps."
+            "Evidence log reviewed and cross-referenced with procedure steps.",
         ],
         risk_rating=risk_map[outcome],
         tod_result=step_results_pass[outcome],

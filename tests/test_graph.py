@@ -5,11 +5,13 @@ Guardrails for the LangGraph structure.
 Verifies all expected nodes exist, edges are wired correctly,
 and interrupt points are at the right checkpoints.
 """
-import pytest
-import sys, os
+
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.graph import app, workflow
+from swarm.graph import app
 
 
 EXPECTED_NODES = [
@@ -51,7 +53,6 @@ class TestGraphStructure:
 
     def test_interrupt_points_are_set(self):
         """The graph must interrupt at both human review points."""
-        config = app.config_schema()
         # LangGraph stores interrupt_before in the compiled graph's builder
         interrupt_nodes = getattr(app, "interrupt_before", None)
         if interrupt_nodes is None:
