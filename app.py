@@ -78,7 +78,8 @@ with st.sidebar:
 # ─── Session State ─────────────────────────────────────────────────────────────
 for k,v in [("thread_id", str(uuid.uuid4())), ("chat_history",[]),
             ("scope_submitted",False), ("scope_text_cache",""),
-            ("control_feedback",{})]:
+            ("control_feedback",{}), ("suggested_audit_name",""),
+            ("resume_swarm", False)]:
     if k not in st.session_state: st.session_state[k] = v
 
 config = {"configurable":{"thread_id": st.session_state.thread_id}}
@@ -96,6 +97,21 @@ def step_badge(result):
     if not result: return "—"
     icons = {"Pass":"✅","Fail":"❌","Exception":"⚠️"}
     return icons.get(result, result)
+
+def _suggest_audit_name(scope_text: str) -> str:
+    """Extract a concise audit name from the first meaningful line of the scope."""
+    import re
+    for line in scope_text.splitlines():
+        line = line.strip().strip("-=")
+        # Skip banners, blanks, and field labels like 'Organization:'
+        if not line or len(line) < 8 or re.match(r'^(organization|prepared|audit period|period):', line, re.I):
+            continue
+        # Strip AUDIT/SCOPE/NARRATIVE boilerplate prefixes
+        line = re.sub(r'^(AUDIT SCOPE NARRATIVE[\s\—\-–]+|AUDIT SCOPE[\s\—\-–]+|SCOPE[:\s]+)', '', line, flags=re.I).strip()
+        if line:
+            # Trim if very long
+            return line[:80].strip()
+    return ""
 
 # ─── Header ────────────────────────────────────────────────────────────────────
 st.title("🎯 Swarm Audit Command Center")
@@ -128,8 +144,20 @@ if not st.session_state.scope_submitted:
         else:
             st.info("Upload or select lab data to see the scope.")
 
+    # Auto-suggest name when scope changes
+    if scope_text:
+        suggestion = _suggest_audit_name(scope_text)
+        if suggestion and st.session_state.suggested_audit_name != suggestion:
+            st.session_state.suggested_audit_name = suggestion
+
     st.markdown("---")
-    audit_name = st.text_input("📝 Audit Name", placeholder="e.g. AWS Prod Q4 2026 – IAM Review", key="audit_name")
+    audit_name = st.text_input(
+        "📝 Audit Name",
+        value=st.session_state.suggested_audit_name,
+        placeholder="e.g. AWS Prod Q4 2026 – IAM Review",
+        key="audit_name",
+        help="Auto-suggested from scope — edit freely before launching."
+    )
     _, c, _ = st.columns([1,2,1])
     if c.button("🚀 Launch Swarm", type="primary", use_container_width=True):
         if not scope_text: st.warning("Please provide scope text.")
@@ -162,6 +190,11 @@ else:
     at_running          = not next_nodes and not state_vals.get("testing_findings") and state_vals.get("audit_scope_narrative","") == ""
     is_fully_done       = not next_nodes and bool(state_vals.get("testing_findings"))
 
+    # Accurate current phase label
+    has_matrix = bool(state_vals.get("control_matrix"))
+    has_findings = bool(state_vals.get("testing_findings"))
+    is_phase1 = not has_matrix or (has_matrix and not has_findings and not at_phase2_review)
+
     # ── Agent Progress Rail (collapsible) ─────────────────────────────────────
     if st.session_state.chat_history:
         with st.expander("📡 Agent Activity Log", expanded=(not at_phase2_review and not is_fully_done)):
@@ -175,10 +208,13 @@ else:
     # ════════════════════════════════════════════════════
     # RUNNING — stream agent nodes
     # ════════════════════════════════════════════════════
-    if not at_phase1_review and not at_phase2_review and not is_fully_done:
-        spinner_msg = ("🔍 Phase 1: Swarm researching and planning..." 
-                       if not state_vals.get("control_matrix")
-                       else "⚙️ Phase 2: Workers executing tests...")
+    if (not at_phase1_review and not at_phase2_review and not is_fully_done) or st.session_state.get("resume_swarm"):
+        st.session_state.resume_swarm = False
+        if is_phase1:
+            spinner_msg = "🔍 Phase 1: Swarm researching and planning..."
+        else:
+            spinner_msg = "⚙️ Phase 2: Swarm executing tests and analyzing findings..."
+
         with st.spinner(spinner_msg):
             stream_input = (
                 {"audit_scope_narrative": st.session_state.scope_text_cache, "audit_trail":[]}
@@ -186,7 +222,9 @@ else:
                 else None
             )
             for event in swarm_app.stream(stream_input, config=config, stream_mode="updates"):
+                # s is the node update dictionary. LangGraph stream can sometimes return tuples for internals.
                 for node, s in event.items():
+                    if not isinstance(s, dict): continue
                     reasoning = None
                     if s.get("audit_trail"):
                         last = s["audit_trail"][-1]
@@ -258,6 +296,8 @@ else:
                 swarm_app.update_state(config, {"revision_feedback":""})
             else:
                 swarm_app.update_state(config, {"revision_feedback":fb})
+
+            st.session_state.resume_swarm = True
             st.rerun()
 
     # ════════════════════════════════════════════════════
@@ -374,6 +414,7 @@ else:
                     })
                     st.session_state.chat_history.append({"role":"user","content":f"Submitted feedback on {len(st.session_state.control_feedback)} controls for re-evaluation."})
                     st.session_state.control_feedback = {}
+                    st.session_state.resume_swarm = True
                     st.rerun()
             else:
                 st.success("All controls reviewed.")
@@ -381,6 +422,7 @@ else:
             if st.button("✅ Approve & Finalize Audit Report", type="primary", use_container_width=True):
                 swarm_app.update_state(config, {"control_feedback": {}})
                 st.session_state.chat_history.append({"role":"user","content":"✅ Audit approved. Final report generated."})
+                st.session_state.resume_swarm = True
                 st.rerun()
 
         # Excel export of findings
