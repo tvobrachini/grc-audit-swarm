@@ -19,13 +19,16 @@ RUN apt-get update && apt-get install -y \
 RUN pip install uv
 
 # Copy project definition files
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock ./
 
 # Install dependencies using uv
-RUN uv pip install --system -e .
+RUN uv sync --frozen --no-dev
 
 # Copy the rest of the application
 COPY . .
+
+# Add the virtual environment to the PATH
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Expose the Streamlit port
 EXPOSE 8501

@@ -18,6 +18,7 @@ dependencies = [
     "pytest>=8.0.0",
     "pytest-bdd>=7.1.2",
     "openpyxl>=3.1.2",
+    "langgraph-checkpoint-sqlite>=3.0.3",
 ]
 
 [tool.bandit]
