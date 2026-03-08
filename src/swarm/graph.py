@@ -1,18 +1,19 @@
 from langgraph.graph import StateGraph, END
-from src.swarm.storage import get_checkpointer
+from swarm.storage import get_checkpointer
 
-from src.swarm.state.schema import AuditState
-from src.swarm.agents.orchestrator import analyze_scope_and_themes
-from src.swarm.agents.researcher import generate_risk_context, research_failed_controls
-from src.swarm.agents.mapper import map_controls_and_design_tests
-from src.swarm.agents.specialist import (
+from swarm.state.schema import AuditState
+from swarm.agents.orchestrator import analyze_scope_and_themes
+from swarm.agents.researcher import generate_risk_context, research_failed_controls
+from swarm.agents.mapper import map_controls_and_design_tests
+from swarm.agents.specialist import (
     inject_specialist_tests,
     annotate_findings_with_specialist,
 )
-from src.swarm.agents.challenger import challenger_review, challenge_execution_findings
-from src.swarm.agents.worker import run_control_test
-from src.swarm.agents.concluder import produce_executive_summary
-from src.swarm.auth.permissions import (
+from swarm.agents.challenger import challenger_review, challenge_execution_findings
+from swarm.agents.worker import run_control_test
+from swarm.agents.concluder import produce_executive_summary
+from swarm.agents.evidence_collector import run_evidence_collector_sync
+from swarm.auth.permissions import (
     validate_execution_permissions,
     PermissionDeniedError,
 )
@@ -95,7 +96,7 @@ def run_all_workers_node(state: AuditState) -> dict:
             validate_execution_permissions({"role": "IT_AUDITOR"}, cid)
         except PermissionDeniedError as e:
             print(f"  ❌ Permission Blocked for {cid}: {e}")
-            from src.swarm.state.schema import Finding
+            from swarm.state.schema import Finding
 
             findings.append(
                 Finding(
@@ -133,6 +134,10 @@ def run_all_workers_node(state: AuditState) -> dict:
     }
 
 
+def evidence_collector_node(state: AuditState) -> dict:
+    return run_evidence_collector_sync(state)
+
+
 def concluder_node(state: AuditState) -> dict:
     return produce_executive_summary(state)
 
@@ -157,6 +162,7 @@ workflow.add_node("control_mapper", control_mapper_node)
 workflow.add_node("dynamic_specialists", dynamic_specialist_node)
 workflow.add_node("challenger", challenger_node)
 workflow.add_node("human_review", human_review_node)
+workflow.add_node("evidence_collector", evidence_collector_node)
 workflow.add_node("run_all_workers", run_all_workers_node)
 # Phase 2 review pipeline nodes
 workflow.add_node("phase2_specialist", lambda s: annotate_findings_with_specialist(s))
@@ -179,8 +185,10 @@ workflow.add_conditional_edges(
 workflow.add_conditional_edges(
     "human_review",
     human_should_approve_phase1,
-    {"revise": "researcher", "execute": "run_all_workers"},
+    {"revise": "researcher", "execute": "evidence_collector"},
 )
+
+workflow.add_edge("evidence_collector", "run_all_workers")
 
 # ── Phase 2 Edges ─────────────────────────────────────────────────────────────
 # Workers → Specialist annotation → Researcher breach context → Challenger QA → Concluder → Human
