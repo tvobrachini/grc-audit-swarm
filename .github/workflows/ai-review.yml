@@ -1,0 +1,28 @@
+name: CodiumAI PR-Agent
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+    name: Run PR Agent on every pull request
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: Codium-ai/pr-agent@main
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
+          pr_description.extra_instructions: "Ensure code uses `uv` for dependencies. Verify no tests are deleted."
+          pr_reviewer.extra_instructions: "CRITICAL DOMAIN RULE: If the PR touches `worker.py` or agent logic, ensure it does NOT allow the AI to pass a control if evidence is missing. Missing evidence = Fail/Exception."
+          pr_code_suggestions.extra_instructions: "Enforce DDD AuthContext guidelines. Ensure no remediation steps are added to the execution phase. Check for proper Pydantic validations."
