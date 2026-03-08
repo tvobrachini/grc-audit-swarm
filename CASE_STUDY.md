@@ -1,8 +1,8 @@
 # Case Study: Scalable Multi-Agent Swarms for Recursive Auditing
 
 **Role:** Senior IT Auditor / Audit Engineer
-**Core Technologies:** Python, LangGraph, Streamlit, DuckDuckGo Search API, Pytest, YAML
-**Frameworks Covered:** Secure Controls Framework (SCF), AWS Cloud Security, PCI-DSS, GDPR, HIPAA
+**Core Technologies:** Python, LangGraph, AWS MCP (Model Context Protocol), Streamlit, DuckDuckGo Search API, Pytest, YAML
+**Frameworks Covered:** Secure Controls Framework (SCF), AWS Cloud Security (Live), PCI-DSS, GDPR, HIPAA
 
 ---
 
@@ -39,9 +39,17 @@ Using **LangGraph**, I architected a stateful "Swarm" of specialized AI agents t
    - *Decision:* Created a decoupled `skills/` directory where specialists (AWS, PCI, GDPR) are defined in YAML.
    - *Why:* This allows the platform to be "framework agnostic." By simply adding a YAML file, the swarm can instantly gain expertise in a new regulation without changing a single line of core Python logic.
 
-4. **Audit Engineering Guardrails (69+ Tests):**
-   - *Decision:* Built a dedicated `pytest` suite for agent contracts and graph topology.
+4. **Audit Engineering Guardrails (80+ Tests):**
+   - *Decision:* Built a dedicated `pytest` suite for agent contracts, graph topology, and BDD (Behavior-Driven Development) rules.
    - *Why:* LLMs are non-deterministic. "Audit Engineering" means ensuring that the swarm's logic is predictable. The tests verify that an "AWS Scope" *always* triggers a Researcher search for AWS breaches and *always* maps to the correct SCF Cloud domains.
+
+5. **Live Evidence Bridging (AWS MCP):**
+   - *Decision:* Integrated the **Model Context Protocol (MCP)** to provide a secure "Sidecar" for live AWS discovery.
+   - *Why:* Real audits need real data. By building a custom Python MCP server, the swarm can now "see" actual IAM policies, MFA status, and public S3 buckets in real-time, moving from static simulation to live technical verification.
+
+6. **Ironclad Safeguards (Privacy & Cost):**
+   - *Decision:* Implemented a recursive **Account ID Redaction** engine and forced a "Read-Only Audit Context."
+   - *Why:* Auditing live environments with LLMs introduces privacy risk. My "Ironclad" layer scrubs 12-digit AWS Account IDs before they leave the environment and strictly forbids "Create/Modify" actions through hardened system prompts.
 
 ---
 
@@ -50,6 +58,7 @@ Using **LangGraph**, I architected a stateful "Swarm" of specialized AI agents t
 By shifting from a single-agent "Crosswalker" to a multi-agent "Swarm," the depth of the audit output increases significantly:
 
 - **Context-Aware Auditing:** The report doesn't just say "Fix AC-01." It provides a **1-Pager Risk Context** citing a specific 2024 breach that occurred because $AC-01$ was weak, grounding the "Fix" in business reality.
+- **Evidence-to-Finding Automation:** By connecting to **AWS MCP**, the swarm identifies real misconfigurations (e.g., missing password policies) and automatically scrubs sensitive metadata for privacy-first reporting.
 - **Human-in-the-Loop Efficiency:** The UI pauses at critical "Checkpoints," allowing the human auditor to act as a **Reviewer** rather than a **Data Entry Clerk**.
 - **Scalable Specialization:** One GRC Engineer can now oversee multiple complex technical audits (AWS, PCI, and GDPR) simultaneously, as the swarm handles the heavy lifting of research, mapping, and preliminary testing.
 
@@ -60,9 +69,11 @@ By shifting from a single-agent "Crosswalker" to a multi-agent "Swarm," the dept
 Explore the results of the swarm's collaborative intelligence in this repository:
 
 1. **The Infrastructure:** `src/swarm/graph.py` (The stateful routing logic).
-2. **The Intelligence:** `skills/aws_cloud_security.yaml` (How the AI is taught to audit AWS).
-3. **The Guardrails:** `tests/test_skill_loader.py` (The automated verification of AI "judgement").
-4. **The UI:** `app.py` (The Findings Command Center where results are visualized).
+2. **The Bridging:** `src/swarm/mcp_server.py` (The AWS Audit MCP Sidecar).
+3. **The Intelligence:** `skills/aws_cloud_security.yaml` (How the AI is taught to audit AWS).
+4. **The Privacy:** `src/swarm/agents/evidence_collector.py` (The metadata redaction engine).
+5. **The Guardrails:** `tests/test_bdd_evaluation.py` (BDD verification of audit rules).
+6. **The UI:** `app.py` (The Findings Command Center where results are visualized).
 
 ---
 *This project proves that "Compliance-as-Code" is no longer about static checks—it's about building autonomous systems that think like an Auditor.*
