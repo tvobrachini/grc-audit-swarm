@@ -9,7 +9,7 @@ and Jailbreak attacks. We perform string-based heuristic checks against the rend
 import pytest
 
 # Load a core prompt from our system (for example, the worker prompt)
-from swarm.agents.worker import WORKER_PROMPT
+from swarm.agents.worker import WORKER_SYSTEM_PROMPT, WORKER_HUMAN_PROMPT
 
 # Common malicious payloads attackers might try to inject via 'scope_narrative' or 'evidence'
 MALICIOUS_PAYLOADS = [
@@ -34,12 +34,16 @@ def test_prompt_injection_resistance():
     for payload in MALICIOUS_PAYLOADS:
         try:
             # We attempt to render the prompt with the malicious payload
-            rendered = WORKER_PROMPT.format(
+            rendered = WORKER_SYSTEM_PROMPT.format(
+                skill_prompt="", human_ctx_section="No extra context."
+            ) + WORKER_HUMAN_PROMPT.format(
                 control_id="CST-01",
-                control_description="Firewall rules.",
-                control_procedures="Review rules.",
-                evidence_text=payload,
-                human_context="No extra context.",
+                domain="Security",
+                description="Firewall rules.",
+                tod="Review rules.",
+                toe="Review rules.",
+                sub="Review rules.",
+                evidence=payload,
             )
 
             # The rendered prompt MUST still contain our core systemic guardrails.
@@ -57,15 +61,19 @@ def test_prompt_injection_resistance():
 
 def test_no_hardcoded_keys_in_prompts():
     """Ensure no prompts accidentally contain hardcoded API keys or secrets."""
-    rendered = WORKER_PROMPT.format(
+    rendered = WORKER_SYSTEM_PROMPT.format(
+        skill_prompt="", human_ctx_section="mock"
+    ) + WORKER_HUMAN_PROMPT.format(
         control_id="mock",
-        control_description="mock",
-        control_procedures="mock",
-        evidence_text="mock",
-        human_context="mock",
+        domain="mock",
+        description="mock",
+        tod="mock",
+        toe="mock",
+        sub="mock",
+        evidence="mock",
     )
 
-    assert "sk-" not in rendered.lower(), (
-        "Potential API key leakage detected in prompt!"
-    )
+    assert (
+        "sk-" not in rendered.lower()
+    ), "Potential API key leakage detected in prompt!"
     assert "gsk_" not in rendered.lower(), "Potential Groq API key leakage!"
