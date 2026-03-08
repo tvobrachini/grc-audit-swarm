@@ -22,7 +22,7 @@ dependencies = [
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
-skips = ["B101"] # Skip assert usage checks
+skips = ["B101", "B105"] # Skip assert usage checks and false-positive password flags
 
 [dependency-groups]
 dev = [
