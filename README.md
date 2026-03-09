@@ -7,8 +7,6 @@ GRC Audit Swarm is a stateful, interactive AI platform designed to transform Aud
 > [!NOTE]
 > **View the Complete Portfolio Case Study:** I've documented the architectural shift from static mapping to recursive autonomous auditing in **[CASE_STUDY.md](CASE_STUDY.md)**.
 
-![Swarm Command Center](assets/ui_demo.png)
-
 ---
 
 ## 🛠️ The Swarm Ecosystem
@@ -43,23 +41,21 @@ graph TD
     Res --> Map[Control Mapper]:::phase1
     Map --> Spec[Dynamic Specialist]:::phase1
     Spec --> QA1[QA Challenger]:::phase1
-    QA1 --> Check1{Human Approval}:::human
+    QA1 -- Revise --> Res
+    QA1 -- Proceed --> HR1{Human Review\nPhase 1}:::human
 
-    Check1 -- Revisions Required --> Res
-    Check1 -- Approved --> Ev[External Evidence APIs / Mock Log]:::init
+    HR1 -- Revise --> Res
+    HR1 -- Approved --> Ev[Evidence Collector]:::phase2
 
-    Ev --> Work1[Execution Worker - Control 1]:::phase2
-    Ev --> Work2[Execution Worker - Control 2]:::phase2
-    Ev --> WorkN[Execution Worker - Control N]:::phase2
-
-    Work1 --> Spec2[Specialist Annotator]:::phase2
-    Work2 --> Spec2
-    WorkN --> Spec2
-
+    Ev --> Workers[Execution Workers\none per control, sequential]:::phase2
+    Workers --> Spec2[Specialist Annotator]:::phase2
     Spec2 --> Res2[Foundations Researcher]:::phase2
     Res2 --> QA2[Execution Challenger]:::phase2
     QA2 --> Conc[Executive Concluder]:::phase2
-    Conc --> End((Final Artifacts)):::init
+    Conc --> HR2{Human Review\nPhase 2}:::human
+
+    HR2 -- Re-run controls --> Workers
+    HR2 -- Approved --> End((Final Artifacts)):::init
 ```
 
 ---
