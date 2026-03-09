@@ -671,9 +671,8 @@ dependencies = [
     { name = "pandas" },
     { name = "pdfplumber" },
     { name = "pydantic" },
-    { name = "pytest" },
-    { name = "pytest-bdd" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "streamlit" },
 ]
 
@@ -700,9 +699,8 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "pdfplumber", specifier = ">=0.10.3" },
     { name = "pydantic", specifier = ">=2.7.0" },
-    { name = "pytest", specifier = ">=8.0.0" },
-    { name = "pytest-bdd", specifier = ">=7.1.2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "streamlit", specifier = ">=1.31.0" },
 ]
 
