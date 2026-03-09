@@ -1,22 +1,28 @@
-from langgraph.graph import StateGraph, END
-from swarm.storage import get_checkpointer
+import logging
 
-from swarm.state.schema import AuditState
-from swarm.agents.orchestrator import analyze_scope_and_themes
-from swarm.agents.researcher import generate_risk_context, research_failed_controls
-from swarm.agents.mapper import map_controls_and_design_tests
-from swarm.agents.specialist import (
-    inject_specialist_tests,
-    annotate_findings_with_specialist,
-)
+from langgraph.graph import StateGraph, END
 from swarm.agents.challenger import challenger_review, challenge_execution_findings
-from swarm.agents.worker import run_control_test
 from swarm.agents.concluder import produce_executive_summary
 from swarm.agents.evidence_collector import run_evidence_collector_sync
-from swarm.auth.permissions import (
-    validate_execution_permissions,
-    PermissionDeniedError,
+from swarm.agents.mapper import map_controls_and_design_tests
+from swarm.agents.orchestrator import analyze_scope_and_themes
+from swarm.agents.researcher import generate_risk_context, research_failed_controls
+from swarm.agents.specialist import (
+    annotate_findings_with_specialist,
+    inject_specialist_tests,
 )
+from swarm.agents.worker import run_control_test
+from swarm.auth.permissions import (
+    PermissionDeniedError,
+    validate_execution_permissions,
+)
+from swarm.state.schema import AuditState
+from swarm.storage import get_checkpointer
+
+logger = logging.getLogger(__name__)
+
+# Maximum autonomous revisions before escalating to human review
+MAX_REVISIONS = 2
 
 workflow = StateGraph(AuditState)
 
@@ -52,17 +58,18 @@ def human_review_node(state: AuditState) -> dict:
 
 
 def should_revise(state: AuditState) -> str:
-    # Cap at 2 autonomous revisions to prevent infinite loops
-    MAX_REVISIONS = 2
     if state.revision_feedback != "" and state.revision_count < MAX_REVISIONS:
-        print(
-            f"[Graph] Challenger requested revision (Attempt {state.revision_count}/{MAX_REVISIONS})"
+        logger.info(
+            "[Graph] Challenger requested revision (Attempt %d/%d)",
+            state.revision_count,
+            MAX_REVISIONS,
         )
         return "revise"
 
     if state.revision_count >= MAX_REVISIONS and state.revision_feedback != "":
-        print(
-            f"[Graph] Max revisions ({MAX_REVISIONS}) reached. Proceeding to human review for final judgment."
+        logger.info(
+            "[Graph] Max revisions (%d) reached. Proceeding to human review for final judgment.",
+            MAX_REVISIONS,
         )
         # Clear feedback so human starts fresh
         return "proceed_to_human"
@@ -82,7 +89,9 @@ def run_all_workers_node(state: AuditState) -> dict:
     Executes audit tests for all controls in the matrix.
     Runs Workers sequentially — one per control.
     """
-    print(f"\n[Execution] Running workers for {len(state.control_matrix)} controls...")
+    logger.info(
+        "[Execution] Running workers for %d controls...", len(state.control_matrix)
+    )
     findings = []
     status_map = {}
 
@@ -95,7 +104,7 @@ def run_all_workers_node(state: AuditState) -> dict:
             # We mock the user_context here as an active auditor.
             validate_execution_permissions({"role": "IT_AUDITOR"}, cid)
         except PermissionDeniedError as e:
-            print(f"  ❌ Permission Blocked for {cid}: {e}")
+            logger.warning("Permission blocked for control %s: %s", cid, e)
             from swarm.state.schema import Finding
 
             findings.append(
@@ -117,7 +126,7 @@ def run_all_workers_node(state: AuditState) -> dict:
         finding = run_control_test(control, state, human_context=human_ctx)
         findings.append(finding)
         status_map[cid] = "awaiting_review"
-        print(f"  ✓ {cid}: {finding.status}")
+        logger.info("  ✓ %s: %s", cid, finding.status)
 
     return {
         "testing_findings": findings,
@@ -211,7 +220,8 @@ app = workflow.compile(
 
 
 if __name__ == "__main__":
-    print("--- Swarm Architecture Graph Compiled Successfully ---")
+    logging.basicConfig(level=logging.INFO)
+    logger.info("--- Swarm Architecture Graph Compiled Successfully ---")
 
     # Test a simple invocation
     initial_state = {
@@ -220,12 +230,12 @@ if __name__ == "__main__":
     }
 
     # Run the graph (Phase 1)
-    print("\n--- Running Phase 1 ---")
+    logger.info("--- Running Phase 1 ---")
     final_state = app.invoke(
         initial_state, config={"configurable": {"thread_id": "test_phase_1"}}
     )
 
-    print("\n--- Paused after Phase 1 ---")
+    logger.info("--- Paused after Phase 1 ---")
 
     # Simulate human approval
     app.update_state(
@@ -233,10 +243,10 @@ if __name__ == "__main__":
         values={"revision_feedback": ""},
     )
 
-    print("\n--- Running Phase 2 ---")
+    logger.info("--- Running Phase 2 ---")
     final_state_phase2 = app.invoke(
         None, config={"configurable": {"thread_id": "test_phase_1"}}
     )
 
-    print("\n--- Final Output State (Phase 2) ---")
-    print(final_state_phase2.get("testing_findings", "No findings generated."))
+    logger.info("--- Final Output State (Phase 2) ---")
+    logger.info(final_state_phase2.get("testing_findings", "No findings generated."))
