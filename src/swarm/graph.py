@@ -16,7 +16,7 @@ from swarm.auth.permissions import (
     PermissionDeniedError,
     validate_execution_permissions,
 )
-from swarm.state.schema import AuditState
+from swarm.state.schema import AuditFinding, AuditState
 from swarm.storage import get_checkpointer
 
 logger = logging.getLogger(__name__)
@@ -105,13 +105,13 @@ def run_all_workers_node(state: AuditState) -> dict:
             validate_execution_permissions({"role": "IT_AUDITOR"}, cid)
         except PermissionDeniedError as e:
             logger.warning("Permission blocked for control %s: %s", cid, e)
-            from swarm.state.schema import AuditFinding
-
             findings.append(
                 AuditFinding(
                     control_id=cid,
+                    agent_role="Permission Guardrail",
                     status="Fail",
                     justification=f"Execution blocked by DDD Identity Context Guardrail: {e}",
+                    evidence_extracted=[str(e)],
                     risk_rating="High",
                     tod_result="Fail",
                     toe_result="Fail",
