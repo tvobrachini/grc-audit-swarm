@@ -78,6 +78,9 @@ def run_control_test(
 
     llm = get_llm(temperature=0.3, prefer_fast=True)
     if llm is None:
+        print(
+            f"[Worker] WARNING: No LLM available for {control.control_id}. Results are SIMULATED, not real audit findings."
+        )
         return _emulate_finding(control)
 
     # Load skill context
@@ -89,6 +92,9 @@ def run_control_test(
     # Serialize procedures
     procs = control.procedures
     if not procs:
+        print(
+            f"[Worker] WARNING: No procedures found for {control.control_id}. Results are SIMULATED, not real audit findings."
+        )
         return _emulate_finding(control)
 
     evidence_summary = _get_evidence_for_control(control.control_id, state.evidence_log)
@@ -134,7 +140,9 @@ def run_control_test(
             substantive_result=result.substantive_result,
         )
     except Exception as e:
-        print(f"[Worker] LLM failed for {control.control_id}: {e}")
+        print(
+            f"[Worker] LLM failed for {control.control_id}: {e}. Results are SIMULATED, not real audit findings."
+        )
         return _emulate_finding(control)
 
 

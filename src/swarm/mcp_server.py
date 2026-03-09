@@ -15,6 +15,7 @@ def get_iam_password_policy() -> str:
             ["aws", "iam", "get-account-password-policy"],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return result.stdout
@@ -33,7 +34,7 @@ def list_iam_users_with_mfa() -> str:
     try:
         # Get users
         users_res = subprocess.run(
-            ["aws", "iam", "list-users"], capture_output=True, text=True
+            ["aws", "iam", "list-users"], capture_output=True, text=True, timeout=30
         )
         if users_res.returncode != 0:
             return f"Error listing users: {users_res.stderr}"
@@ -46,6 +47,7 @@ def list_iam_users_with_mfa() -> str:
                 ["aws", "iam", "list-mfa-devices", "--user-name", name],
                 capture_output=True,
                 text=True,
+                timeout=30,
             )
             has_mfa = (
                 "Yes"
@@ -66,7 +68,7 @@ def list_public_s3_buckets() -> str:
     print("[MCP Server] Tool called: list_public_s3_buckets")
     try:
         result = subprocess.run(
-            ["aws", "s3api", "list-buckets"], capture_output=True, text=True
+            ["aws", "s3api", "list-buckets"], capture_output=True, text=True, timeout=30
         )
         if result.returncode != 0:
             return f"Error: {result.stderr}"

@@ -10,6 +10,7 @@ Schema: { "thread_id": {"name": "...", "created_at": "...", "scope_preview": "..
 
 import json
 import os
+import tempfile
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -29,9 +30,14 @@ def _load() -> Dict:
 
 
 def _save(data: Dict) -> None:
-    os.makedirs(os.path.dirname(SESSIONS_PATH), exist_ok=True)
-    with open(SESSIONS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    dir_path = os.path.dirname(SESSIONS_PATH)
+    os.makedirs(dir_path, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", dir=dir_path, delete=False, suffix=".tmp", encoding="utf-8"
+    ) as tmp:
+        json.dump(data, tmp, indent=2)
+        tmp_path = tmp.name
+    os.replace(tmp_path, SESSIONS_PATH)
 
 
 def save_session(thread_id: str, name: str, scope_preview: str = "") -> None:

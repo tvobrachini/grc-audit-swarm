@@ -24,8 +24,11 @@ def get_scf_db_path() -> str:
         if os.path.exists(full_path):
             return full_path
 
-    # Fallback to the known main project path for local dev
-    return "/home/tvobrachini/Desktop/dev/scf-auto-crosswalker/data/scf_parsed.json"
+    # Fallback: configurable via env var, avoids hardcoded developer path
+    return os.environ.get(
+        "SCF_DATA_PATH",
+        os.path.normpath(os.path.join(current_dir, "../../data/scf_parsed.json")),
+    )
 
 
 # We design an internal Pydantic schema just for the LLM to output its mapping
