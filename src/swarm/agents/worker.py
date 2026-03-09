@@ -79,9 +79,9 @@ def run_control_test(
     llm = get_llm(temperature=0.3, prefer_fast=True)
     if llm is None:
         print(
-            f"[Worker] WARNING: No LLM available for {control.control_id}. Results are SIMULATED, not real audit findings."
+            f"[Worker] [SIMULATED] WARNING: No LLM available for {control.control_id}. Results are SIMULATED, not real audit findings."
         )
-        return _emulate_finding(control)
+        return _emulate_finding(control, human_context=human_context)
 
     # Load skill context
     skill_prompt = ""
@@ -93,9 +93,9 @@ def run_control_test(
     procs = control.procedures
     if not procs:
         print(
-            f"[Worker] WARNING: No procedures found for {control.control_id}. Results are SIMULATED, not real audit findings."
+            f"[Worker] [SIMULATED] WARNING: No procedures found for {control.control_id}. Results are SIMULATED, not real audit findings."
         )
-        return _emulate_finding(control)
+        return _emulate_finding(control, human_context=human_context)
 
     evidence_summary = _get_evidence_for_control(control.control_id, state.evidence_log)
     human_ctx_section = (
@@ -141,9 +141,9 @@ def run_control_test(
         )
     except Exception as e:
         print(
-            f"[Worker] LLM failed for {control.control_id}: {e}. Results are SIMULATED, not real audit findings."
+            f"[Worker] [SIMULATED] LLM failed for {control.control_id}: {e}. Results are SIMULATED, not real audit findings."
         )
-        return _emulate_finding(control)
+        return _emulate_finding(control, human_context=human_context)
 
 
 def _get_evidence_for_control(control_id: str, evidence_log: Dict[str, Any]) -> str:
@@ -210,10 +210,25 @@ def _mock_evidence(control_id: str) -> str:
     )
 
 
-def _emulate_finding(control: ControlMatrixItem) -> AuditFinding:
+def _emulate_finding(
+    control: ControlMatrixItem, human_context: str = ""
+) -> AuditFinding:
     """Mock finding generator for when no LLM is available."""
-    # Weighted random: 60% Pass, 25% Exception, 15% Fail
-    outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]  # nosec B311
+    # Domain rule: missing evidence must never silently pass.
+    # If the human auditor explicitly signals no evidence, return Exception — not Pass.
+    _no_evidence_signals = (
+        "no evidence",
+        "missing evidence",
+        "evidence is empty",
+        "no evidence provided",
+    )
+    if human_context and any(
+        sig in human_context.lower() for sig in _no_evidence_signals
+    ):
+        outcome = "Exception"
+    else:
+        # Weighted random: 60% Pass, 25% Exception, 15% Fail
+        outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]  # nosec B311
 
     # Use realistic mock evidence
 
