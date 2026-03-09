@@ -111,12 +111,22 @@ if not st.session_state.scope_submitted:
                         [p.extract_text() for p in pdf.pages if p.extract_text()]
                     )
             else:
-                scope_text = up.getvalue().decode("utf-8")
+                try:
+                    scope_text = up.getvalue().decode("utf-8")
+                except UnicodeDecodeError:
+                    st.error(
+                        "File encoding not supported. Please upload a UTF-8 encoded file."
+                    )
+                    scope_text = ""
         labs = lab_files(".txt")
         sel = st.selectbox("Or Lab Data", ["None"] + labs, key="scope_lab")
         if sel != "None" and not scope_text:
-            with open(os.path.join(LAB_DIR, sel), "r", encoding="utf-8") as f:
-                scope_text = f.read()
+            _resolved = os.path.realpath(os.path.join(LAB_DIR, sel))
+            if not _resolved.startswith(os.path.realpath(LAB_DIR) + os.sep):
+                st.error("Invalid file selection.")
+            else:
+                with open(_resolved, "r", encoding="utf-8") as f:
+                    scope_text = f.read()
     with colB:
         st.markdown("### 🔍 Preview")
         if scope_text:
