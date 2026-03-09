@@ -105,10 +105,10 @@ def run_all_workers_node(state: AuditState) -> dict:
             validate_execution_permissions({"role": "IT_AUDITOR"}, cid)
         except PermissionDeniedError as e:
             logger.warning("Permission blocked for control %s: %s", cid, e)
-            from swarm.state.schema import Finding
+            from swarm.state.schema import AuditFinding
 
             findings.append(
-                Finding(
+                AuditFinding(
                     control_id=cid,
                     status="Fail",
                     justification=f"Execution blocked by DDD Identity Context Guardrail: {e}",
