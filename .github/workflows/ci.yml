@@ -16,7 +16,7 @@ jobs:
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: "3.12"
+        python-version: "3.12.3"
 
     - name: Install dependencies
       run: |
@@ -33,11 +33,19 @@ jobs:
       run: |
         uv run bandit -c pyproject.toml -r .
 
+    - name: Type Check with Pyright
+      run: |
+        uv run pyright src/
+
     - name: Verify AI Guardrails and Agent Constraints (Pytest & BDD)
       env:
         PYTHONPATH: .
       run: |
-        uv run pytest tests/ -v
+        uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=60
+
+    - name: Dependency Vulnerability Scan (pip-audit)
+      run: |
+        uvx pip-audit
 
     - name: Verify Docker Container Build
       run: |
