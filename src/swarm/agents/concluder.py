@@ -6,12 +6,16 @@ Aggregates all AuditFindings, calculates the overall risk score,
 and drafts an Executive Summary paragraph for the findings dashboard.
 """
 
+import logging
+
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
 from swarm.state.schema import AuditState
 from swarm.llm_factory import get_llm
+
+logger = logging.getLogger(__name__)
 
 
 class ConcluderOutput(BaseModel):
@@ -41,8 +45,12 @@ def produce_executive_summary(state: AuditState) -> dict:
     fails = sum(1 for f in findings if f.status == "Fail")
     highs = sum(1 for f in findings if f.risk_rating == "High")
 
-    print(
-        f"[Concluder] Aggregating {total} findings: {passes} Pass, {exceptions} Exception, {fails} Fail"
+    logger.info(
+        "[Concluder] Aggregating %d findings: %d Pass, %d Exception, %d Fail",
+        total,
+        passes,
+        exceptions,
+        fails,
     )
 
     llm = get_llm(temperature=0.4, prefer_fast=True)
@@ -93,7 +101,7 @@ def produce_executive_summary(state: AuditState) -> dict:
         overall_risk = result.overall_risk_score
         summary = result.executive_summary
     except Exception as e:
-        print(f"[Concluder] LLM failed: {e}. Falling back to template.")
+        logger.warning("[Concluder] LLM failed. Falling back to template. Error: %s", e)
         return _emulate_summary(state, passes, exceptions, fails, highs)
 
     trail_entry = {

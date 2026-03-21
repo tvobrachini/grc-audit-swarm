@@ -1,5 +1,9 @@
+import logging
+
 from swarm.state.schema import AuditState
 from swarm.skill_loader import detect_skills_from_scope
+
+logger = logging.getLogger(__name__)
 
 # IMPORTANT: Future LLM configuration goes here.
 # For now, this is a placeholder function that simulates the structured JSON output
@@ -13,7 +17,9 @@ def analyze_scope_and_themes(state: AuditState) -> dict:
     """
     scope_text = state.audit_scope_narrative
 
-    print(f"[Orchestrator] Mining risk themes from scope: '{scope_text[:80]}...'")
+    logger.info(
+        "[Orchestrator] Mining risk themes from scope: '%s...'", scope_text[:80]
+    )
 
     themes = []
     roles = []
@@ -51,7 +57,7 @@ def analyze_scope_and_themes(state: AuditState) -> dict:
     matched_skills = detect_skills_from_scope(scope_text)
     skill_ids = [s.get("id", "") for s in matched_skills]
     skill_names = [s.get("name", "") for s in matched_skills]
-    print(f"[Orchestrator] Matched skills: {', '.join(skill_names) or 'None'}")
+    logger.info("[Orchestrator] Matched skills: %s", ", ".join(skill_names) or "None")
 
     return {
         "risk_themes": themes,

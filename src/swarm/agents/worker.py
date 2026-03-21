@@ -10,6 +10,7 @@ In LLM mode:  reasons against evidence using the loaded skill system prompt.
 """
 
 import hashlib
+import logging
 from typing import List, Dict
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,8 @@ from swarm.evidence import ControlEvidence, serialize_control_evidence
 from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem
 from swarm.llm_factory import get_llm
 from swarm.skill_loader import get_skill_by_id, get_specialist_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerFindingOutput(BaseModel):
@@ -75,12 +78,13 @@ def run_control_test(
     Execute all test procedures for a single control.
     Returns an AuditFinding with full results.
     """
-    print(f"[Worker] Testing control: {control.control_id} ({control.domain})")
+    logger.info("[Worker] Testing control: %s (%s)", control.control_id, control.domain)
 
     llm = get_llm(temperature=0.3, prefer_fast=True)
     if llm is None:
-        print(
-            f"[Worker] [SIMULATED] WARNING: No LLM available for {control.control_id}. Results are SIMULATED, not real audit findings."
+        logger.warning(
+            "[Worker] [SIMULATED] No LLM available for %s. Results are simulated.",
+            control.control_id,
         )
         return _emulate_finding(control, human_context=human_context)
 
@@ -93,8 +97,9 @@ def run_control_test(
     # Serialize procedures
     procs = control.procedures
     if not procs:
-        print(
-            f"[Worker] [SIMULATED] WARNING: No procedures found for {control.control_id}. Results are SIMULATED, not real audit findings."
+        logger.warning(
+            "[Worker] [SIMULATED] No procedures found for %s. Results are simulated.",
+            control.control_id,
         )
         return _emulate_finding(control, human_context=human_context)
 
@@ -141,8 +146,10 @@ def run_control_test(
             substantive_result=result.substantive_result,
         )
     except Exception as e:
-        print(
-            f"[Worker] [SIMULATED] LLM failed for {control.control_id}: {e}. Results are SIMULATED, not real audit findings."
+        logger.warning(
+            "[Worker] [SIMULATED] LLM failed for %s: %s. Results are simulated.",
+            control.control_id,
+            e,
         )
         return _emulate_finding(control, human_context=human_context)
 

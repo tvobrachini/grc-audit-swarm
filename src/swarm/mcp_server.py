@@ -1,6 +1,9 @@
+import logging
 import subprocess
 import json
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 # Define the Audit MCP Server
 mcp = FastMCP("AWS-Audit-Agent")
@@ -9,7 +12,7 @@ mcp = FastMCP("AWS-Audit-Agent")
 @mcp.tool()
 def get_iam_password_policy() -> str:
     """Fetches the AWS IAM account password policy. Essential for AC-01 audit."""
-    print("[MCP Server] Tool called: get_iam_password_policy")
+    logger.info("[MCP Server] Tool called: get_iam_password_policy")
     try:
         result = subprocess.run(
             ["aws", "iam", "get-account-password-policy"],
@@ -30,7 +33,7 @@ def get_iam_password_policy() -> str:
 @mcp.tool()
 def list_iam_users_with_mfa() -> str:
     """Lists IAM users and indicates if MFA is enabled. Essential for AC-02 audit."""
-    print("[MCP Server] Tool called: list_iam_users_with_mfa")
+    logger.info("[MCP Server] Tool called: list_iam_users_with_mfa")
     try:
         # Get users
         users_res = subprocess.run(
@@ -65,7 +68,7 @@ def list_iam_users_with_mfa() -> str:
 @mcp.tool()
 def list_public_s3_buckets() -> str:
     """Checks for S3 buckets that might have public access. Essential for CLD-10 audit."""
-    print("[MCP Server] Tool called: list_public_s3_buckets")
+    logger.info("[MCP Server] Tool called: list_public_s3_buckets")
     try:
         result = subprocess.run(
             ["aws", "s3api", "list-buckets"], capture_output=True, text=True, timeout=30

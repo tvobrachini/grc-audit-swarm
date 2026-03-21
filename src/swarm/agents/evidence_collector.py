@@ -1,6 +1,7 @@
 import asyncio
-import os
 import json
+import logging
+import os
 import re
 from typing import Dict, Any
 from mcp import ClientSession, StdioServerParameters
@@ -9,6 +10,8 @@ from dotenv import load_dotenv
 
 from swarm.evidence import ControlEvidence, ToolEvidence
 from swarm.state.schema import AuditState
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -41,8 +44,8 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
     LangGraph Node: Evidence Collector (Local MCP version)
     Connects to the local Python MCP server and pulls real evidence.
     """
-    print(
-        "\n[Evidence Collector] starting live AWS data gathering via Local MCP sidecar..."
+    logger.info(
+        "[Evidence Collector] Starting live AWS data gathering via Local MCP sidecar..."
     )
 
     # Define local server parameters
@@ -66,14 +69,18 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
                     if prefix in AUDIT_TOOL_MAP:
                         domains_to_scan.add(prefix)
 
-                print(
-                    f"[Evidence Collector] Detected {len(domains_to_scan)} domains to scan: {domains_to_scan}"
+                logger.info(
+                    "[Evidence Collector] Detected %d domains to scan: %s",
+                    len(domains_to_scan),
+                    domains_to_scan,
                 )
 
                 for prefix in domains_to_scan:
                     tool_names = AUDIT_TOOL_MAP[prefix]
                     for tool_name in tool_names:
-                        print(f"  -> Calling MCP Tool: {tool_name}...")
+                        logger.info(
+                            "[Evidence Collector] Calling MCP tool: %s", tool_name
+                        )
 
                         try:
                             result = await session.call_tool(tool_name)
@@ -91,7 +98,11 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
                                     )
 
                         except Exception as tool_err:
-                            print(f"  ! Tool call failed for {tool_name}: {tool_err}")
+                            logger.warning(
+                                "[Evidence Collector] Tool call failed for %s: %s",
+                                tool_name,
+                                tool_err,
+                            )
                             _store_tool_evidence(
                                 evidence_updates,
                                 prefix,
@@ -100,7 +111,10 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
                             )
 
     except Exception as e:
-        print(f"❌ Critical error in Local MCP Evidence Collector: {e}")
+        logger.warning(
+            "[Evidence Collector] Critical error in local MCP evidence collector: %s",
+            e,
+        )
 
     # Merge updates into the state evidence log
     new_log = state.evidence_log.copy()

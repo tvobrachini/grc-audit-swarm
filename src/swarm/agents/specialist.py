@@ -1,3 +1,4 @@
+import logging
 from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -6,6 +7,8 @@ from pydantic import BaseModel, Field
 from swarm.state.schema import AuditState
 from swarm.llm_factory import get_llm
 from swarm.skill_loader import get_skill_by_id, get_specialist_prompt
+
+logger = logging.getLogger(__name__)
 
 
 class EnhancedProcedureOutput(BaseModel):
@@ -32,16 +35,19 @@ def inject_specialist_tests(state: AuditState) -> dict:
     roles = state.specialist_roles_required
     if not roles or "IT General Auditor" in roles:
         # If it's just a general ITGC, we don't necessarily need hyper-specific injection
-        print("[Specialist] No hyper-specific specialist required for this scope.")
+        logger.info(
+            "[Specialist] No hyper-specific specialist required for this scope."
+        )
         return {}
 
-    print(
-        f"[Specialist] {', '.join(roles)} injecting specific tests into baseline matrix..."
+    logger.info(
+        "[Specialist] %s injecting specific tests into baseline matrix...",
+        ", ".join(roles),
     )
 
     llm = get_llm(temperature=0.2)
     if llm is None:
-        print("[Specialist] No LLM available. Emulating logic.")
+        logger.warning("[Specialist] No LLM available. Emulating logic.")
         return _emulate_specialist(state)
 
     # ─── Load Skill System Prompt ───────────────────────────────────────────────
@@ -52,8 +58,9 @@ def inject_specialist_tests(state: AuditState) -> dict:
             s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))
         ]
         skill_system_prompt = get_specialist_prompt(loaded_skills)
-        print(
-            f"[Specialist] Loaded skill prompts: {', '.join(state.active_skill_names)}"
+        logger.info(
+            "[Specialist] Loaded skill prompts: %s",
+            ", ".join(state.active_skill_names),
         )
     else:
         skill_system_prompt = (
@@ -61,7 +68,7 @@ def inject_specialist_tests(state: AuditState) -> dict:
             "Enhance the provided audit procedures with highly technical, domain-specific checks. "
             "Do not write generic procedures — write exactly what a specialist in this domain would check."
         )
-        print("[Specialist] No skills loaded, using role-based prompt.")
+        logger.info("[Specialist] No skills loaded, using role-based prompt.")
 
     specialist_prompt = ChatPromptTemplate.from_messages(
         [
@@ -96,7 +103,7 @@ def inject_specialist_tests(state: AuditState) -> dict:
             continue
 
         try:
-            print(f"  -> Enhancing procedure for {item.control_id}...")
+            logger.info("[Specialist] Enhancing procedure for %s...", item.control_id)
             result = enhancer_chain.invoke(
                 {
                     "control_id": item.control_id,
@@ -116,7 +123,7 @@ def inject_specialist_tests(state: AuditState) -> dict:
             item.procedures.erl_items = result.erl_items
 
         except Exception as e:
-            print(f"[Specialist] Failed to enhance {item.control_id}: {e}")
+            logger.warning("[Specialist] Failed to enhance %s: %s", item.control_id, e)
 
         enhanced_matrix.append(item)
 
@@ -195,7 +202,7 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
 
     failed = [f for f in findings if f.status in ("Fail", "Exception")]
     if not failed:
-        print("[Phase2 Specialist] No failures found — no annotation needed.")
+        logger.info("[Phase2 Specialist] No failures found — no annotation needed.")
         return {
             "audit_trail": state.audit_trail
             + [
@@ -208,8 +215,9 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
             ]
         }
 
-    print(
-        f"[Phase2 Specialist] Annotating {len(failed)} failed/exception findings with specialist context..."
+    logger.info(
+        "[Phase2 Specialist] Annotating %d failed/exception findings with specialist context...",
+        len(failed),
     )
 
     llm = get_llm(temperature=0.1, prefer_fast=True)
@@ -280,10 +288,15 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
                     )
                 }
             )
-            print(f"  ✓ Annotated {finding.control_id} with specialist context")
+            logger.info(
+                "[Phase2 Specialist] Annotated %s with specialist context",
+                finding.control_id,
+            )
         except Exception as e:
-            print(
-                f"[Phase2 Specialist] Annotation failed for {finding.control_id}: {e}"
+            logger.warning(
+                "[Phase2 Specialist] Annotation failed for %s: %s",
+                finding.control_id,
+                e,
             )
 
     return {
