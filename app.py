@@ -18,7 +18,14 @@ load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.graph import app as swarm_app  # noqa: E402
+from swarm.review_actions import (  # noqa: E402
+    flag_control_for_finding,
+    mark_control_clean,
+    request_control_rerun,
+    submit_phase2_feedback,
+)
 from swarm.session_manager import save_session, update_session  # noqa: E402
+from swarm.session_sync import append_chat_message, build_session_update  # noqa: E402
 
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
@@ -63,21 +70,18 @@ def step_badge(result):
     return icons.get(result, result)
 
 
-def _merge_state_map(current, updates):
-    merged = dict(current or {})
-    merged.update(updates)
-    return merged
-
-
 def _append_chat_message(role: str, content: str, reasoning=None):
-    message = {"role": role, "content": content}
-    if reasoning:
-        message["reasoning"] = reasoning
-    st.session_state.chat_history.append(message)
+    st.session_state.chat_history = append_chat_message(
+        st.session_state.chat_history,
+        role,
+        content,
+        reasoning=reasoning,
+    )
     update_session(
         st.session_state.thread_id,
-        chat_history=st.session_state.chat_history,
-        scope_text=st.session_state.scope_text_cache,
+        **build_session_update(
+            st.session_state.scope_text_cache, st.session_state.chat_history
+        ),
     )
 
 
@@ -483,26 +487,25 @@ else:
                 # Quick action buttons
                 col_a, col_b, col_c = st.columns(3)
                 if col_a.button("✅ Mark Clean", key=f"clean_{cid}"):
-                    merged_status = _merge_state_map(
-                        state_vals.get("execution_status"), {cid: "clean"}
-                    )
-                    swarm_app.update_state(config, {"execution_status": merged_status})
-                    st.rerun()
-                if col_b.button("🚩 Flag as Finding", key=f"flag_{cid}"):
-                    merged_status = _merge_state_map(
-                        state_vals.get("execution_status"), {cid: "flagged"}
-                    )
-                    swarm_app.update_state(config, {"execution_status": merged_status})
-                    st.rerun()
-                if col_c.button("🔁 Re-test with My Context", key=f"retest_{cid}"):
-                    merged_feedback = _merge_state_map(
-                        state_vals.get("control_feedback"), {cid: new_fb}
-                    )
                     swarm_app.update_state(
                         config,
-                        {
-                            "control_feedback": merged_feedback,
-                        },
+                        mark_control_clean(state_vals.get("execution_status"), cid),
+                    )
+                    st.rerun()
+                if col_b.button("🚩 Flag as Finding", key=f"flag_{cid}"):
+                    swarm_app.update_state(
+                        config,
+                        flag_control_for_finding(
+                            state_vals.get("execution_status"), cid
+                        ),
+                    )
+                    st.rerun()
+                if col_c.button("🔁 Re-test with My Context", key=f"retest_{cid}"):
+                    swarm_app.update_state(
+                        config,
+                        request_control_rerun(
+                            state_vals.get("control_feedback"), cid, new_fb
+                        ),
                     )
                     st.session_state.resume_swarm = True
                     st.rerun()
@@ -523,9 +526,7 @@ else:
                 ):
                     swarm_app.update_state(
                         config,
-                        {
-                            "control_feedback": st.session_state.control_feedback,
-                        },
+                        submit_phase2_feedback(st.session_state.control_feedback),
                     )
                     _append_chat_message(
                         "user",
