@@ -148,6 +148,6 @@ def test_prompt_eval_llm_as_judge(scenario):
     print(f"[Eval] Judge Reasoning: {grade.reasoning}")
 
     # 3. ASSERT: Catch regressions
-    assert (
-        grade.passed
-    ), f"Prompt Regression Detected! Score: {grade.score}. Reason: {grade.reasoning}"
+    assert grade.passed, (
+        f"Prompt Regression Detected! Score: {grade.score}. Reason: {grade.reasoning}"
+    )
