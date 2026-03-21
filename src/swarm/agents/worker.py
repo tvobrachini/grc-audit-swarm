@@ -9,9 +9,10 @@ In mock mode: generates realistic simulated findings.
 In LLM mode:  reasons against evidence using the loaded skill system prompt.
 """
 
+from dataclasses import dataclass
 import hashlib
 import logging
-from typing import List, Dict
+from typing import Any, Dict, List, Protocol
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -71,6 +72,102 @@ Available Evidence:
 Execute these tests against the evidence and return your finding."""
 
 
+class WorkerAdapter(Protocol):
+    def run(
+        self, control: ControlMatrixItem, state: AuditState, human_context: str = ""
+    ) -> AuditFinding: ...
+
+
+@dataclass
+class MockWorkerAdapter:
+    reason: str
+
+    def run(
+        self, control: ControlMatrixItem, state: AuditState, human_context: str = ""
+    ) -> AuditFinding:
+        logger.warning("%s", self.reason)
+        return _emulate_finding(control, human_context=human_context)
+
+
+@dataclass
+class LiveWorkerAdapter:
+    llm: Any
+    skill_prompt: str
+
+    def run(
+        self, control: ControlMatrixItem, state: AuditState, human_context: str = ""
+    ) -> AuditFinding:
+        procs = control.procedures
+        if not procs:
+            return MockWorkerAdapter(
+                f"[Worker] [SIMULATED] No procedures found for {control.control_id}. Results are simulated."
+            ).run(control, state, human_context=human_context)
+
+        evidence_summary = _get_evidence_for_control(
+            control.control_id, state.evidence_log
+        )
+        human_ctx_section = (
+            f"\n\nAdditional human auditor context:\n{human_context}"
+            if human_context
+            else ""
+        )
+
+        worker_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", WORKER_SYSTEM_PROMPT),
+                ("human", WORKER_HUMAN_PROMPT),
+            ]
+        )
+
+        chain = worker_prompt | self.llm.with_structured_output(WorkerFindingOutput)
+
+        try:
+            result = chain.invoke(
+                {
+                    "control_id": control.control_id,
+                    "domain": control.domain,
+                    "description": control.description,
+                    "tod": "\n".join(procs.tod_steps),
+                    "toe": "\n".join(procs.toe_steps),
+                    "sub": "\n".join(procs.substantive_steps),
+                    "evidence": evidence_summary,
+                    "skill_prompt": self.skill_prompt,
+                    "human_ctx_section": human_ctx_section,
+                }
+            )
+
+            return AuditFinding(
+                control_id=control.control_id,
+                agent_role=f"Execution Worker ({control.domain})",
+                status=result.status,
+                justification=result.justification,
+                evidence_extracted=result.evidence_extracted,
+                risk_rating=result.risk_rating if result.status != "Pass" else None,
+                tod_result=result.tod_result,
+                toe_result=result.toe_result,
+                substantive_result=result.substantive_result,
+            )
+        except Exception as e:
+            return MockWorkerAdapter(
+                f"[Worker] [SIMULATED] LLM failed for {control.control_id}: {e}. Results are simulated."
+            ).run(control, state, human_context=human_context)
+
+
+def build_worker_adapter(state: AuditState) -> WorkerAdapter:
+    llm = get_llm(temperature=0.3, prefer_fast=True)
+    if llm is None:
+        return MockWorkerAdapter(
+            "[Worker] [SIMULATED] No LLM available. Results are simulated."
+        )
+
+    skill_prompt = ""
+    if state.active_skill_ids:
+        skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
+        skill_prompt = get_specialist_prompt(skills)
+
+    return LiveWorkerAdapter(llm=llm, skill_prompt=skill_prompt)
+
+
 def run_control_test(
     control: ControlMatrixItem, state: AuditState, human_context: str = ""
 ) -> AuditFinding:
@@ -79,79 +176,7 @@ def run_control_test(
     Returns an AuditFinding with full results.
     """
     logger.info("[Worker] Testing control: %s (%s)", control.control_id, control.domain)
-
-    llm = get_llm(temperature=0.3, prefer_fast=True)
-    if llm is None:
-        logger.warning(
-            "[Worker] [SIMULATED] No LLM available for %s. Results are simulated.",
-            control.control_id,
-        )
-        return _emulate_finding(control, human_context=human_context)
-
-    # Load skill context
-    skill_prompt = ""
-    if state.active_skill_ids:
-        skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
-        skill_prompt = get_specialist_prompt(skills)
-
-    # Serialize procedures
-    procs = control.procedures
-    if not procs:
-        logger.warning(
-            "[Worker] [SIMULATED] No procedures found for %s. Results are simulated.",
-            control.control_id,
-        )
-        return _emulate_finding(control, human_context=human_context)
-
-    evidence_summary = _get_evidence_for_control(control.control_id, state.evidence_log)
-    human_ctx_section = (
-        f"\n\nAdditional human auditor context:\n{human_context}"
-        if human_context
-        else ""
-    )
-
-    worker_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", WORKER_SYSTEM_PROMPT),
-            ("human", WORKER_HUMAN_PROMPT),
-        ]
-    )
-
-    chain = worker_prompt | llm.with_structured_output(WorkerFindingOutput)
-
-    try:
-        result = chain.invoke(
-            {
-                "control_id": control.control_id,
-                "domain": control.domain,
-                "description": control.description,
-                "tod": "\n".join(procs.tod_steps),
-                "toe": "\n".join(procs.toe_steps),
-                "sub": "\n".join(procs.substantive_steps),
-                "evidence": evidence_summary,
-                "skill_prompt": skill_prompt,
-                "human_ctx_section": human_ctx_section,
-            }
-        )
-
-        return AuditFinding(
-            control_id=control.control_id,
-            agent_role=f"Execution Worker ({control.domain})",
-            status=result.status,
-            justification=result.justification,
-            evidence_extracted=result.evidence_extracted,
-            risk_rating=result.risk_rating if result.status != "Pass" else None,
-            tod_result=result.tod_result,
-            toe_result=result.toe_result,
-            substantive_result=result.substantive_result,
-        )
-    except Exception as e:
-        logger.warning(
-            "[Worker] [SIMULATED] LLM failed for %s: %s. Results are simulated.",
-            control.control_id,
-            e,
-        )
-        return _emulate_finding(control, human_context=human_context)
+    return build_worker_adapter(state).run(control, state, human_context=human_context)
 
 
 def _get_evidence_for_control(
