@@ -1,40 +1,29 @@
+import json
 import logging
 import os
-import json
+from pathlib import Path
 from typing import List
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
 from swarm.runtime_adapters import build_llm_adapter
+from swarm.state.schema import AuditProcedure, AuditState, ControlMatrixItem
 
 logger = logging.getLogger(__name__)
 
+# Resolve the SCF database path relative to this file — works regardless of cwd
+_THIS_DIR = Path(__file__).resolve().parent
+_DEFAULT_SCF_PATH = _THIS_DIR.parent.parent.parent / "data" / "scf_parsed.json"
 
-# Helper function to get the SCF database path
+
 def get_scf_db_path() -> str:
-    # Try different relative paths based on where this script is executed from
-    possible_paths = [
-        "../../data/scf_parsed.json",  # From scf-langgraph-swarm/src/agents
-        "../data/scf_parsed.json",  # From main src/agents (future state)
-        "data/scf_parsed.json",  # From root
-    ]
-
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    for path in possible_paths:
-        full_path = os.path.normpath(os.path.join(current_dir, path))
-        if os.path.exists(full_path):
-            return full_path
-
-    # Fallback: configurable via env var, avoids hardcoded developer path
-    return os.environ.get(
-        "SCF_DATA_PATH",
-        os.path.normpath(os.path.join(current_dir, "../../data/scf_parsed.json")),
-    )
+    env_path = os.environ.get("SCF_DATA_PATH")
+    if env_path:
+        return env_path
+    return str(_DEFAULT_SCF_PATH)
 
 
-# We design an internal Pydantic schema just for the LLM to output its mapping
 class ScfMappingOutput(BaseModel):
     selected_control_ids: List[str] = Field(
         description="List of exact SCF Control IDs (e.g. 'AC-01', 'CRY-02') that best map to the provided risk themes."
@@ -64,57 +53,46 @@ class AuditProcedureOutput(BaseModel):
 
 def map_controls_and_design_tests(state: AuditState) -> dict:
     """
-    Agent 2 & 3 (Control Mapper):
-    Phase 2a: Pulls generic controls from SCF based on Orchestrator's risk themes.
+    Control Mapper:
+    Phase 2a: Pulls relevant controls from SCF based on Orchestrator's risk themes.
     Phase 2b: Designs baseline test procedures for those controls.
+    Incorporates Challenger QA feedback when revising after a rejection.
     """
-    logger.info("[Mapper] Analyzing risk themes: %s", ", ".join(state.risk_themes))
+    logger.info("[Mapper] Analysing risk themes: %s", ", ".join(state.risk_themes))
 
-    # Ensure API Key
-    if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
-        logger.warning("[Mapper] No API keys found. Emulating logic.")
-        return _emulate_mapping(state)
-
-    # In a real environment, we'd use LangChain here.
     runtime = build_llm_adapter(temperature=0)
     if not runtime.is_live:
         logger.warning("[Mapper] %s Emulating logic.", runtime.reason)
         return _emulate_mapping(state)
     llm = runtime.llm
-    assert llm is not None
-
-    # --- Phase 2a: Control Retrieval (Simulated RAG/Search) ---
-    # In a full production system, we would embed the 1100+ SCF controls and do a vector search.
-    # For this swarm phase, we'll do a keyword-based heuristic chunking of the JSON database
-    # to provide a manageable context to the LLM.
+    if llm is None:
+        return _emulate_mapping(state)
 
     scf_path = get_scf_db_path()
     try:
-        with open(scf_path, "r", encoding="utf-8") as f:
+        with open(scf_path, encoding="utf-8") as f:
             scf_db = json.load(f)
     except FileNotFoundError:
         logger.warning("[Mapper] SCF database not found at %s. Emulating.", scf_path)
         return _emulate_mapping(state)
 
-    # Heuristic filtering: find controls whose domain or description matches the risk themes somewhat
+    # Heuristic filtering: score controls against risk themes
     themes_lower = " ".join(state.risk_themes).lower()
     candidate_controls = []
 
     for control in scf_db:
-        # Score the control against the themes (very naive heuristic)
         score = 0
         desc_lower = control.get("description", "").lower()
         domain_lower = control.get("domain", "").lower()
 
-        for theme_word in themes_lower.split():
-            if len(theme_word) > 3:  # Ignore short words
-                if theme_word in desc_lower:
+        for word in themes_lower.split():
+            if len(word) > 3:
+                if word in desc_lower:
                     score += 1
-                if theme_word in domain_lower:
+                if word in domain_lower:
                     score += 2
 
         if score > 0:
-            # Keep a summary to send to the LLM
             candidate_controls.append(
                 {
                     "id": control["control_id"],
@@ -124,15 +102,13 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
                 }
             )
 
-    # Sort and take top 20 candidates to avoid blowing up context window
     candidate_controls.sort(key=lambda x: x["score"], reverse=True)
     top_candidates = candidate_controls[:20]
 
     if not top_candidates:
-        logger.info("[Mapper] RAG heuristic found no matches. Defaulting.")
+        logger.info("[Mapper] No heuristic matches found. Defaulting to emulation.")
         return _emulate_mapping(state)
 
-    # Format context for LLM
     context_str = "\n".join(
         [
             f"- {c['id']} ({c['domain']}): {c['description'][:100]}..."
@@ -140,21 +116,38 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
         ]
     )
 
+    # Include Challenger QA feedback when re-mapping after a revision cycle
+    challenger_note = ""
+    if state.challenger_feedback:
+        challenger_note = (
+            f"\n\nQA Challenger feedback from previous review cycle — "
+            f"address these specific gaps when selecting controls:\n{state.challenger_feedback}"
+        )
+        logger.info(
+            "[Mapper] Incorporating Challenger feedback into control selection."
+        )
+
     mapping_prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
-                "You are an expert IT Auditor. Map the identified risk themes and real-world Risk Context 1-Pager to the most relevant controls from the provided framework candidate list. Select up to 3 core controls that directly address the citations/breaches mentioned. DO NOT just select vaguely related ones; anchor them to the real-world context.",
+                "You are an expert IT Auditor. Map the identified risk themes and real-world Risk Context "
+                "1-Pager to the most relevant controls from the provided framework candidate list. "
+                "Select up to 3 core controls that directly address the citations/breaches mentioned. "
+                "DO NOT select vaguely related controls — anchor them to the real-world risk context.",
             ),
             (
                 "human",
-                "Risk Themes: {themes}\n\n1-Pager Risk Context:\n{risk_context}\n\nCandidate Controls:\n{context}\n\nSelect the best controls to audit.",
+                "Risk Themes: {themes}\n\n"
+                "1-Pager Risk Context:\n{risk_context}\n\n"
+                "Candidate Controls:\n{context}"
+                "{challenger_note}\n\n"
+                "Select the best controls to audit.",
             ),
         ]
     )
 
-    structured_mapper = llm.with_structured_output(ScfMappingOutput)
-    mapper_chain = mapping_prompt | structured_mapper
+    mapper_chain = mapping_prompt | llm.with_structured_output(ScfMappingOutput)
 
     logger.info("[Mapper] Asking LLM to select from candidate controls...")
     try:
@@ -163,37 +156,38 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
                 "themes": ", ".join(state.risk_themes),
                 "risk_context": state.risk_context_document,
                 "context": context_str,
+                "challenger_note": challenger_note,
             }
         )
         selected_ids = mapping_result.selected_control_ids
         justification = mapping_result.mapping_justification
-    except Exception as e:
-        logger.warning("[Mapper] LLM mapping failed. Emulating. Error: %s", e)
+    except Exception as exc:
+        logger.warning("[Mapper] LLM mapping failed: %s. Emulating.", exc)
         return _emulate_mapping(state)
 
-    # Retrieve full definitions for selected controls
     selected_full_controls = [c for c in scf_db if c["control_id"] in selected_ids]
 
-    # --- Phase 2b: Test Design ---
+    # Phase 2b: Design procedures for each selected control
     design_prompt = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
-                "You are a Senior IT Auditor. Design detailed audit procedures (TOD, TOE, Substantive, and ERL) for the provided baseline IT control. Be specific and tactical.",
+                "You are a Senior IT Auditor. Design detailed audit procedures "
+                "(TOD, TOE, Substantive, and ERL) for the provided baseline IT control. "
+                "Be specific and tactical.",
             ),
             (
                 "human",
-                "Design an Audit Procedure for this control:\nID: {control_id}\nDomain: {domain}\nDescription: {description}",
+                "Design an Audit Procedure for this control:\n"
+                "ID: {control_id}\nDomain: {domain}\nDescription: {description}",
             ),
         ]
     )
 
-    structured_designer = llm.with_structured_output(AuditProcedureOutput)
-    designer_chain = design_prompt | structured_designer
-
+    designer_chain = design_prompt | llm.with_structured_output(AuditProcedureOutput)
     control_matrix = []
 
-    logger.info("[Mapper] Asking LLM to design baseline audit procedures...")
+    logger.info("[Mapper] Designing baseline audit procedures...")
     for control in selected_full_controls:
         try:
             procedure_result = designer_chain.invoke(
@@ -204,49 +198,45 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
                 }
             )
 
-            matrix_item = ControlMatrixItem(
-                control_id=control["control_id"],
-                domain=control["domain"],
-                description=control["description"],
-                procedures=AuditProcedure(
-                    control_id=procedure_result.control_id,
-                    tod_steps=procedure_result.tod_steps,
-                    toe_steps=procedure_result.toe_steps,
-                    substantive_steps=procedure_result.substantive_steps,
-                    erl_items=procedure_result.erl_items,
-                ),
+            control_matrix.append(
+                ControlMatrixItem(
+                    control_id=control["control_id"],
+                    domain=control["domain"],
+                    description=control["description"],
+                    procedures=AuditProcedure(
+                        control_id=procedure_result.control_id,
+                        tod_steps=procedure_result.tod_steps,
+                        toe_steps=procedure_result.toe_steps,
+                        substantive_steps=procedure_result.substantive_steps,
+                        erl_items=procedure_result.erl_items,
+                    ),
+                )
             )
-            control_matrix.append(matrix_item)
-
-        except Exception as e:
+        except Exception as exc:
             logger.warning(
-                "[Mapper] LLM procedure design failed for %s: %s",
+                "[Mapper] Procedure design failed for %s: %s — skipping.",
                 control["control_id"],
-                e,
+                exc,
             )
-            # Do not append if failed, skip to next
 
-    # Log Actions
+    if not control_matrix:
+        logger.warning("[Mapper] Matrix empty after processing. Falling back.")
+        return _emulate_mapping(state)
+
     audit_trail_entries = [
         {
-            "agent_or_user_id": "Agent 2 (Control Mapper)",
-            "action_taken": f"Selected {len(selected_full_controls)} baseline SCF controls.",
+            "agent_or_user_id": "Control Mapper",
+            "action_taken": f"Selected {len(selected_full_controls)} SCF controls.",
             "reasoning_snapshot": justification,
             "approval_status": "Auto-Approved",
         },
         {
-            "agent_or_user_id": "Agent 3 (Procedure Designer)",
-            "action_taken": "Designed baseline audit procedures for the selected controls.",
-            "reasoning_snapshot": "Based on standard ISACA IT Audit frameworks and SCF control descriptions.",
+            "agent_or_user_id": "Procedure Designer",
+            "action_taken": "Designed baseline audit procedures for selected controls.",
+            "reasoning_snapshot": "Based on ISACA IT Audit frameworks and SCF control descriptions.",
             "approval_status": "Auto-Approved",
         },
     ]
-
-    if not control_matrix:
-        logger.warning(
-            "[Mapper] Matrix empty after processing, falling back to emulation."
-        )
-        return _emulate_mapping(state)
 
     logger.info("[Mapper] Complete. Designed initial control matrix.")
     return {
@@ -258,7 +248,6 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
 def _emulate_mapping(state: AuditState) -> dict:
     """Fallback logic when no API key is present or LLM call fails."""
     themes = state.risk_themes
-
     matrix = []
 
     if "AWS Cloud Infrastructure" in themes:
@@ -314,7 +303,7 @@ def _emulate_mapping(state: AuditState) -> dict:
                 procedures=AuditProcedure(
                     control_id="LOG-04",
                     tod_steps=[
-                        "Analyze Logging Strategy Document for Cloud Trail requirements."
+                        "Analyse Logging Strategy Document for CloudTrail requirements."
                     ],
                     toe_steps=[
                         "Ensure AWS CloudTrail is enabled on all regions and log file validation is ON."
@@ -389,7 +378,7 @@ def _emulate_mapping(state: AuditState) -> dict:
                 ),
             )
         )
-    else:  # ITGC
+    else:  # ITGC default
         matrix.append(
             ControlMatrixItem(
                 control_id="AC-03",
@@ -401,7 +390,7 @@ def _emulate_mapping(state: AuditState) -> dict:
                         "Review Access Management Policy for quarterly review requirements."
                     ],
                     toe_steps=[
-                        "Inspect the last 2 quarters documented access reviews for completion (signed off by managers)."
+                        "Inspect the last 2 quarters documented access reviews for completion."
                     ],
                     substantive_steps=[
                         "Sample 10 random active AD users and trace back to their access review approval."
@@ -454,7 +443,7 @@ def _emulate_mapping(state: AuditState) -> dict:
 
     audit_trail_entries = [
         {
-            "agent_or_user_id": "Agent 2/3 (Mapper/Designer Mock)",
+            "agent_or_user_id": "Control Mapper (Mock)",
             "action_taken": "Mocked baseline control mapping and procedure design.",
             "reasoning_snapshot": f"Based on themes: {themes}",
             "approval_status": "Auto-Approved",

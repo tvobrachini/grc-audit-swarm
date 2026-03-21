@@ -110,9 +110,15 @@ class AuditState(BaseModel):
     executive_summary: str = Field(default="")
 
     # Cross-Phase State & Feedback Loop
+    # challenger_feedback: set by the Challenger QA agent; routes back to control_mapper
+    challenger_feedback: str = Field(
+        default="",
+        description="QA feedback from the Challenger agent requesting a revision of the control matrix.",
+    )
+    # revision_feedback: set by the human at Phase 1 review; routes back to researcher
     revision_feedback: str = Field(
         default="",
-        description="Instructions from the Human or the Challenger to revise the current artifact.",
+        description="Instructions from the Human auditor to revise planning artifacts.",
     )
     revision_count: int = Field(
         default=0,
