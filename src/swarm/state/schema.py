@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from swarm.evidence import ControlEvidence
 from swarm.workflow_types import ExecutionStatus
@@ -124,3 +124,27 @@ class AuditState(BaseModel):
         default_factory=list,
         description="Immutable log of all system and human actions.",
     )
+
+    @staticmethod
+    def _coerce_model_value(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            return value.model_dump()
+        return value
+
+    @classmethod
+    def _coerce_model_list(cls, values: Any) -> Any:
+        if not isinstance(values, list):
+            return values
+        return [cls._coerce_model_value(item) for item in values]
+
+    @field_validator("control_matrix", "testing_findings", "audit_trail", mode="before")
+    @classmethod
+    def _coerce_legacy_model_lists(cls, values: Any) -> Any:
+        return cls._coerce_model_list(values)
+
+    @field_validator("evidence_log", mode="before")
+    @classmethod
+    def _coerce_legacy_evidence_log(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return {key: cls._coerce_model_value(item) for key, item in value.items()}
