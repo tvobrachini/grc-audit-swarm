@@ -33,7 +33,8 @@ def challenger_review(state: AuditState) -> dict:
         logger.info("[Challenger] %s Auto-approving for emulation.", runtime.reason)
         return _emulate_challenger(state)
     llm = runtime.llm
-    assert llm is not None
+    if llm is None:
+        return _emulate_challenger(state)
 
     # Serialize the matrix for the LLM context
     matrix_str = ""
@@ -95,7 +96,7 @@ def challenger_review(state: AuditState) -> dict:
     ]
 
     return {
-        "revision_feedback": feedback if not result.is_approved else "",
+        "challenger_feedback": feedback if not result.is_approved else "",
         "audit_trail": state.audit_trail + audit_trail_entries,
     }
 
@@ -104,7 +105,7 @@ def _emulate_challenger(state: AuditState) -> dict:
     """Mock fallback logic."""
     audit_trail_entries = [
         {
-            "agent_or_user_id": "Agent 5 (Challenger Mock)",
+            "agent_or_user_id": "Challenger (Mock)",
             "action_taken": "Reviewed Draft Matrix: Approved",
             "reasoning_snapshot": "Mocked approval.",
             "approval_status": "Auto-Approved",
@@ -112,7 +113,7 @@ def _emulate_challenger(state: AuditState) -> dict:
     ]
 
     return {
-        "revision_feedback": "",
+        "challenger_feedback": "",
         "audit_trail": state.audit_trail + audit_trail_entries,
     }
 
@@ -156,7 +157,8 @@ def challenge_execution_findings(state: AuditState) -> dict:
         logger.info("[Phase2 Challenger] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_challenger(state)
     llm = runtime.llm
-    assert llm is not None
+    if llm is None:
+        return _emulate_phase2_challenger(state)
 
     # Serialize findings for LLM review
     findings_text = "\n\n".join(

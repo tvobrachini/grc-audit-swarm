@@ -14,6 +14,69 @@ from swarm.review_actions import (
 from swarm.session_manager import save_session, update_session
 from swarm.session_sync import append_chat_message, build_session_update
 
+# ── Human-readable activity log labels ────────────────────────────────────────
+_NODE_LABELS: dict[str, str] = {
+    "orchestrator": "🔍 Scope analysed",
+    "researcher": "📰 Risk & breach research complete",
+    "control_mapper": "🗂️ Control matrix built",
+    "dynamic_specialists": "🎯 Specialist procedures injected",
+    "challenger": "⚖️ QA review",
+    "evidence_collector": "🔬 Evidence collected",
+    "run_all_workers": "⚙️ Control tests complete",
+    "phase2_specialist": "🔬 Regulatory annotations added",
+    "phase2_researcher": "📰 Breach precedent research complete",
+    "phase2_challenger": "⚖️ Findings quality review complete",
+    "concluder": "📊 Executive summary drafted",
+}
+
+
+def _describe_node_event(node: str, update: dict) -> str:
+    """Return a rich human-readable description of a completed graph node event."""
+    base = _NODE_LABELS.get(node, f"✅ {node} complete")
+
+    if node == "orchestrator":
+        themes = update.get("risk_themes") or []
+        skills = update.get("active_skill_names") or []
+        if themes:
+            base += f" — {', '.join(themes)}"
+        if skills:
+            base += f"\n> 🎯 Skills loaded: **{'  ·  '.join(skills)}**"
+
+    elif node == "control_mapper":
+        matrix = update.get("control_matrix") or []
+        if matrix:
+            ids = ", ".join(
+                (
+                    m.get("control_id") or ""
+                    if isinstance(m, dict)
+                    else getattr(m, "control_id", "")
+                )
+                for m in matrix
+            )
+            base += (
+                f" — {len(matrix)} control{'s' if len(matrix) != 1 else ''}: *{ids}*"
+            )
+
+    elif node == "challenger":
+        feedback = update.get("challenger_feedback", "")
+        base += " — revisions requested" if feedback else " — approved ✓"
+
+    elif node == "run_all_workers":
+        findings = update.get("testing_findings") or []
+        if findings:
+
+            def _s(f):
+                return (
+                    f.get("status") if isinstance(f, dict) else getattr(f, "status", "")
+                )
+
+            p = sum(1 for f in findings if _s(f) == "Pass")
+            e = sum(1 for f in findings if _s(f) == "Exception")
+            fa = sum(1 for f in findings if _s(f) == "Fail")
+            base += f" — {p} ✅  {e} ⚠️  {fa} ❌"
+
+    return base
+
 
 class AuditWorkflowService:
     def __init__(self, graph_service: GraphService | None = None):
@@ -105,7 +168,7 @@ class AuditWorkflowService:
                 self.append_chat_message(
                     session_state,
                     "assistant",
-                    f"🟢 **`{node}`** completed",
+                    _describe_node_event(node, update),
                     reasoning=reasoning,
                 )
         session_state["resume_swarm"] = False

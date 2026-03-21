@@ -50,7 +50,8 @@ def inject_specialist_tests(state: AuditState) -> dict:
         logger.warning("[Specialist] %s Emulating logic.", runtime.reason)
         return _emulate_specialist(state)
     llm = runtime.llm
-    assert llm is not None
+    if llm is None:
+        return _emulate_specialist(state)
 
     # ─── Load Skill System Prompt ───────────────────────────────────────────────
     # If the Orchestrator matched skills, use their combined expert system prompts.
@@ -227,7 +228,8 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
         logger.info("[Phase2 Specialist] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_specialist(state, failed)
     llm = runtime.llm
-    assert llm is not None
+    if llm is None:
+        return _emulate_phase2_specialist(state, failed)
 
     # Load skill system prompt
     if state.active_skill_ids:

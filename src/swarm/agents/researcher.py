@@ -37,8 +37,8 @@ def generate_risk_context(state: AuditState) -> dict:
         return _emulate_researcher(state)
     llm = runtime.llm
     search_tool = runtime.search_tool
-    assert llm is not None
-    assert search_tool is not None
+    if llm is None or search_tool is None:
+        return _emulate_researcher(state)
 
     # Load skill-specific research guidance
     skill_hints = ""
@@ -209,8 +209,8 @@ def research_failed_controls(state: AuditState) -> dict:
         return _emulate_phase2_researcher(state, failed)
     llm = runtime.llm
     search_tool = runtime.search_tool
-    assert llm is not None
-    assert search_tool is not None
+    if llm is None or search_tool is None:
+        return _emulate_phase2_researcher(state, failed)
 
     # Load skill-specific research hints for targeted queries
     skill_hints = ""

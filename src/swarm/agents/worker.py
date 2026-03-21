@@ -272,9 +272,6 @@ def _emulate_finding(
         else:  # ~15%
             outcome = "Fail"
 
-    # Use realistic mock evidence
-
-    # Use realistic mock evidence
     evidence_text = _mock_evidence(control.control_id)
 
     justifications = {

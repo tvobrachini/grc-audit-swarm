@@ -46,7 +46,6 @@ def test_scope_input_component_loads_lab_file_and_triggers_launch(
         render_scope_input(
             lab_dir=os.environ["TEST_LAB_DIR"],
             suggested_audit_name=st.session_state.captured_suggestion,
-            suggest_audit_name=lambda text: text.splitlines()[-1],
             on_scope_change=on_scope_change,
             on_launch=on_launch,
         )
