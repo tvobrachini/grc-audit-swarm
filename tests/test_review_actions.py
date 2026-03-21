@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.review_actions import (
+    build_phase1_review_patch,
     flag_control_for_finding,
     mark_control_clean,
     merge_state_map,
@@ -40,6 +41,19 @@ def test_submit_phase2_feedback_clones_feedback_map():
     patch = submit_phase2_feedback(feedback)
     assert patch == {"control_feedback": {"AC-01": "recheck users"}}
     assert patch["control_feedback"] is not feedback
+
+
+def test_build_phase1_review_patch_approves_known_inputs():
+    assert build_phase1_review_patch("Approve to start execution") == {
+        "revision_feedback": ""
+    }
+    assert build_phase1_review_patch(" LGTM ") == {"revision_feedback": ""}
+
+
+def test_build_phase1_review_patch_preserves_revision_feedback():
+    assert build_phase1_review_patch("Add one more logging control") == {
+        "revision_feedback": "Add one more logging control"
+    }
 
 
 def test_append_chat_message_returns_new_history():

@@ -1,5 +1,15 @@
 from typing import Any, Dict
 
+PHASE1_APPROVAL_INPUTS = {
+    "approve",
+    "approved",
+    "approve to start execution",
+    "ok",
+    "yes",
+    "lgtm",
+    "go",
+}
+
 
 def merge_state_map(
     current: Dict[str, Any] | None, updates: Dict[str, Any]
@@ -37,3 +47,10 @@ def submit_phase2_feedback(
     control_feedback: Dict[str, str],
 ) -> Dict[str, Dict[str, str]]:
     return {"control_feedback": dict(control_feedback)}
+
+
+def build_phase1_review_patch(feedback: str) -> Dict[str, str]:
+    normalized = feedback.strip().lower()
+    if normalized in PHASE1_APPROVAL_INPUTS:
+        return {"revision_feedback": ""}
+    return {"revision_feedback": feedback}
