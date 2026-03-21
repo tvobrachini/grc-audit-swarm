@@ -58,7 +58,8 @@ def produce_executive_summary(state: AuditState) -> dict:
         logger.info("[Concluder] %s Falling back to template.", runtime.reason)
         return _emulate_summary(state, passes, exceptions, fails, highs)
     llm = runtime.llm
-    assert llm is not None
+    if llm is None:
+        return _emulate_summary(state, passes, exceptions, fails, highs)
 
     findings_text = "\n\n".join(
         [

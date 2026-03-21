@@ -11,9 +11,23 @@ def render_phase1_review(
     on_feedback: Callable[[str], None],
 ):
     st.info(
-        "📋 **Phase 1 Complete** — Review the planning artifacts below, then approve or give feedback."
+        "📋 **Phase 1 Complete** — Review the planning artifacts below, then approve or request changes."
     )
 
+    # ── Active skill badges ────────────────────────────────────────────────────
+    skill_names: list = state_vals.get("active_skill_names") or []
+    if skill_names:
+        pills = "".join(
+            f'<span class="skill-pill">🎯 {name}</span>' for name in skill_names
+        )
+        st.markdown(
+            f'<div class="skill-strip"><span style="font-size:12px;color:#6b7280;font-weight:600;'
+            f'text-transform:uppercase;letter-spacing:.06em;margin-right:8px;">Skills active:</span>'
+            f"{pills}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Planning artifact tabs ─────────────────────────────────────────────────
     tab1, tab2 = st.tabs(["📄 1-Pager Risk Context", "📋 Control Matrix"])
 
     with tab1:
@@ -85,9 +99,40 @@ def render_phase1_review(
                 use_container_width=True,
             )
 
+    # ── Approval action area ───────────────────────────────────────────────────
     st.markdown("---")
-    feedback = st.chat_input(
-        "Type 'Approve to start execution' or describe what to change..."
+    st.markdown("### ✅ Ready to proceed?")
+    st.caption(
+        "Approve to begin evidence collection and test execution, "
+        "or request changes to the control matrix before testing starts."
     )
-    if feedback:
-        on_feedback(feedback)
+
+    col_approve, col_revise = st.columns([3, 2])
+
+    with col_approve:
+        if st.button(
+            "🚀 Approve & Start Testing",
+            type="primary",
+            use_container_width=True,
+            help="Accepts the current control matrix and triggers Phase 2 test execution.",
+        ):
+            on_feedback("approve")
+
+    with col_revise:
+        show_fb = st.toggle("📝 Request Changes", key="p1_show_feedback")
+
+    if show_fb:
+        fb_text = st.text_area(
+            "What should be revised?",
+            placeholder=(
+                "e.g. 'The procedures for AC-01 are too generic — "
+                "add specific AWS CLI commands and CIS benchmark checks.'"
+            ),
+            height=100,
+            key="p1_feedback_text",
+        )
+        if st.button("📩 Submit Feedback", use_container_width=True):
+            if fb_text.strip():
+                on_feedback(fb_text)
+            else:
+                st.warning("Please describe what should be changed.")

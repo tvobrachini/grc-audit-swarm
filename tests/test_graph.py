@@ -186,23 +186,25 @@ class TestExecutionReruns:
             control_feedback={"AC-01": "Recheck pending offboarding evidence."},
         )
 
-        with patch(
-            "swarm.graph.run_control_test", return_value=rerun
-        ) as run_control_test_mock:
+        from unittest.mock import MagicMock
+
+        mock_adapter = MagicMock()
+        mock_adapter.run.return_value = rerun
+        with patch("swarm.graph.build_worker_adapter", return_value=mock_adapter):
             result = run_all_workers_node(state)
 
         assert result["testing_findings"] == [rerun]
         assert result["execution_status"]["AC-01"] == ExecutionStatus.AWAITING_REVIEW
-        run_control_test_mock.assert_called_once()
+        mock_adapter.run.assert_called_once()
 
 
 class TestGraphContracts:
     def test_should_revise_returns_revise_when_feedback_present_and_under_limit(self):
-        state = AuditState(revision_feedback="tighten tests", revision_count=1)
+        state = AuditState(challenger_feedback="tighten tests", revision_count=1)
         assert should_revise(state) == ReviewDecision.REVISE
 
     def test_should_revise_escalates_to_human_when_limit_reached(self):
-        state = AuditState(revision_feedback="still wrong", revision_count=2)
+        state = AuditState(challenger_feedback="still wrong", revision_count=2)
         assert should_revise(state) == ReviewDecision.PROCEED_TO_HUMAN
 
     def test_phase1_human_review_routes_to_execute_on_approval(self):
