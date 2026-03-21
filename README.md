@@ -2,7 +2,7 @@
 
 > **AI Multi-Agent Swarm for Adaptive Audit Planning & Execution**
 
-GRC Audit Swarm is a stateful, interactive AI platform designed to transform Audit narratives into actionable findings. Powered by **LangGraph**, it coordinates a "Swarm" of specialized agents that research real-world risks, map controls from the **Secure Controls Framework (SCF)**, and autonomously execute audit tests to generate a Findings Command Center.
+GRC Audit Swarm is a stateful, interactive AI platform designed to transform audit narratives into actionable findings. Powered by **LangGraph**, it coordinates a swarm of specialized agents that research real-world risks, map controls from the **Secure Controls Framework (SCF)**, and execute audit workflows against simulated or collected evidence to generate a Findings Command Center.
 
 > [!NOTE]
 > **View the Complete Portfolio Case Study:** I've documented the architectural shift from static mapping to recursive autonomous auditing in **[CASE_STUDY.md](CASE_STUDY.md)**.
@@ -58,6 +58,12 @@ graph TD
     HR2 -- Approved --> End((Final Artifacts)):::init
 ```
 
+### 🧱 Current App Boundaries
+- **Streamlit UI Components:** Scope intake, Phase 1 review, and Phase 2 findings review are split into dedicated component modules instead of living in a single monolithic page.
+- **Workflow Action Helpers:** Review commands, session resets, and app routing/phase detection are isolated into small helper modules for easier testing.
+- **Graph Interaction Service:** The UI reaches LangGraph through a thin service layer instead of calling the compiled graph directly.
+- **Structured Evidence Pipeline:** MCP-collected evidence is stored as typed control/tool evidence objects before worker serialization.
+
 ---
 
 ## 🚀 Key Features
@@ -65,9 +71,10 @@ graph TD
 - **📡 Live Research:** Integrated web search (DDGS) for grounding audits in current threat data.
 - **🔌 Loadable Skill Modules:** Define specialized audit logic in YAML files (`skills/`) for easy extensibility.
 - **📊 Findings Command Center:** Interactive UI with KPI bars, expandable control drill-downs, and per-step result badges (✅/❌/⚠️).
-- **🛡️ Guardrail Test Suite (BDD):** 69+ unit tests including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
-- **💾 Persistent Sessions:** Full history of past audits stored via decoupled `storage.py` abstraction.
-- **📥 Enterprise Ready:** Containerized with Docker, packaged with `uv`, and protected by SAST (`bandit`) and CI/CD pipelines.
+- **🛡️ Guardrail Test Suite (BDD):** 100 automated tests currently pass locally, including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
+- **💾 Persistent Sessions:** Audit scope text and activity history are persisted and restored across sessions via the session/storage layer.
+- **🧾 Typed Workflow & Evidence Models:** Workflow states use shared typed status values, and collected evidence is stored through structured control/tool evidence objects.
+- **📦 Containerized Dev Setup:** Dockerized, packaged with `uv`, and covered by SAST (`bandit`) and CI-oriented checks.
 - **⚡ LLM Rate-Limit Optimized:** Dynamically degrades to `llama-3.1-8b-instant` during batch execution to conquer Groq's 6,000 TPM limit while maintaining quality.
 
 ---
@@ -103,11 +110,15 @@ uv run pytest tests/ -v
 ```
 
 The suite covers:
-- **Agents:** Contract compliance for all 12+ agent nodes.
+- **Agents:** Contract compliance for the planning, execution, review, and summary nodes in the swarm workflow.
 - **Graph:** Topology validation (ensuring Phase 1 -> Phase 2 flow is unbroken).
 - **Behavior-Driven Development (BDD):** Enforces strict "Missing Evidence" constraints to preempt AI hallucinations.
 - **Skills:** Auto-detection accuracy across 5 key domains.
-- **Schema:** Strict Pydantic data modeling for findings and state.
+- **Schema & Workflow Types:** Strict Pydantic data modeling for findings, state, workflow statuses, and collected evidence.
+
+Notes:
+- The live AWS MCP smoke test is opt-in and runs only when `RUN_AWS_MCP_INTEGRATION=1`.
+- The LLM-as-a-judge evaluation skips automatically when no reachable model provider is configured.
 
 ---
 
