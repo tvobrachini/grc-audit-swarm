@@ -9,10 +9,31 @@ import pytest
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-from src.swarm.llm_factory import get_llm
-from src.swarm.state.schema import ControlMatrixItem, AuditFinding
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from swarm.llm_factory import get_llm
+from swarm.state.schema import ControlMatrixItem, AuditFinding
 
 load_dotenv()
+
+try:
+    from groq import APIConnectionError as GroqAPIConnectionError
+except Exception:  # pragma: no cover - optional dependency surface
+    GroqAPIConnectionError = ()
+
+try:
+    from openai import APIConnectionError as OpenAIAPIConnectionError
+except Exception:  # pragma: no cover - optional dependency surface
+    OpenAIAPIConnectionError = ()
+
+LLM_CONNECTION_ERRORS = tuple(
+    err
+    for err in (GroqAPIConnectionError, OpenAIAPIConnectionError)
+    if isinstance(err, type)
+)
 
 
 class JudgeResult(BaseModel):
@@ -85,6 +106,8 @@ def test_prompt_eval_llm_as_judge(scenario):
                 "evidence": scenario["evidence_log"],
             }
         )
+    except LLM_CONNECTION_ERRORS as e:
+        pytest.skip(f"LLM provider unavailable for generation: {e}")
     except Exception as e:
         pytest.fail(f"LLM Generation failed: {e}")
 
@@ -116,6 +139,8 @@ def test_prompt_eval_llm_as_judge(scenario):
                 "justification": finding.justification,
             }
         )
+    except LLM_CONNECTION_ERRORS as e:
+        pytest.skip(f"LLM provider unavailable for judging: {e}")
     except Exception as e:
         pytest.fail(f"LLM Judge failed: {e}")
 
@@ -123,6 +148,6 @@ def test_prompt_eval_llm_as_judge(scenario):
     print(f"[Eval] Judge Reasoning: {grade.reasoning}")
 
     # 3. ASSERT: Catch regressions
-    assert grade.passed, (
-        f"Prompt Regression Detected! Score: {grade.score}. Reason: {grade.reasoning}"
-    )
+    assert (
+        grade.passed
+    ), f"Prompt Regression Detected! Score: {grade.score}. Reason: {grade.reasoning}"

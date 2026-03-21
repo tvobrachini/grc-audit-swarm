@@ -1,6 +1,12 @@
+import os
+import sys
+
 from pytest_bdd import scenario, given, when, then
-from src.swarm.state.schema import ControlMatrixItem, AuditState
-from src.swarm.agents.worker import run_control_test
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from swarm.state.schema import ControlMatrixItem, AuditState
+from swarm.agents.worker import run_control_test
 
 
 @scenario(
@@ -54,6 +60,6 @@ def evaluate_missing_evidence(setup_control):
 @then('the AI evaluation must not return a "Pass" status')
 def verify_finding_status(evaluate_missing_evidence):
     finding = evaluate_missing_evidence
-    assert finding.status in ["Fail", "Exception"], (
-        f"Domain Rule Violated: Agent passed a control with missing evidence! Got status: {finding.status}"
-    )
+    assert (
+        finding.status in ["Fail", "Exception"]
+    ), f"Domain Rule Violated: Agent passed a control with missing evidence! Got status: {finding.status}"
