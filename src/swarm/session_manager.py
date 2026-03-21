@@ -40,14 +40,34 @@ def _save(data: Dict) -> None:
     os.replace(tmp_path, SESSIONS_PATH)
 
 
-def save_session(thread_id: str, name: str, scope_preview: str = "") -> None:
+def save_session(
+    thread_id: str,
+    name: str,
+    scope_text: str = "",
+    chat_history: Optional[list] = None,
+) -> None:
     """Register/update an audit session by thread_id."""
     data = _load()
+    existing = data.get(thread_id, {})
     data[thread_id] = {
         "name": name,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "scope_preview": scope_preview[:200],  # keep it short for display
+        "created_at": existing.get(
+            "created_at", datetime.now().isoformat(timespec="seconds")
+        ),
+        "scope_preview": scope_text[:200],  # keep it short for display
+        "scope_text": scope_text,
+        "chat_history": chat_history or existing.get("chat_history", []),
     }
+    _save(data)
+
+
+def update_session(thread_id: str, **fields) -> None:
+    """Merge selected session fields for an existing thread."""
+    data = _load()
+    if thread_id not in data:
+        return
+
+    data[thread_id].update(fields)
     _save(data)
 
 

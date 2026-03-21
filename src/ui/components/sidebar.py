@@ -35,6 +35,9 @@ def render_sidebar():
                     st.session_state.thread_id = tid
                     st.session_state.scope_submitted = True
                     st.session_state.chat_history = meta.get("chat_history", [])
+                    st.session_state.scope_text_cache = meta.get(
+                        "scope_text", meta.get("scope_preview", "")
+                    )
                     st.rerun()
                 if c2.button("🗑️", key=f"del_{tid}", help="Delete"):
                     delete_session(tid)
