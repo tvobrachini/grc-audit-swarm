@@ -7,6 +7,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from dotenv import load_dotenv
 
+from swarm.evidence import ControlEvidence, ToolEvidence
 from swarm.state.schema import AuditState
 
 load_dotenv()
@@ -20,11 +21,19 @@ AUDIT_TOOL_MAP = {
 
 
 def _store_tool_evidence(
-    evidence_updates: Dict[str, Any], prefix: str, tool_name: str, payload: Any
+    evidence_updates: Dict[str, ControlEvidence],
+    prefix: str,
+    tool_name: str,
+    payload: Any,
 ) -> None:
     """Accumulate evidence per control prefix instead of overwriting prior tool output."""
-    prefix_bucket = evidence_updates.setdefault(prefix, {})
-    prefix_bucket[tool_name] = _redact_aws_metadata(payload)
+    prefix_bucket = evidence_updates.setdefault(
+        prefix, ControlEvidence(control_id=prefix, source="mcp")
+    )
+    prefix_bucket.tool_results[tool_name] = ToolEvidence(
+        tool_name=tool_name,
+        payload=_redact_aws_metadata(payload),
+    )
 
 
 async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
@@ -99,7 +108,9 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
         # Map back to specific controls that share this prefix the simple way
         for item in state.control_matrix:
             if item.control_id.startswith(prefix):
-                new_log[item.control_id] = data
+                new_log[item.control_id] = data.model_copy(
+                    update={"control_id": item.control_id}
+                )
 
     return {"evidence_log": new_log}
 

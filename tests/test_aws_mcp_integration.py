@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.agents.evidence_collector import _redact_aws_metadata, _store_tool_evidence
+from swarm.evidence import ControlEvidence
 
 
 def test_store_tool_evidence_accumulates_multiple_tool_results():
@@ -32,15 +33,21 @@ def test_store_tool_evidence_accumulates_multiple_tool_results():
         [{"UserName": "alice", "AccountId": "123456789012"}],
     )
 
-    assert set(evidence_updates["AC"]) == {
+    assert isinstance(evidence_updates["AC"], ControlEvidence)
+    assert set(evidence_updates["AC"].tool_results) == {
         "get_iam_password_policy",
         "list_iam_users_with_mfa",
     }
     assert (
-        evidence_updates["AC"]["get_iam_password_policy"]["AccountId"] == "XXXXXXXXXXXX"
+        evidence_updates["AC"]
+        .tool_results["get_iam_password_policy"]
+        .payload["AccountId"]
+        == "XXXXXXXXXXXX"
     )
     assert (
-        evidence_updates["AC"]["list_iam_users_with_mfa"][0]["AccountId"]
+        evidence_updates["AC"]
+        .tool_results["list_iam_users_with_mfa"]
+        .payload[0]["AccountId"]
         == "XXXXXXXXXXXX"
     )
 
