@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.app_flow import derive_app_view_state, fresh_session_state
+from swarm.app_flow import derive_app_view_state
 
 
 class DummyState:
@@ -35,13 +35,3 @@ def test_derive_app_view_state_for_completed_run():
     derived = derive_app_view_state(state)
     assert derived["is_fully_done"] is True
     assert derived["should_stream"] is False
-
-
-def test_fresh_session_state_resets_mutable_ui_fields():
-    reset = fresh_session_state("thread-123")
-    assert reset == {
-        "thread_id": "thread-123",
-        "chat_history": [],
-        "scope_submitted": False,
-        "control_feedback": {},
-    }
