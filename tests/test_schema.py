@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pydantic import ValidationError
 
+from swarm.evidence import ControlEvidence, ToolEvidence
 from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditAction
 
 
@@ -41,6 +42,27 @@ class TestAuditStateDefaults:
         assert aws_scope_state.active_skill_ids == ["aws_cloud_security"]
         assert aws_scope_state.active_skill_names == ["AWS Cloud Security Specialist"]
         assert "AWS Cloud Infrastructure" in aws_scope_state.risk_themes
+
+    def test_evidence_log_accepts_typed_control_evidence(self):
+        state = AuditState(
+            evidence_log={
+                "AC-01": ControlEvidence(
+                    control_id="AC-01",
+                    tool_results={
+                        "get_iam_password_policy": ToolEvidence(
+                            tool_name="get_iam_password_policy",
+                            payload={"MinimumPasswordLength": 14},
+                        )
+                    },
+                )
+            }
+        )
+        assert (
+            state.evidence_log["AC-01"]
+            .tool_results["get_iam_password_policy"]
+            .payload["MinimumPasswordLength"]
+            == 14
+        )
 
 
 class TestAuditFinding:

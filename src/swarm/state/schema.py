@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from swarm.evidence import ControlEvidence
 from swarm.workflow_types import ExecutionStatus
 
 
@@ -97,7 +98,7 @@ class AuditState(BaseModel):
     )
 
     # Phase 2: Execution
-    evidence_log: Dict[str, Any] = Field(
+    evidence_log: Dict[str, ControlEvidence] = Field(
         default_factory=dict,
         description="Raw mocked JSON payloads or MCP tool outputs loaded for the workers to read.",
     )

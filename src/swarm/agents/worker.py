@@ -10,11 +10,12 @@ In LLM mode:  reasons against evidence using the loaded skill system prompt.
 """
 
 import hashlib
-from typing import List, Dict, Any
+from typing import List, Dict
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from swarm.evidence import ControlEvidence, serialize_control_evidence
 from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem
 from swarm.llm_factory import get_llm
 from swarm.skill_loader import get_skill_by_id, get_specialist_prompt
@@ -146,11 +147,12 @@ def run_control_test(
         return _emulate_finding(control, human_context=human_context)
 
 
-def _get_evidence_for_control(control_id: str, evidence_log: Dict[str, Any]) -> str:
+def _get_evidence_for_control(
+    control_id: str, evidence_log: Dict[str, ControlEvidence]
+) -> str:
     """Pull relevant evidence from the evidence log, or return a mock."""
     if control_id in evidence_log:
-        ev = evidence_log[control_id]
-        return str(ev)
+        return serialize_control_evidence(evidence_log[control_id])
     # Return mock evidence when no real evidence log exists
     return _mock_evidence(control_id)
 

@@ -14,8 +14,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.state.schema import AuditState, AuditFinding
+from swarm.evidence import ControlEvidence, ToolEvidence
 from swarm.agents.orchestrator import analyze_scope_and_themes
-from swarm.agents.worker import _emulate_finding, _mock_evidence
+from swarm.agents.worker import (
+    _emulate_finding,
+    _get_evidence_for_control,
+    _mock_evidence,
+)
 from swarm.agents.concluder import _emulate_summary
 from swarm.agents.specialist import _emulate_phase2_specialist
 from swarm.agents.researcher import _emulate_phase2_researcher
@@ -109,6 +114,22 @@ class TestWorkerAgent:
     def test_mock_evidence_unknown_prefix_returns_generic(self):
         evidence = _mock_evidence("XYZ-99")
         assert len(evidence) > 20
+
+    def test_get_evidence_for_control_serializes_typed_evidence_log(self):
+        evidence_log = {
+            "AC-01": ControlEvidence(
+                control_id="AC-01",
+                tool_results={
+                    "get_iam_password_policy": ToolEvidence(
+                        tool_name="get_iam_password_policy",
+                        payload={"MinimumPasswordLength": 14},
+                    )
+                },
+            )
+        }
+        evidence = _get_evidence_for_control("AC-01", evidence_log)
+        assert "Evidence Source: mcp" in evidence
+        assert "MinimumPasswordLength" in evidence
 
 
 class TestConcluderAgent:
