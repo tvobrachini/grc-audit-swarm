@@ -33,6 +33,7 @@ def challenger_review(state: AuditState) -> dict:
         logger.info("[Challenger] %s Auto-approving for emulation.", runtime.reason)
         return _emulate_challenger(state)
     llm = runtime.llm
+    assert llm is not None
 
     # Serialize the matrix for the LLM context
     matrix_str = ""
@@ -155,6 +156,7 @@ def challenge_execution_findings(state: AuditState) -> dict:
         logger.info("[Phase2 Challenger] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_challenger(state)
     llm = runtime.llm
+    assert llm is not None
 
     # Serialize findings for LLM review
     findings_text = "\n\n".join(

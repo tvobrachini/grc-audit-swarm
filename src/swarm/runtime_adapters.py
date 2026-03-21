@@ -1,20 +1,9 @@
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, TypeAlias
 
 from langchain_community.tools import DuckDuckGoSearchRun
 
 from swarm.llm_factory import get_llm
-
-
-class LLMAdapter(Protocol):
-    is_live: bool
-    llm: Any | None
-
-
-class SearchAdapter(Protocol):
-    is_live: bool
-    llm: Any | None
-    search_tool: Any | None
 
 
 @dataclass(frozen=True)
@@ -43,6 +32,10 @@ class LiveSearchAdapter:
     llm: Any
     search_tool: Any
     is_live: bool = True
+
+
+LLMAdapter: TypeAlias = MockLLMAdapter | LiveLLMAdapter
+SearchAdapter: TypeAlias = MockSearchAdapter | LiveSearchAdapter
 
 
 def build_llm_adapter(

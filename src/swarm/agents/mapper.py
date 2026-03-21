@@ -81,6 +81,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
         logger.warning("[Mapper] %s Emulating logic.", runtime.reason)
         return _emulate_mapping(state)
     llm = runtime.llm
+    assert llm is not None
 
     # --- Phase 2a: Control Retrieval (Simulated RAG/Search) ---
     # In a full production system, we would embed the 1100+ SCF controls and do a vector search.
