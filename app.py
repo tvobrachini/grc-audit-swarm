@@ -8,9 +8,7 @@ Phase 2: AI Execution (Workers per control → Concluder → Human)
 import os
 import sys
 import uuid
-import io
 import streamlit as st
-import pandas as pd
 import pdfplumber
 from dotenv import load_dotenv
 
@@ -28,6 +26,9 @@ from swarm.review_actions import (  # noqa: E402
 from swarm.session_manager import save_session, update_session  # noqa: E402
 from swarm.session_sync import append_chat_message, build_session_update  # noqa: E402
 
+from ui.components.common import get_value, step_badge  # noqa: E402
+from ui.components.phase1_review import render_phase1_review  # noqa: E402
+from ui.components.phase2_review import render_phase2_review  # noqa: E402
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
 from ui.components.state import initialize_session_state  # noqa: E402
@@ -54,21 +55,6 @@ def lab_files(ext=None):
         return []
     f = [x for x in os.listdir(LAB_DIR) if os.path.isfile(os.path.join(LAB_DIR, x))]
     return [x for x in f if x.endswith(ext)] if ext else f
-
-
-def _get(obj, key, default=""):
-    return (
-        getattr(obj, key, None)
-        or (obj.get(key, default) if isinstance(obj, dict) else default)
-        or default
-    )
-
-
-def step_badge(result):
-    if not result:
-        return "—"
-    icons = {"Pass": "✅", "Fail": "❌", "Exception": "⚠️"}
-    return icons.get(result, result)
 
 
 def _append_chat_message(role: str, content: str, reasoning=None):
@@ -286,294 +272,81 @@ else:
     # PHASE 1 HUMAN REVIEW — Planning artifacts
     # ════════════════════════════════════════════════════
     elif at_phase1_review:
-        st.info(
-            "📋 **Phase 1 Complete** — Review the planning artifacts below, then approve or give feedback."
-        )
 
-        tab1, tab2 = st.tabs(["📄 1-Pager Risk Context", "📋 Control Matrix"])
-
-        with tab1:
-            doc = state_vals.get("risk_context_document", "")
-            st.markdown(doc or "_No risk context document generated._")
-
-        with tab2:
-            matrix = state_vals.get("control_matrix", [])
-            for ctrl in matrix:
-                cid = _get(ctrl, "control_id")
-                desc = _get(ctrl, "description")
-                procs = _get(ctrl, "procedures")
-                with st.expander(f"**{cid}** — {str(desc)[:80]}…"):
-                    st.markdown(f"**Domain:** {_get(ctrl, 'domain')}")
-                    if procs:
-                        tod = _get(procs, "tod_steps") or []
-                        toe = _get(procs, "toe_steps") or []
-                        sub = _get(procs, "substantive_steps") or []
-                        erl = _get(procs, "erl_items") or []
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown("**🔵 Test of Design**")
-                            for s in tod:
-                                st.markdown(f"- {s}")
-                            st.markdown("**🟡 Test of Effectiveness**")
-                            for s in toe:
-                                st.markdown(f"- {s}")
-                        with c2:
-                            st.markdown("**🔴 Substantive**")
-                            for s in sub:
-                                st.markdown(f"- {s}")
-                            st.markdown("**📎 Evidence Request List**")
-                            for s in erl:
-                                st.markdown(f"- {s}")
-
-            # Excel download
-            if matrix:
-                st.markdown("---")
-                rows, qrows, erows = [], [], []
-                for ctrl in matrix:
-                    cid = _get(ctrl, "control_id")
-                    desc = _get(ctrl, "description")
-                    procs = _get(ctrl, "procedures")
-                    rows.append({"Control ID": cid, "Description": desc})
-                    if procs:
-                        qrows.append(
-                            {
-                                "Control ID": cid,
-                                "TOD Steps": "\n".join(_get(procs, "tod_steps") or []),
-                            }
-                        )
-                        erows.append(
-                            {
-                                "ERL": "\n".join(_get(procs, "erl_items") or []),
-                                "Control": cid,
-                            }
-                        )
-                buf = io.BytesIO()
-                with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                    pd.DataFrame(rows).to_excel(w, sheet_name="Controls", index=False)
-                    pd.DataFrame(qrows).to_excel(w, sheet_name="Questions", index=False)
-                    pd.DataFrame(erows).to_excel(w, sheet_name="ERL", index=False)
-                st.download_button(
-                    "📥 Download Audit Plan (Excel)",
-                    buf.getvalue(),
-                    "audit_plan.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
-
-        st.markdown("---")
-        fb = st.chat_input(
-            "Type 'Approve to start execution' or describe what to change..."
-        )
-        if fb:
-            _append_chat_message("user", fb)
-            swarm_app.update_state(config, build_phase1_review_patch(fb))
+        def _handle_phase1_feedback(feedback: str):
+            _append_chat_message("user", feedback)
+            swarm_app.update_state(config, build_phase1_review_patch(feedback))
             st.session_state.resume_swarm = True
             st.rerun()
+
+        render_phase1_review(state_vals, get_value, _handle_phase1_feedback)
 
     # ════════════════════════════════════════════════════
     # PHASE 2 HUMAN REVIEW — Findings Command Center
     # ════════════════════════════════════════════════════
     elif at_phase2_review:
-        findings = state_vals.get("testing_findings", [])
-        summary = state_vals.get("executive_summary", "")
 
-        # --- KPI Bar ---
-        total = len(findings)
-        passes = sum(1 for f in findings if _get(f, "status") == "Pass")
-        excepts = sum(1 for f in findings if _get(f, "status") == "Exception")
-        fails = sum(1 for f in findings if _get(f, "status") == "Fail")
-
-        st.markdown("## ⚙️ Phase 2 — Findings Command Center")
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("🔬 Controls Tested", total)
-        k2.metric("✅ Pass", passes)
-        k3.metric("⚠️ Exception", excepts)
-        k4.metric("❌ Fail", fails)
-
-        # --- Filter bar ---
-        st.markdown("---")
-        col_f1, col_f2, _ = st.columns([1, 1, 2])
-        status_filter = col_f1.selectbox(
-            "Filter by Status",
-            ["All", "Pass", "Exception", "Fail"],
-            key="status_filter",
-        )
-        shown = (
-            findings
-            if status_filter == "All"
-            else [f for f in findings if _get(f, "status") == status_filter]
-        )
-
-        # --- Executive Summary ---
-        if summary:
-            with st.expander("📊 Executive Summary", expanded=True):
-                st.markdown(summary)
-
-        st.markdown("---")
-        st.markdown("### 📋 Control Findings — Click to Expand")
-        st.caption(
-            "Review each control, leave targeted feedback, then submit all at the bottom."
-        )
-
-        # --- Findings list with inline expand ---
-        has_pending_feedback = False
-        for finding in shown:
-            cid = _get(finding, "control_id")
-            status = _get(finding, "status")
-            risk = _get(finding, "risk_rating") or "N/A"
-            just = _get(finding, "justification")
-            evids = _get(finding, "evidence_extracted") or []
-            tod_r = _get(finding, "tod_result")
-            toe_r = _get(finding, "toe_result")
-            sub_r = _get(finding, "substantive_result")
-
-            icon = {"Pass": "✅", "Exception": "⚠️", "Fail": "❌"}.get(status, "❓")
-            color_class = {
-                "Pass": "finding-pass",
-                "Exception": "finding-exception",
-                "Fail": "finding-fail",
-            }.get(status, "")
-
-            label = f"{icon} **{cid}** — {status}"
-            if risk not in ("N/A", None, ""):
-                label += f" · Risk: **{risk}**"
-
-            with st.expander(label, expanded=(status in ["Fail", "Exception"])):
-                # Test step results row
-                r1, r2, r3 = st.columns(3)
-                r1.markdown(f"**TOD:** {step_badge(tod_r)}")
-                r2.markdown(f"**TOE:** {step_badge(toe_r)}")
-                r3.markdown(f"**Substantive:** {step_badge(sub_r)}")
-                st.markdown("---")
-
-                # Finding narrative
-                st.markdown(f"**🔍 Finding:**  \n{just}")
-
-                # Evidence
-                if evids:
-                    with st.expander("📎 Evidence Extracted"):
-                        for e in evids:
-                            st.markdown(f"- {e}")
-
-                st.markdown("---")
-
-                # ── Per-control feedback ───────────────────────────────────
-                fb_key = f"fb_{cid}"
-                existing_fb = st.session_state.control_feedback.get(cid, "")
-                new_fb = st.text_area(
-                    f"💬 Your notes / context for {cid}:",
-                    value=existing_fb,
-                    placeholder="e.g. 'The 3 flagged users were in the Nov 30 offboarding batch — please verify against HR list before marking as exception.'",
-                    height=90,
-                    key=fb_key,
-                )
-                st.session_state.control_feedback[cid] = new_fb
-
-                if new_fb.strip():
-                    has_pending_feedback = True
-
-                # Quick action buttons
-                col_a, col_b, col_c = st.columns(3)
-                if col_a.button("✅ Mark Clean", key=f"clean_{cid}"):
-                    swarm_app.update_state(
-                        config,
-                        mark_control_clean(state_vals.get("execution_status"), cid),
-                    )
-                    st.rerun()
-                if col_b.button("🚩 Flag as Finding", key=f"flag_{cid}"):
-                    swarm_app.update_state(
-                        config,
-                        flag_control_for_finding(
-                            state_vals.get("execution_status"), cid
-                        ),
-                    )
-                    st.rerun()
-                if col_c.button("🔁 Re-test with My Context", key=f"retest_{cid}"):
-                    swarm_app.update_state(
-                        config,
-                        request_control_rerun(
-                            state_vals.get("control_feedback"), cid, new_fb
-                        ),
-                    )
-                    st.session_state.resume_swarm = True
-                    st.rerun()
-
-        # --- Bottom submit bar ---
-        st.markdown("---")
-        c_sub1, c_sub2, c_sub3 = st.columns([1, 2, 1])
-
-        with c_sub2:
-            if has_pending_feedback:
-                st.warning(
-                    f"📝 You have notes on {sum(1 for v in st.session_state.control_feedback.values() if v.strip())} control(s). Submit to let the swarm re-evaluate those tests."
-                )
-                if st.button(
-                    "🔁 Submit Feedback & Re-run Flagged Tests",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    swarm_app.update_state(
-                        config,
-                        submit_phase2_feedback(st.session_state.control_feedback),
-                    )
-                    _append_chat_message(
-                        "user",
-                        f"Submitted feedback on {len(st.session_state.control_feedback)} controls for re-evaluation.",
-                    )
-                    st.session_state.control_feedback = {}
-                    st.session_state.resume_swarm = True
-                    st.rerun()
-            else:
-                st.success("All controls reviewed.")
-
-            if st.button(
-                "✅ Approve & Finalize Audit Report",
-                type="primary",
-                use_container_width=True,
-            ):
-                swarm_app.update_state(config, {"control_feedback": {}})
-                _append_chat_message(
-                    "user", "✅ Audit approved. Final report generated."
-                )
-                st.session_state.resume_swarm = True
-                st.rerun()
-
-        # Excel export of findings
-        st.markdown("---")
-        if findings:
-            rows = []
-            for f in findings:
-                rows.append(
-                    {
-                        "Control ID": _get(f, "control_id"),
-                        "Status": _get(f, "status"),
-                        "Risk": _get(f, "risk_rating") or "N/A",
-                        "TOD": _get(f, "tod_result") or "—",
-                        "TOE": _get(f, "toe_result") or "—",
-                        "Substantive": _get(f, "substantive_result") or "—",
-                        "Finding": _get(f, "justification"),
-                        "Evidence": " | ".join(_get(f, "evidence_extracted") or []),
-                    }
-                )
-            buf = io.BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                pd.DataFrame(rows).to_excel(w, sheet_name="Findings", index=False)
-            st.download_button(
-                "📥 Download Findings Report (Excel)",
-                buf.getvalue(),
-                "audit_findings.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+        def _handle_mark_clean(control_id: str):
+            swarm_app.update_state(
+                config,
+                mark_control_clean(state_vals.get("execution_status"), control_id),
             )
+            st.rerun()
+
+        def _handle_flag_finding(control_id: str):
+            swarm_app.update_state(
+                config,
+                flag_control_for_finding(
+                    state_vals.get("execution_status"), control_id
+                ),
+            )
+            st.rerun()
+
+        def _handle_rerun_control(control_id: str, feedback: str):
+            swarm_app.update_state(
+                config,
+                request_control_rerun(
+                    state_vals.get("control_feedback"), control_id, feedback
+                ),
+            )
+            st.session_state.resume_swarm = True
+            st.rerun()
+
+        def _handle_submit_feedback(control_feedback: dict[str, str]):
+            swarm_app.update_state(config, submit_phase2_feedback(control_feedback))
+            _append_chat_message(
+                "user",
+                f"Submitted feedback on {len(control_feedback)} controls for re-evaluation.",
+            )
+            st.session_state.control_feedback = {}
+            st.session_state.resume_swarm = True
+            st.rerun()
+
+        def _handle_finalize():
+            swarm_app.update_state(config, {"control_feedback": {}})
+            _append_chat_message("user", "✅ Audit approved. Final report generated.")
+            st.session_state.resume_swarm = True
+            st.rerun()
+
+        render_phase2_review(
+            state_vals=state_vals,
+            session_control_feedback=st.session_state.control_feedback,
+            get_value=get_value,
+            step_badge=step_badge,
+            on_mark_clean=_handle_mark_clean,
+            on_flag_finding=_handle_flag_finding,
+            on_rerun_control=_handle_rerun_control,
+            on_submit_feedback=_handle_submit_feedback,
+            on_finalize=_handle_finalize,
+        )
 
     # ════════════════════════════════════════════════════
     # FULLY DONE
     # ════════════════════════════════════════════════════
     elif is_fully_done:
         findings = state_vals.get("testing_findings", [])
-        passes = sum(1 for f in findings if _get(f, "status") == "Pass")
-        fails = sum(1 for f in findings if _get(f, "status") == "Fail")
+        passes = sum(1 for f in findings if get_value(f, "status") == "Pass")
+        fails = sum(1 for f in findings if get_value(f, "status") == "Fail")
 
         st.success(
             f"✅ **Audit Complete!** {passes} controls passed · {fails} controls failed."
