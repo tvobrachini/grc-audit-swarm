@@ -10,6 +10,7 @@ modify findings without dropping or corrupting data.
 
 import sys
 import os
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -17,9 +18,12 @@ from swarm.state.schema import AuditState, AuditFinding
 from swarm.evidence import ControlEvidence, ToolEvidence
 from swarm.agents.orchestrator import analyze_scope_and_themes
 from swarm.agents.worker import (
+    LiveWorkerAdapter,
+    MockWorkerAdapter,
     _emulate_finding,
     _get_evidence_for_control,
     _mock_evidence,
+    build_worker_adapter,
 )
 from swarm.agents.concluder import _emulate_summary
 from swarm.agents.specialist import _emulate_phase2_specialist
@@ -130,6 +134,20 @@ class TestWorkerAgent:
         evidence = _get_evidence_for_control("AC-01", evidence_log)
         assert "Evidence Source: mcp" in evidence
         assert "MinimumPasswordLength" in evidence
+
+    def test_build_worker_adapter_returns_mock_when_llm_unavailable(
+        self, minimal_state
+    ):
+        with patch("swarm.agents.worker.get_llm", return_value=None):
+            adapter = build_worker_adapter(minimal_state)
+
+        assert isinstance(adapter, MockWorkerAdapter)
+
+    def test_build_worker_adapter_returns_live_when_llm_available(self, minimal_state):
+        with patch("swarm.agents.worker.get_llm", return_value=object()):
+            adapter = build_worker_adapter(minimal_state)
+
+        assert isinstance(adapter, LiveWorkerAdapter)
 
 
 class TestConcluderAgent:
