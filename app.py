@@ -14,17 +14,8 @@ from dotenv import load_dotenv
 load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
-from swarm.app_flow import derive_app_view_state  # noqa: E402
+from swarm.audit_workflow_service import AuditWorkflowService  # noqa: E402
 from swarm.graph_service import GraphService  # noqa: E402
-from swarm.review_actions import (  # noqa: E402
-    build_phase1_review_patch,
-    flag_control_for_finding,
-    mark_control_clean,
-    request_control_rerun,
-    submit_phase2_feedback,
-)
-from swarm.session_manager import save_session, update_session  # noqa: E402
-from swarm.session_sync import append_chat_message, build_session_update  # noqa: E402
 
 from ui.components.common import get_value, step_badge  # noqa: E402
 from ui.components.phase1_review import render_phase1_review  # noqa: E402
@@ -48,22 +39,17 @@ render_sidebar()
 initialize_session_state()
 
 graph_service = GraphService()
+workflow_service = AuditWorkflowService(graph_service)
 config = {"configurable": {"thread_id": st.session_state.thread_id}}
 LAB_DIR = os.path.join(os.path.dirname(__file__), "lab_data")
 
 
 def _append_chat_message(role: str, content: str, reasoning=None):
-    st.session_state.chat_history = append_chat_message(
-        st.session_state.chat_history,
+    workflow_service.append_chat_message(
+        st.session_state,
         role,
         content,
         reasoning=reasoning,
-    )
-    update_session(
-        st.session_state.thread_id,
-        **build_session_update(
-            st.session_state.scope_text_cache, st.session_state.chat_history
-        ),
     )
 
 
@@ -105,16 +91,7 @@ if not st.session_state.scope_submitted:
         st.session_state.suggested_audit_name = suggestion
 
     def _handle_scope_launch(scope_text: str, audit_name: str):
-        name = audit_name.strip() or f"Audit {st.session_state.thread_id[:8]}"
-        st.session_state.scope_text_cache = scope_text
-        st.session_state.scope_submitted = True
-        _append_chat_message("user", f"**🚀 {name}** — Scope loaded.")
-        save_session(
-            st.session_state.thread_id,
-            name,
-            scope_text,
-            st.session_state.chat_history,
-        )
+        workflow_service.start_audit(st.session_state, scope_text, audit_name)
         st.rerun()
 
     render_scope_input(
@@ -135,8 +112,8 @@ else:
         reset_session_state(str(uuid.uuid4()))
         st.rerun()
 
-    current_state = graph_service.get_state(config)
-    view_state = derive_app_view_state(current_state)
+    view_state = workflow_service.get_view_state(config)
+    workflow_service.sync_state_snapshot(st.session_state, view_state)
     state_vals = view_state["state_vals"]
     at_phase1_review = view_state["at_phase1_review"]
     at_phase2_review = view_state["at_phase2_review"]
@@ -167,29 +144,7 @@ else:
             spinner_msg = "⚙️ Phase 2: Swarm executing tests and analyzing findings..."
 
         with st.spinner(spinner_msg):
-            stream_input = (
-                {
-                    "audit_scope_narrative": st.session_state.scope_text_cache,
-                    "audit_trail": [],
-                }
-                if not state_vals
-                else None
-            )
-            for event in graph_service.stream_updates(stream_input, config):
-                # s is the node update dictionary. LangGraph stream can sometimes return tuples for internals.
-                for node, s in event.items():
-                    if not isinstance(s, dict):
-                        continue
-                    reasoning = None
-                    if s.get("audit_trail"):
-                        last = s["audit_trail"][-1]
-                        reasoning = (
-                            last.get("reasoning_snapshot")
-                            if isinstance(last, dict)
-                            else getattr(last, "reasoning_snapshot", None)
-                        )
-                    txt = f"🟢 **`{node}`** completed"
-                    _append_chat_message("assistant", txt, reasoning=reasoning)
+            workflow_service.consume_stream(st.session_state, config, state_vals)
             st.rerun()
 
     # ════════════════════════════════════════════════════
@@ -198,9 +153,7 @@ else:
     elif at_phase1_review:
 
         def _handle_phase1_feedback(feedback: str):
-            _append_chat_message("user", feedback)
-            graph_service.update_state(config, build_phase1_review_patch(feedback))
-            st.session_state.resume_swarm = True
+            workflow_service.submit_phase1_review(st.session_state, config, feedback)
             st.rerun()
 
         render_phase1_review(state_vals, get_value, _handle_phase1_feedback)
@@ -211,45 +164,35 @@ else:
     elif at_phase2_review:
 
         def _handle_mark_clean(control_id: str):
-            graph_service.update_state(
-                config,
-                mark_control_clean(state_vals.get("execution_status"), control_id),
+            workflow_service.mark_control_clean(
+                config, state_vals.get("execution_status"), control_id
             )
             st.rerun()
 
         def _handle_flag_finding(control_id: str):
-            graph_service.update_state(
-                config,
-                flag_control_for_finding(
-                    state_vals.get("execution_status"), control_id
-                ),
+            workflow_service.flag_control_for_finding(
+                config, state_vals.get("execution_status"), control_id
             )
             st.rerun()
 
         def _handle_rerun_control(control_id: str, feedback: str):
-            graph_service.update_state(
+            workflow_service.rerun_control(
+                st.session_state,
                 config,
-                request_control_rerun(
-                    state_vals.get("control_feedback"), control_id, feedback
-                ),
+                state_vals.get("control_feedback"),
+                control_id,
+                feedback,
             )
-            st.session_state.resume_swarm = True
             st.rerun()
 
         def _handle_submit_feedback(control_feedback: dict[str, str]):
-            graph_service.update_state(config, submit_phase2_feedback(control_feedback))
-            _append_chat_message(
-                "user",
-                f"Submitted feedback on {len(control_feedback)} controls for re-evaluation.",
+            workflow_service.submit_phase2_feedback(
+                st.session_state, config, control_feedback
             )
-            st.session_state.control_feedback = {}
-            st.session_state.resume_swarm = True
             st.rerun()
 
         def _handle_finalize():
-            graph_service.update_state(config, {"control_feedback": {}})
-            _append_chat_message("user", "✅ Audit approved. Final report generated.")
-            st.session_state.resume_swarm = True
+            workflow_service.finalize_audit(st.session_state, config)
             st.rerun()
 
         render_phase2_review(

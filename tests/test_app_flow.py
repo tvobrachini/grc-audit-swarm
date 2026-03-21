@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.app_flow import derive_app_view_state
+from swarm.workflow_types import ViewPhase
 
 
 class DummyState:
@@ -18,6 +19,7 @@ def test_derive_app_view_state_for_phase1_review():
     assert derived["at_phase1_review"] is True
     assert derived["at_phase2_review"] is False
     assert derived["should_stream"] is False
+    assert derived["view_phase"] == ViewPhase.PHASE1_REVIEW
 
 
 def test_derive_app_view_state_for_phase2_review():
@@ -28,6 +30,7 @@ def test_derive_app_view_state_for_phase2_review():
     derived = derive_app_view_state(state)
     assert derived["at_phase2_review"] is True
     assert derived["is_phase1"] is False
+    assert derived["view_phase"] == ViewPhase.PHASE2_REVIEW
 
 
 def test_derive_app_view_state_for_completed_run():
@@ -35,3 +38,4 @@ def test_derive_app_view_state_for_completed_run():
     derived = derive_app_view_state(state)
     assert derived["is_fully_done"] is True
     assert derived["should_stream"] is False
+    assert derived["view_phase"] == ViewPhase.COMPLETE
