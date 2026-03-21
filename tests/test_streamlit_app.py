@@ -45,13 +45,26 @@ def test_scope_input_component_loads_lab_file_and_triggers_launch():
 
     at = AppTest.from_function(app)
     at.run()
-    at.selectbox[0].set_value("aws_iam_cloudtrail_audit.txt")
+    lab_options = [option for option in at.selectbox[0].options if option != "None"]
+    assert lab_options
+
+    selected_lab = next(
+        (option for option in lab_options if "aws" in option.lower()),
+        lab_options[0],
+    )
+    expected_scope = open(
+        os.path.join("lab_data", selected_lab),
+        "r",
+        encoding="utf-8",
+    ).read()
+
+    at.selectbox[0].set_value(selected_lab)
     at.run()
 
-    assert "AWS" in at.text_area[0].value
+    assert at.text_area[0].value == expected_scope
 
     at.button[0].click()
     at.run()
 
     launch_payload = at.session_state["launch_payload"]
-    assert "AWS" in launch_payload["scope_text"]
+    assert launch_payload["scope_text"] == expected_scope
