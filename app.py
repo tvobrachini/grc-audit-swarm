@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
-from swarm.app_flow import derive_app_view_state, fresh_session_state  # noqa: E402
+from swarm.app_flow import derive_app_view_state  # noqa: E402
 from swarm.graph import app as swarm_app  # noqa: E402
 from swarm.review_actions import (  # noqa: E402
     build_phase1_review_patch,
@@ -32,7 +32,7 @@ from ui.components.phase2_review import render_phase2_review  # noqa: E402
 from ui.components.scope_input import render_scope_input  # noqa: E402
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
-from ui.components.state import initialize_session_state  # noqa: E402
+from ui.components.state import initialize_session_state, reset_session_state  # noqa: E402
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -131,7 +131,7 @@ else:
     # New Audit button
     _, col_reset = st.columns([5, 1])
     if col_reset.button("🔄 New Audit", use_container_width=True):
-        st.session_state.update(fresh_session_state(str(uuid.uuid4())))
+        reset_session_state(str(uuid.uuid4()))
         st.rerun()
 
     current_state = swarm_app.get_state(config)
@@ -284,5 +284,5 @@ else:
             st.markdown(summary)
 
         if st.button("🆕 Start New Audit", type="primary"):
-            st.session_state.update(fresh_session_state(str(uuid.uuid4())))
+            reset_session_state(str(uuid.uuid4()))
             st.rerun()

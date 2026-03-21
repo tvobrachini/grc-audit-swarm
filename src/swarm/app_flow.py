@@ -26,12 +26,3 @@ def derive_app_view_state(current_state: Any) -> dict[str, Any]:
         "is_phase1": is_phase1,
         "should_stream": should_stream,
     }
-
-
-def fresh_session_state(thread_id: str) -> dict[str, Any]:
-    return {
-        "thread_id": thread_id,
-        "chat_history": [],
-        "scope_submitted": False,
-        "control_feedback": {},
-    }
