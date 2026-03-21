@@ -18,7 +18,7 @@ load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.graph import app as swarm_app  # noqa: E402
-from swarm.session_manager import save_session  # noqa: E402
+from swarm.session_manager import save_session, update_session  # noqa: E402
 
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
@@ -67,6 +67,18 @@ def _merge_state_map(current, updates):
     merged = dict(current or {})
     merged.update(updates)
     return merged
+
+
+def _append_chat_message(role: str, content: str, reasoning=None):
+    message = {"role": role, "content": content}
+    if reasoning:
+        message["reasoning"] = reasoning
+    st.session_state.chat_history.append(message)
+    update_session(
+        st.session_state.thread_id,
+        chat_history=st.session_state.chat_history,
+        scope_text=st.session_state.scope_text_cache,
+    )
 
 
 def _suggest_audit_name(scope_text: str) -> str:
@@ -163,11 +175,14 @@ if not st.session_state.scope_submitted:
             st.warning("Please provide scope text.")
         else:
             name = audit_name.strip() or f"Audit {st.session_state.thread_id[:8]}"
-            save_session(st.session_state.thread_id, name, scope_text)
             st.session_state.scope_text_cache = scope_text
             st.session_state.scope_submitted = True
-            st.session_state.chat_history.append(
-                {"role": "user", "content": f"**🚀 {name}** — Scope loaded."}
+            _append_chat_message("user", f"**🚀 {name}** — Scope loaded.")
+            save_session(
+                st.session_state.thread_id,
+                name,
+                scope_text,
+                st.session_state.chat_history,
             )
             st.rerun()
 
@@ -259,9 +274,7 @@ else:
                             else getattr(last, "reasoning_snapshot", None)
                         )
                     txt = f"🟢 **`{node}`** completed"
-                    st.session_state.chat_history.append(
-                        {"role": "assistant", "content": txt, "reasoning": reasoning}
-                    )
+                    _append_chat_message("assistant", txt, reasoning=reasoning)
             st.rerun()
 
     # ════════════════════════════════════════════════════
@@ -347,7 +360,7 @@ else:
             "Type 'Approve to start execution' or describe what to change..."
         )
         if fb:
-            st.session_state.chat_history.append({"role": "user", "content": fb})
+            _append_chat_message("user", fb)
             if fb.strip().lower() in [
                 "approve",
                 "approved",
@@ -514,11 +527,9 @@ else:
                             "control_feedback": st.session_state.control_feedback,
                         },
                     )
-                    st.session_state.chat_history.append(
-                        {
-                            "role": "user",
-                            "content": f"Submitted feedback on {len(st.session_state.control_feedback)} controls for re-evaluation.",
-                        }
+                    _append_chat_message(
+                        "user",
+                        f"Submitted feedback on {len(st.session_state.control_feedback)} controls for re-evaluation.",
                     )
                     st.session_state.control_feedback = {}
                     st.session_state.resume_swarm = True
@@ -532,11 +543,8 @@ else:
                 use_container_width=True,
             ):
                 swarm_app.update_state(config, {"control_feedback": {}})
-                st.session_state.chat_history.append(
-                    {
-                        "role": "user",
-                        "content": "✅ Audit approved. Final report generated.",
-                    }
+                _append_chat_message(
+                    "user", "✅ Audit approved. Final report generated."
                 )
                 st.session_state.resume_swarm = True
                 st.rerun()
