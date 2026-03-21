@@ -15,7 +15,7 @@ load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.app_flow import derive_app_view_state  # noqa: E402
-from swarm.graph import app as swarm_app  # noqa: E402
+from swarm.graph_service import GraphService  # noqa: E402
 from swarm.review_actions import (  # noqa: E402
     build_phase1_review_patch,
     flag_control_for_finding,
@@ -47,6 +47,7 @@ inject_swarm_css()
 render_sidebar()
 initialize_session_state()
 
+graph_service = GraphService()
 config = {"configurable": {"thread_id": st.session_state.thread_id}}
 LAB_DIR = os.path.join(os.path.dirname(__file__), "lab_data")
 
@@ -134,7 +135,7 @@ else:
         reset_session_state(str(uuid.uuid4()))
         st.rerun()
 
-    current_state = swarm_app.get_state(config)
+    current_state = graph_service.get_state(config)
     view_state = derive_app_view_state(current_state)
     state_vals = view_state["state_vals"]
     at_phase1_review = view_state["at_phase1_review"]
@@ -174,9 +175,7 @@ else:
                 if not state_vals
                 else None
             )
-            for event in swarm_app.stream(
-                stream_input, config=config, stream_mode="updates"
-            ):
+            for event in graph_service.stream_updates(stream_input, config):
                 # s is the node update dictionary. LangGraph stream can sometimes return tuples for internals.
                 for node, s in event.items():
                     if not isinstance(s, dict):
@@ -200,7 +199,7 @@ else:
 
         def _handle_phase1_feedback(feedback: str):
             _append_chat_message("user", feedback)
-            swarm_app.update_state(config, build_phase1_review_patch(feedback))
+            graph_service.update_state(config, build_phase1_review_patch(feedback))
             st.session_state.resume_swarm = True
             st.rerun()
 
@@ -212,14 +211,14 @@ else:
     elif at_phase2_review:
 
         def _handle_mark_clean(control_id: str):
-            swarm_app.update_state(
+            graph_service.update_state(
                 config,
                 mark_control_clean(state_vals.get("execution_status"), control_id),
             )
             st.rerun()
 
         def _handle_flag_finding(control_id: str):
-            swarm_app.update_state(
+            graph_service.update_state(
                 config,
                 flag_control_for_finding(
                     state_vals.get("execution_status"), control_id
@@ -228,7 +227,7 @@ else:
             st.rerun()
 
         def _handle_rerun_control(control_id: str, feedback: str):
-            swarm_app.update_state(
+            graph_service.update_state(
                 config,
                 request_control_rerun(
                     state_vals.get("control_feedback"), control_id, feedback
@@ -238,7 +237,7 @@ else:
             st.rerun()
 
         def _handle_submit_feedback(control_feedback: dict[str, str]):
-            swarm_app.update_state(config, submit_phase2_feedback(control_feedback))
+            graph_service.update_state(config, submit_phase2_feedback(control_feedback))
             _append_chat_message(
                 "user",
                 f"Submitted feedback on {len(control_feedback)} controls for re-evaluation.",
@@ -248,7 +247,7 @@ else:
             st.rerun()
 
         def _handle_finalize():
-            swarm_app.update_state(config, {"control_feedback": {}})
+            graph_service.update_state(config, {"control_feedback": {}})
             _append_chat_message("user", "✅ Audit approved. Final report generated.")
             st.session_state.resume_swarm = True
             st.rerun()
