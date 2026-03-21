@@ -20,6 +20,7 @@ from swarm.state.schema import (
     AuditState,
     ControlMatrixItem,
 )
+from swarm.workflow_types import ExecutionStatus
 
 
 EXPECTED_NODES = [
@@ -127,7 +128,7 @@ class TestExecutionReruns:
             audit_scope_narrative="Access review audit",
             control_matrix=[control],
             testing_findings=[existing],
-            execution_status={"AC-01": "clean"},
+            execution_status={"AC-01": ExecutionStatus.CLEAN},
             control_feedback={},
         )
 
@@ -135,7 +136,7 @@ class TestExecutionReruns:
             result = run_all_workers_node(state)
 
         assert result["testing_findings"] == [existing]
-        assert result["execution_status"]["AC-01"] == "clean"
+        assert result["execution_status"]["AC-01"] == ExecutionStatus.CLEAN
         run_control_test_mock.assert_not_called()
 
     def test_run_all_workers_reruns_controls_with_feedback(self):
@@ -176,7 +177,7 @@ class TestExecutionReruns:
             audit_scope_narrative="Access review audit",
             control_matrix=[control],
             testing_findings=[existing],
-            execution_status={"AC-01": "clean"},
+            execution_status={"AC-01": ExecutionStatus.CLEAN},
             control_feedback={"AC-01": "Recheck pending offboarding evidence."},
         )
 
@@ -186,5 +187,5 @@ class TestExecutionReruns:
             result = run_all_workers_node(state)
 
         assert result["testing_findings"] == [rerun]
-        assert result["execution_status"]["AC-01"] == "awaiting_review"
+        assert result["execution_status"]["AC-01"] == ExecutionStatus.AWAITING_REVIEW
         run_control_test_mock.assert_called_once()

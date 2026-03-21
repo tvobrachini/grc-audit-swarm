@@ -18,6 +18,7 @@ from swarm.state.schema import (
     AuditProcedure,
     ControlMatrixItem,
 )
+from swarm.workflow_types import ExecutionStatus
 
 
 @pytest.fixture
@@ -136,8 +137,8 @@ def state_with_findings(
     aws_scope_state.control_matrix = [sample_control]
     aws_scope_state.testing_findings = [pass_finding, fail_finding, exception_finding]
     aws_scope_state.execution_status = {
-        "AC-01": "awaiting_review",
-        "VUL-02": "awaiting_review",
-        "LOG-04": "awaiting_review",
+        "AC-01": ExecutionStatus.AWAITING_REVIEW,
+        "VUL-02": ExecutionStatus.AWAITING_REVIEW,
+        "LOG-04": ExecutionStatus.AWAITING_REVIEW,
     }
     return aws_scope_state

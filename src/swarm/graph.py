@@ -18,6 +18,7 @@ from swarm.auth.permissions import (
 )
 from swarm.state.schema import AuditFinding, AuditState
 from swarm.storage import get_checkpointer
+from swarm.workflow_types import ExecutionStatus, ReviewDecision
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def should_revise(state: AuditState) -> str:
             state.revision_count,
             MAX_REVISIONS,
         )
-        return "revise"
+        return ReviewDecision.REVISE
 
     if state.revision_count >= MAX_REVISIONS and state.revision_feedback != "":
         logger.info(
@@ -72,15 +73,15 @@ def should_revise(state: AuditState) -> str:
             MAX_REVISIONS,
         )
         # Clear feedback so human starts fresh
-        return "proceed_to_human"
+        return ReviewDecision.PROCEED_TO_HUMAN
 
-    return "proceed_to_human"
+    return ReviewDecision.PROCEED_TO_HUMAN
 
 
 def human_should_approve_phase1(state: AuditState) -> str:
     if state.revision_feedback != "":
-        return "revise"
-    return "execute"
+        return ReviewDecision.REVISE
+    return ReviewDecision.EXECUTE
 
 
 # ── Phase 2: Execution Nodes ──────────────────────────────────────────────────
@@ -105,11 +106,11 @@ def run_all_workers_node(state: AuditState) -> dict:
 
         if not should_rerun and cid in existing_findings:
             findings.append(existing_findings[cid])
-            status_map.setdefault(cid, "awaiting_review")
+            status_map.setdefault(cid, ExecutionStatus.AWAITING_REVIEW)
             logger.info("  ↺ %s: preserved prior finding", cid)
             continue
 
-        status_map[cid] = "executing"
+        status_map[cid] = ExecutionStatus.EXECUTING
 
         # DDD Identity/Permissions Guardrail Execution Check
         try:
@@ -130,12 +131,12 @@ def run_all_workers_node(state: AuditState) -> dict:
                     substantive_result="Fail",
                 )
             )
-            status_map[cid] = "blocked_by_guardrail"
+            status_map[cid] = ExecutionStatus.BLOCKED_BY_GUARDRAIL
             continue
 
         finding = run_control_test(control, state, human_context=human_ctx)
         findings.append(finding)
-        status_map[cid] = "awaiting_review"
+        status_map[cid] = ExecutionStatus.AWAITING_REVIEW
         logger.info("  ✓ %s: %s", cid, finding.status)
 
     return {
@@ -170,8 +171,8 @@ def human_should_approve_phase2(state: AuditState) -> str:
     # Check if any control has feedback that needs re-running
     has_feedback = any(v.strip() for v in state.control_feedback.values())
     if has_feedback:
-        return "rerun"
-    return "end"
+        return ReviewDecision.RERUN
+    return ReviewDecision.END
 
 
 # ── Add nodes ─────────────────────────────────────────────────────────────────
