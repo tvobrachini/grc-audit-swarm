@@ -9,7 +9,7 @@ In mock mode: generates realistic simulated findings.
 In LLM mode:  reasons against evidence using the loaded skill system prompt.
 """
 
-import random
+import hashlib
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 
@@ -227,8 +227,16 @@ def _emulate_finding(
     ):
         outcome = "Exception"
     else:
-        # Weighted random: 60% Pass, 25% Exception, 15% Fail
-        outcome = random.choices(["Pass", "Exception", "Fail"], weights=[60, 25, 15])[0]  # nosec B311
+        # Deterministic fallback keeps offline demos and tests reproducible.
+        fingerprint = hashlib.sha256(
+            f"{control.control_id}:{human_context}".encode("utf-8")
+        ).digest()[0]
+        if fingerprint < 153:  # ~60%
+            outcome = "Pass"
+        elif fingerprint < 217:  # ~25%
+            outcome = "Exception"
+        else:  # ~15%
+            outcome = "Fail"
 
     # Use realistic mock evidence
 
