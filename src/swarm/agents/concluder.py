@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 from swarm.state.schema import AuditState
-from swarm.llm_factory import get_llm
+from swarm.runtime_adapters import build_llm_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,11 @@ def produce_executive_summary(state: AuditState) -> dict:
         fails,
     )
 
-    llm = get_llm(temperature=0.4, prefer_fast=True)
-    if llm is None:
+    runtime = build_llm_adapter(temperature=0.4, prefer_fast=True)
+    if not runtime.is_live:
+        logger.info("[Concluder] %s Falling back to template.", runtime.reason)
         return _emulate_summary(state, passes, exceptions, fails, highs)
+    llm = runtime.llm
 
     findings_text = "\n\n".join(
         [

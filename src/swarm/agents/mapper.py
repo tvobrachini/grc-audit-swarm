@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
-from swarm.llm_factory import get_llm
+from swarm.runtime_adapters import build_llm_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +76,11 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
         return _emulate_mapping(state)
 
     # In a real environment, we'd use LangChain here.
-    llm = get_llm(temperature=0)
-    if llm is None:
-        logger.warning("[Mapper] No LLM available. Emulating logic.")
+    runtime = build_llm_adapter(temperature=0)
+    if not runtime.is_live:
+        logger.warning("[Mapper] %s Emulating logic.", runtime.reason)
         return _emulate_mapping(state)
+    llm = runtime.llm
 
     # --- Phase 2a: Control Retrieval (Simulated RAG/Search) ---
     # In a full production system, we would embed the 1100+ SCF controls and do a vector search.

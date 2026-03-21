@@ -3,10 +3,9 @@ from typing import List
 from pydantic import BaseModel, Field
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_community.tools import DuckDuckGoSearchRun
 
 from swarm.state.schema import AuditState
-from swarm.llm_factory import get_llm
+from swarm.runtime_adapters import build_search_adapter
 from swarm.skill_loader import get_skill_by_id, get_researcher_context_hints
 
 logger = logging.getLogger(__name__)
@@ -32,17 +31,12 @@ def generate_risk_context(state: AuditState) -> dict:
     """
     logger.info("[Researcher] Building 1-pager risk context document...")
 
-    llm = get_llm(temperature=0.1)
-    if llm is None:
+    runtime = build_search_adapter(temperature=0.1)
+    if not runtime.is_live:
+        logger.info("[Researcher] %s Emulating logic.", runtime.reason)
         return _emulate_researcher(state)
-
-    try:
-        search_tool = DuckDuckGoSearchRun()
-    except Exception as e:
-        logger.warning(
-            "[Researcher] Search tool setup failed. Emulating logic. Error: %s", e
-        )
-        return _emulate_researcher(state)
+    llm = runtime.llm
+    search_tool = runtime.search_tool
 
     # Load skill-specific research guidance
     skill_hints = ""
@@ -207,15 +201,12 @@ def research_failed_controls(state: AuditState) -> dict:
         len(failed),
     )
 
-    llm = get_llm(temperature=0.1, prefer_fast=True)
-    if llm is None:
+    runtime = build_search_adapter(temperature=0.1, prefer_fast=True)
+    if not runtime.is_live:
+        logger.info("[Phase2 Researcher] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_researcher(state, failed)
-
-    try:
-        search_tool = DuckDuckGoSearchRun()
-    except Exception as e:
-        logger.warning("[Phase2 Researcher] Search tool unavailable: %s", e)
-        return _emulate_phase2_researcher(state, failed)
+    llm = runtime.llm
+    search_tool = runtime.search_tool
 
     # Load skill-specific research hints for targeted queries
     skill_hints = ""
