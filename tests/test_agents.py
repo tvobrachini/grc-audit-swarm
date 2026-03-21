@@ -88,13 +88,17 @@ class TestWorkerAgent:
         finding = _emulate_finding(sample_control)
         assert len(finding.evidence_extracted) >= 1
 
+    def test_emulate_finding_is_deterministic_for_same_input(self, sample_control):
+        first = _emulate_finding(sample_control, human_context="same context")
+        second = _emulate_finding(sample_control, human_context="same context")
+        assert first.status == second.status
+        assert first.justification == second.justification
+
     def test_emulate_finding_fail_has_risk_rating(self, sample_control):
         """Run multiple times to get a Fail result; Fail should always have a risk rating."""
-        for _ in range(10):
-            finding = _emulate_finding(sample_control)
-            if finding.status == "Fail":
-                assert finding.risk_rating in ("High", "Medium", "Low")
-                break
+        finding = _emulate_finding(sample_control, human_context="force fail bucket")
+        if finding.status == "Fail":
+            assert finding.risk_rating in ("High", "Medium", "Low")
 
     def test_mock_evidence_all_control_prefixes(self):
         """Every known control prefix must return non-empty evidence."""
