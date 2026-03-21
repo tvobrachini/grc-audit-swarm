@@ -9,12 +9,12 @@ import os
 import sys
 import uuid
 import streamlit as st
-import pdfplumber
 from dotenv import load_dotenv
 
 load_dotenv()
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
+from swarm.app_flow import derive_app_view_state, fresh_session_state  # noqa: E402
 from swarm.graph import app as swarm_app  # noqa: E402
 from swarm.review_actions import (  # noqa: E402
     build_phase1_review_patch,
@@ -29,6 +29,7 @@ from swarm.session_sync import append_chat_message, build_session_update  # noqa
 from ui.components.common import get_value, step_badge  # noqa: E402
 from ui.components.phase1_review import render_phase1_review  # noqa: E402
 from ui.components.phase2_review import render_phase2_review  # noqa: E402
+from ui.components.scope_input import render_scope_input  # noqa: E402
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
 from ui.components.state import initialize_session_state  # noqa: E402
@@ -48,13 +49,6 @@ initialize_session_state()
 
 config = {"configurable": {"thread_id": st.session_state.thread_id}}
 LAB_DIR = os.path.join(os.path.dirname(__file__), "lab_data")
-
-
-def lab_files(ext=None):
-    if not os.path.exists(LAB_DIR):
-        return []
-    f = [x for x in os.listdir(LAB_DIR) if os.path.isfile(os.path.join(LAB_DIR, x))]
-    return [x for x in f if x.endswith(ext)] if ext else f
 
 
 def _append_chat_message(role: str, content: str, reasoning=None):
@@ -105,77 +99,30 @@ st.title("🎯 Swarm Audit Command Center")
 # PHASE 0 — Scope Input
 # ══════════════════════════════════════════════════════════════════════════════
 if not st.session_state.scope_submitted:
-    st.markdown(
-        "Submit a scope narrative and let the AI swarm research, map controls, execute tests, and present findings for your review."
-    )
-    scope_text = ""
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("### 📄 Upload Scope")
-        up = st.file_uploader("PDF or TXT", type=["pdf", "txt"], key="scope_up")
-        if up:
-            if up.name.endswith(".pdf"):
-                with pdfplumber.open(up) as pdf:
-                    scope_text = "\n".join(
-                        [p.extract_text() for p in pdf.pages if p.extract_text()]
-                    )
-            else:
-                try:
-                    scope_text = up.getvalue().decode("utf-8")
-                except UnicodeDecodeError:
-                    st.error(
-                        "File encoding not supported. Please upload a UTF-8 encoded file."
-                    )
-                    scope_text = ""
-        labs = lab_files(".txt")
-        sel = st.selectbox("Or Lab Data", ["None"] + labs, key="scope_lab")
-        if sel != "None" and not scope_text:
-            _resolved = os.path.realpath(os.path.join(LAB_DIR, sel))
-            if not _resolved.startswith(os.path.realpath(LAB_DIR) + os.sep):
-                st.error("Invalid file selection.")
-            else:
-                with open(_resolved, "r", encoding="utf-8") as f:
-                    scope_text = f.read()
-    with colB:
-        st.markdown("### 🔍 Preview")
-        if scope_text:
-            st.text_area(
-                "Scope (Editable)", value=scope_text, height=200, key="scope_ta"
-            )
-            scope_text = st.session_state.scope_ta
-        else:
-            st.info("Upload or select lab data to see the scope.")
 
-    # Auto-suggest name when scope changes
-    if scope_text:
-        suggestion = _suggest_audit_name(scope_text)
-        if suggestion and st.session_state.suggested_audit_name != suggestion:
-            st.session_state.suggested_audit_name = suggestion
+    def _handle_scope_suggestion(suggestion: str):
+        st.session_state.suggested_audit_name = suggestion
 
-    st.markdown("---")
-    audit_name = st.text_input(
-        "📝 Audit Name",
-        value=st.session_state.suggested_audit_name,
-        placeholder="e.g. AWS Prod Q4 2026 – IAM Review",
-        key="audit_name",
-        help="Auto-suggested from scope — edit freely before launching.",
+    def _handle_scope_launch(scope_text: str, audit_name: str):
+        name = audit_name.strip() or f"Audit {st.session_state.thread_id[:8]}"
+        st.session_state.scope_text_cache = scope_text
+        st.session_state.scope_submitted = True
+        _append_chat_message("user", f"**🚀 {name}** — Scope loaded.")
+        save_session(
+            st.session_state.thread_id,
+            name,
+            scope_text,
+            st.session_state.chat_history,
+        )
+        st.rerun()
+
+    render_scope_input(
+        lab_dir=LAB_DIR,
+        suggested_audit_name=st.session_state.suggested_audit_name,
+        suggest_audit_name=_suggest_audit_name,
+        on_scope_change=_handle_scope_suggestion,
+        on_launch=_handle_scope_launch,
     )
-    _, c, _ = st.columns([1, 2, 1])
-    if c.button("🚀 Launch Swarm", type="primary", use_container_width=True):
-        if not scope_text:
-            st.warning("Please provide scope text.")
-        else:
-            name = audit_name.strip() or f"Audit {st.session_state.thread_id[:8]}"
-            st.session_state.scope_text_cache = scope_text
-            st.session_state.scope_submitted = True
-            _append_chat_message("user", f"**🚀 {name}** — Scope loaded.")
-            save_session(
-                st.session_state.thread_id,
-                name,
-                scope_text,
-                st.session_state.chat_history,
-            )
-            st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ACTIVE SESSION
@@ -184,36 +131,16 @@ else:
     # New Audit button
     _, col_reset = st.columns([5, 1])
     if col_reset.button("🔄 New Audit", use_container_width=True):
-        st.session_state.update(
-            {
-                "thread_id": str(uuid.uuid4()),
-                "chat_history": [],
-                "scope_submitted": False,
-                "control_feedback": {},
-            }
-        )
+        st.session_state.update(fresh_session_state(str(uuid.uuid4())))
         st.rerun()
 
     current_state = swarm_app.get_state(config)
-    next_nodes = current_state.next
-    state_vals = current_state.values or {}
-
-    # Gate detection
-    at_phase1_review = next_nodes and next_nodes[0] == "human_review"
-    at_phase2_review = next_nodes and next_nodes[0] == "human_review_execution"
-    at_running = (
-        not next_nodes
-        and not state_vals.get("testing_findings")
-        and state_vals.get("audit_scope_narrative", "") == ""
-    )
-    is_fully_done = not next_nodes and bool(state_vals.get("testing_findings"))
-
-    # Accurate current phase label
-    has_matrix = bool(state_vals.get("control_matrix"))
-    has_findings = bool(state_vals.get("testing_findings"))
-    is_phase1 = not has_matrix or (
-        has_matrix and not has_findings and not at_phase2_review
-    )
+    view_state = derive_app_view_state(current_state)
+    state_vals = view_state["state_vals"]
+    at_phase1_review = view_state["at_phase1_review"]
+    at_phase2_review = view_state["at_phase2_review"]
+    is_fully_done = view_state["is_fully_done"]
+    is_phase1 = view_state["is_phase1"]
 
     # ── Agent Progress Rail (collapsible) ─────────────────────────────────────
     if st.session_state.chat_history:
@@ -231,9 +158,7 @@ else:
     # ════════════════════════════════════════════════════
     # RUNNING — stream agent nodes
     # ════════════════════════════════════════════════════
-    if (
-        not at_phase1_review and not at_phase2_review and not is_fully_done
-    ) or st.session_state.get("resume_swarm"):
+    if view_state["should_stream"] or st.session_state.get("resume_swarm"):
         st.session_state.resume_swarm = False
         if is_phase1:
             spinner_msg = "🔍 Phase 1: Swarm researching and planning..."
@@ -359,12 +284,5 @@ else:
             st.markdown(summary)
 
         if st.button("🆕 Start New Audit", type="primary"):
-            st.session_state.update(
-                {
-                    "thread_id": str(uuid.uuid4()),
-                    "chat_history": [],
-                    "scope_submitted": False,
-                    "control_feedback": {},
-                }
-            )
+            st.session_state.update(fresh_session_state(str(uuid.uuid4())))
             st.rerun()
