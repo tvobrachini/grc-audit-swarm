@@ -8,10 +8,18 @@ and interrupt points are at the right checkpoints.
 
 import sys
 import os
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.graph import app
+from swarm.graph import run_all_workers_node
+from swarm.state.schema import (
+    AuditFinding,
+    AuditProcedure,
+    AuditState,
+    ControlMatrixItem,
+)
 
 
 EXPECTED_NODES = [
@@ -89,3 +97,94 @@ class TestGraphStructure:
         ]
         for src, dst in pipeline:
             assert (src, dst) in edges, f"Missing edge: {src} → {dst}"
+
+
+class TestExecutionReruns:
+    def test_run_all_workers_preserves_findings_without_feedback(self):
+        control = ControlMatrixItem(
+            control_id="AC-01",
+            domain="Access Control",
+            description="Quarterly user access review.",
+            procedures=AuditProcedure(
+                control_id="AC-01",
+                tod_steps=["Review policy"],
+                toe_steps=["Sample access reviews"],
+                substantive_steps=["Inspect orphan accounts"],
+                erl_items=["Access review evidence"],
+            ),
+        )
+        existing = AuditFinding(
+            control_id="AC-01",
+            agent_role="Execution Worker (Access Control)",
+            status="Pass",
+            justification="Existing finding.",
+            evidence_extracted=["Existing evidence."],
+            tod_result="Pass",
+            toe_result="Pass",
+            substantive_result="Pass",
+        )
+        state = AuditState(
+            audit_scope_narrative="Access review audit",
+            control_matrix=[control],
+            testing_findings=[existing],
+            execution_status={"AC-01": "clean"},
+            control_feedback={},
+        )
+
+        with patch("swarm.graph.run_control_test") as run_control_test_mock:
+            result = run_all_workers_node(state)
+
+        assert result["testing_findings"] == [existing]
+        assert result["execution_status"]["AC-01"] == "clean"
+        run_control_test_mock.assert_not_called()
+
+    def test_run_all_workers_reruns_controls_with_feedback(self):
+        control = ControlMatrixItem(
+            control_id="AC-01",
+            domain="Access Control",
+            description="Quarterly user access review.",
+            procedures=AuditProcedure(
+                control_id="AC-01",
+                tod_steps=["Review policy"],
+                toe_steps=["Sample access reviews"],
+                substantive_steps=["Inspect orphan accounts"],
+                erl_items=["Access review evidence"],
+            ),
+        )
+        existing = AuditFinding(
+            control_id="AC-01",
+            agent_role="Execution Worker (Access Control)",
+            status="Pass",
+            justification="Existing finding.",
+            evidence_extracted=["Existing evidence."],
+            tod_result="Pass",
+            toe_result="Pass",
+            substantive_result="Pass",
+        )
+        rerun = AuditFinding(
+            control_id="AC-01",
+            agent_role="Execution Worker (Access Control)",
+            status="Exception",
+            justification="Rerun finding.",
+            evidence_extracted=["Updated evidence."],
+            risk_rating="Medium",
+            tod_result="Pass",
+            toe_result="Exception",
+            substantive_result="Exception",
+        )
+        state = AuditState(
+            audit_scope_narrative="Access review audit",
+            control_matrix=[control],
+            testing_findings=[existing],
+            execution_status={"AC-01": "clean"},
+            control_feedback={"AC-01": "Recheck pending offboarding evidence."},
+        )
+
+        with patch(
+            "swarm.graph.run_control_test", return_value=rerun
+        ) as run_control_test_mock:
+            result = run_all_workers_node(state)
+
+        assert result["testing_findings"] == [rerun]
+        assert result["execution_status"]["AC-01"] == "awaiting_review"
+        run_control_test_mock.assert_called_once()

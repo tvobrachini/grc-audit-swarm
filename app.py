@@ -63,6 +63,12 @@ def step_badge(result):
     return icons.get(result, result)
 
 
+def _merge_state_map(current, updates):
+    merged = dict(current or {})
+    merged.update(updates)
+    return merged
+
+
 def _suggest_audit_name(scope_text: str) -> str:
     """Extract a concise audit name from the first meaningful line of the scope."""
     import re
@@ -464,20 +470,28 @@ else:
                 # Quick action buttons
                 col_a, col_b, col_c = st.columns(3)
                 if col_a.button("✅ Mark Clean", key=f"clean_{cid}"):
-                    swarm_app.update_state(config, {"execution_status": {cid: "clean"}})
+                    merged_status = _merge_state_map(
+                        state_vals.get("execution_status"), {cid: "clean"}
+                    )
+                    swarm_app.update_state(config, {"execution_status": merged_status})
                     st.rerun()
                 if col_b.button("🚩 Flag as Finding", key=f"flag_{cid}"):
-                    swarm_app.update_state(
-                        config, {"execution_status": {cid: "flagged"}}
+                    merged_status = _merge_state_map(
+                        state_vals.get("execution_status"), {cid: "flagged"}
                     )
+                    swarm_app.update_state(config, {"execution_status": merged_status})
                     st.rerun()
                 if col_c.button("🔁 Re-test with My Context", key=f"retest_{cid}"):
+                    merged_feedback = _merge_state_map(
+                        state_vals.get("control_feedback"), {cid: new_fb}
+                    )
                     swarm_app.update_state(
                         config,
                         {
-                            "control_feedback": {cid: new_fb},
+                            "control_feedback": merged_feedback,
                         },
                     )
+                    st.session_state.resume_swarm = True
                     st.rerun()
 
         # --- Bottom submit bar ---
