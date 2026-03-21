@@ -12,21 +12,32 @@ from swarm.review_actions import (
     submit_phase2_feedback,
 )
 from swarm.session_sync import append_chat_message, build_session_update
+from swarm.workflow_types import ExecutionStatus
 
 
 def test_merge_state_map_preserves_existing_entries():
-    merged = merge_state_map({"AC-01": "clean"}, {"LOG-04": "flagged"})
-    assert merged == {"AC-01": "clean", "LOG-04": "flagged"}
+    merged = merge_state_map(
+        {"AC-01": ExecutionStatus.CLEAN}, {"LOG-04": ExecutionStatus.FLAGGED}
+    )
+    assert merged == {
+        "AC-01": ExecutionStatus.CLEAN,
+        "LOG-04": ExecutionStatus.FLAGGED,
+    }
 
 
 def test_mark_control_clean_returns_graph_patch():
-    patch = mark_control_clean({"AC-01": "awaiting_review"}, "AC-01")
-    assert patch == {"execution_status": {"AC-01": "clean"}}
+    patch = mark_control_clean({"AC-01": ExecutionStatus.AWAITING_REVIEW}, "AC-01")
+    assert patch == {"execution_status": {"AC-01": ExecutionStatus.CLEAN}}
 
 
 def test_flag_control_for_finding_returns_graph_patch():
-    patch = flag_control_for_finding({"AC-01": "clean"}, "VUL-02")
-    assert patch == {"execution_status": {"AC-01": "clean", "VUL-02": "flagged"}}
+    patch = flag_control_for_finding({"AC-01": ExecutionStatus.CLEAN}, "VUL-02")
+    assert patch == {
+        "execution_status": {
+            "AC-01": ExecutionStatus.CLEAN,
+            "VUL-02": ExecutionStatus.FLAGGED,
+        }
+    }
 
 
 def test_request_control_rerun_merges_feedback():

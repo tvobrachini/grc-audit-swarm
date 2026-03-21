@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from swarm.workflow_types import ExecutionStatus
+
 
 # --- Traceability & Audit Logging ---
 class AuditAction(BaseModel):
@@ -100,8 +102,7 @@ class AuditState(BaseModel):
         description="Raw mocked JSON payloads or MCP tool outputs loaded for the workers to read.",
     )
     testing_findings: List[AuditFinding] = Field(default_factory=list)
-    # Per-control execution status: 'pending' | 'executing' | 'awaiting_review' | 'clean' | 'flagged'
-    execution_status: Dict[str, str] = Field(default_factory=dict)
+    execution_status: Dict[str, ExecutionStatus] = Field(default_factory=dict)
     # Per-control human feedback, keyed by control_id
     control_feedback: Dict[str, str] = Field(default_factory=dict)
     # Executive summary produced by Concluder agent

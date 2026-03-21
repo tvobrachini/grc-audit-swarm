@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+from swarm.workflow_types import ExecutionStatus
+
 PHASE1_APPROVAL_INPUTS = {
     "approve",
     "approved",
@@ -20,18 +22,22 @@ def merge_state_map(
 
 
 def mark_control_clean(
-    execution_status: Dict[str, str] | None, control_id: str
-) -> Dict[str, Dict[str, str]]:
+    execution_status: Dict[str, ExecutionStatus] | None, control_id: str
+) -> Dict[str, Dict[str, ExecutionStatus]]:
     return {
-        "execution_status": merge_state_map(execution_status, {control_id: "clean"})
+        "execution_status": merge_state_map(
+            execution_status, {control_id: ExecutionStatus.CLEAN}
+        )
     }
 
 
 def flag_control_for_finding(
-    execution_status: Dict[str, str] | None, control_id: str
-) -> Dict[str, Dict[str, str]]:
+    execution_status: Dict[str, ExecutionStatus] | None, control_id: str
+) -> Dict[str, Dict[str, ExecutionStatus]]:
     return {
-        "execution_status": merge_state_map(execution_status, {control_id: "flagged"})
+        "execution_status": merge_state_map(
+            execution_status, {control_id: ExecutionStatus.FLAGGED}
+        )
     }
 
 
