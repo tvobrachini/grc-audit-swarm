@@ -5,7 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from swarm.state.schema import AuditState
-from swarm.llm_factory import get_llm
+from swarm.runtime_adapters import build_llm_adapter
 from swarm.skill_loader import get_skill_by_id, get_specialist_prompt
 
 logger = logging.getLogger(__name__)
@@ -45,10 +45,12 @@ def inject_specialist_tests(state: AuditState) -> dict:
         ", ".join(roles),
     )
 
-    llm = get_llm(temperature=0.2)
-    if llm is None:
-        logger.warning("[Specialist] No LLM available. Emulating logic.")
+    runtime = build_llm_adapter(temperature=0.2)
+    if not runtime.is_live:
+        logger.warning("[Specialist] %s Emulating logic.", runtime.reason)
         return _emulate_specialist(state)
+    llm = runtime.llm
+    assert llm is not None
 
     # ─── Load Skill System Prompt ───────────────────────────────────────────────
     # If the Orchestrator matched skills, use their combined expert system prompts.
@@ -220,9 +222,12 @@ def annotate_findings_with_specialist(state: AuditState) -> dict:
         len(failed),
     )
 
-    llm = get_llm(temperature=0.1, prefer_fast=True)
-    if llm is None:
+    runtime = build_llm_adapter(temperature=0.1, prefer_fast=True)
+    if not runtime.is_live:
+        logger.info("[Phase2 Specialist] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_specialist(state, failed)
+    llm = runtime.llm
+    assert llm is not None
 
     # Load skill system prompt
     if state.active_skill_ids:

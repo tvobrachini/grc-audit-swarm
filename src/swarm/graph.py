@@ -18,7 +18,7 @@ from swarm.auth.permissions import (
 )
 from swarm.state.schema import AuditFinding, AuditState
 from swarm.storage import get_checkpointer
-from swarm.workflow_types import ExecutionStatus, ReviewDecision
+from swarm.workflow_types import ExecutionStatus, ReviewDecision, WorkflowNode
 
 logger = logging.getLogger(__name__)
 
@@ -176,57 +176,71 @@ def human_should_approve_phase2(state: AuditState) -> str:
 
 
 # ── Add nodes ─────────────────────────────────────────────────────────────────
-workflow.add_node("orchestrator", orchestrator_node)
-workflow.add_node("researcher", researcher_node)
-workflow.add_node("control_mapper", control_mapper_node)
-workflow.add_node("dynamic_specialists", dynamic_specialist_node)
-workflow.add_node("challenger", challenger_node)
-workflow.add_node("human_review", human_review_node)
-workflow.add_node("evidence_collector", evidence_collector_node)
-workflow.add_node("run_all_workers", run_all_workers_node)
+workflow.add_node(WorkflowNode.ORCHESTRATOR, orchestrator_node)
+workflow.add_node(WorkflowNode.RESEARCHER, researcher_node)
+workflow.add_node(WorkflowNode.CONTROL_MAPPER, control_mapper_node)
+workflow.add_node(WorkflowNode.DYNAMIC_SPECIALISTS, dynamic_specialist_node)
+workflow.add_node(WorkflowNode.CHALLENGER, challenger_node)
+workflow.add_node(WorkflowNode.HUMAN_REVIEW, human_review_node)
+workflow.add_node(WorkflowNode.EVIDENCE_COLLECTOR, evidence_collector_node)
+workflow.add_node(WorkflowNode.RUN_ALL_WORKERS, run_all_workers_node)
 # Phase 2 review pipeline nodes
-workflow.add_node("phase2_specialist", lambda s: annotate_findings_with_specialist(s))
-workflow.add_node("phase2_researcher", lambda s: research_failed_controls(s))
-workflow.add_node("phase2_challenger", lambda s: challenge_execution_findings(s))
-workflow.add_node("concluder", concluder_node)
-workflow.add_node("human_review_execution", human_review_execution_node)
+workflow.add_node(
+    WorkflowNode.PHASE2_SPECIALIST, lambda s: annotate_findings_with_specialist(s)
+)
+workflow.add_node(WorkflowNode.PHASE2_RESEARCHER, lambda s: research_failed_controls(s))
+workflow.add_node(
+    WorkflowNode.PHASE2_CHALLENGER, lambda s: challenge_execution_findings(s)
+)
+workflow.add_node(WorkflowNode.CONCLUDER, concluder_node)
+workflow.add_node(WorkflowNode.HUMAN_REVIEW_EXECUTION, human_review_execution_node)
 
 # ── Phase 1 Edges ─────────────────────────────────────────────────────────────
-workflow.set_entry_point("orchestrator")
-workflow.add_edge("orchestrator", "researcher")
-workflow.add_edge("researcher", "control_mapper")
-workflow.add_edge("control_mapper", "dynamic_specialists")
-workflow.add_edge("dynamic_specialists", "challenger")
+workflow.set_entry_point(WorkflowNode.ORCHESTRATOR)
+workflow.add_edge(WorkflowNode.ORCHESTRATOR, WorkflowNode.RESEARCHER)
+workflow.add_edge(WorkflowNode.RESEARCHER, WorkflowNode.CONTROL_MAPPER)
+workflow.add_edge(WorkflowNode.CONTROL_MAPPER, WorkflowNode.DYNAMIC_SPECIALISTS)
+workflow.add_edge(WorkflowNode.DYNAMIC_SPECIALISTS, WorkflowNode.CHALLENGER)
 workflow.add_conditional_edges(
-    "challenger",
+    WorkflowNode.CHALLENGER,
     should_revise,
-    {"revise": "researcher", "proceed_to_human": "human_review"},
+    {
+        ReviewDecision.REVISE: WorkflowNode.RESEARCHER,
+        ReviewDecision.PROCEED_TO_HUMAN: WorkflowNode.HUMAN_REVIEW,
+    },
 )
 workflow.add_conditional_edges(
-    "human_review",
+    WorkflowNode.HUMAN_REVIEW,
     human_should_approve_phase1,
-    {"revise": "researcher", "execute": "evidence_collector"},
+    {
+        ReviewDecision.REVISE: WorkflowNode.RESEARCHER,
+        ReviewDecision.EXECUTE: WorkflowNode.EVIDENCE_COLLECTOR,
+    },
 )
 
-workflow.add_edge("evidence_collector", "run_all_workers")
+workflow.add_edge(WorkflowNode.EVIDENCE_COLLECTOR, WorkflowNode.RUN_ALL_WORKERS)
 
 # ── Phase 2 Edges ─────────────────────────────────────────────────────────────
 # Workers → Specialist annotation → Researcher breach context → Challenger QA → Concluder → Human
-workflow.add_edge("run_all_workers", "phase2_specialist")
-workflow.add_edge("phase2_specialist", "phase2_researcher")
-workflow.add_edge("phase2_researcher", "phase2_challenger")
-workflow.add_edge("phase2_challenger", "concluder")
-workflow.add_edge("concluder", "human_review_execution")
+workflow.add_edge(WorkflowNode.RUN_ALL_WORKERS, WorkflowNode.PHASE2_SPECIALIST)
+workflow.add_edge(WorkflowNode.PHASE2_SPECIALIST, WorkflowNode.PHASE2_RESEARCHER)
+workflow.add_edge(WorkflowNode.PHASE2_RESEARCHER, WorkflowNode.PHASE2_CHALLENGER)
+workflow.add_edge(WorkflowNode.PHASE2_CHALLENGER, WorkflowNode.CONCLUDER)
+workflow.add_edge(WorkflowNode.CONCLUDER, WorkflowNode.HUMAN_REVIEW_EXECUTION)
 workflow.add_conditional_edges(
-    "human_review_execution",
+    WorkflowNode.HUMAN_REVIEW_EXECUTION,
     human_should_approve_phase2,
-    {"rerun": "run_all_workers", "end": END},
+    {ReviewDecision.RERUN: WorkflowNode.RUN_ALL_WORKERS, ReviewDecision.END: END},
 )
 
 memory = get_checkpointer()
 
 app = workflow.compile(
-    checkpointer=memory, interrupt_before=["human_review", "human_review_execution"]
+    checkpointer=memory,
+    interrupt_before=[
+        WorkflowNode.HUMAN_REVIEW,
+        WorkflowNode.HUMAN_REVIEW_EXECUTION,
+    ],
 )
 
 

@@ -12,15 +12,20 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.graph import app
-from swarm.graph import run_all_workers_node
+from swarm.graph import (
+    app,
+    human_should_approve_phase1,
+    human_should_approve_phase2,
+    run_all_workers_node,
+    should_revise,
+)
 from swarm.state.schema import (
     AuditFinding,
     AuditProcedure,
     AuditState,
     ControlMatrixItem,
 )
-from swarm.workflow_types import ExecutionStatus
+from swarm.workflow_types import ExecutionStatus, ReviewDecision
 
 
 EXPECTED_NODES = [
@@ -189,3 +194,25 @@ class TestExecutionReruns:
         assert result["testing_findings"] == [rerun]
         assert result["execution_status"]["AC-01"] == ExecutionStatus.AWAITING_REVIEW
         run_control_test_mock.assert_called_once()
+
+
+class TestGraphContracts:
+    def test_should_revise_returns_revise_when_feedback_present_and_under_limit(self):
+        state = AuditState(revision_feedback="tighten tests", revision_count=1)
+        assert should_revise(state) == ReviewDecision.REVISE
+
+    def test_should_revise_escalates_to_human_when_limit_reached(self):
+        state = AuditState(revision_feedback="still wrong", revision_count=2)
+        assert should_revise(state) == ReviewDecision.PROCEED_TO_HUMAN
+
+    def test_phase1_human_review_routes_to_execute_on_approval(self):
+        state = AuditState(revision_feedback="")
+        assert human_should_approve_phase1(state) == ReviewDecision.EXECUTE
+
+    def test_phase2_human_review_routes_to_rerun_when_feedback_present(self):
+        state = AuditState(control_feedback={"AC-01": "recheck users"})
+        assert human_should_approve_phase2(state) == ReviewDecision.RERUN
+
+    def test_phase2_human_review_routes_to_end_without_feedback(self):
+        state = AuditState(control_feedback={"AC-01": "   "})
+        assert human_should_approve_phase2(state) == ReviewDecision.END

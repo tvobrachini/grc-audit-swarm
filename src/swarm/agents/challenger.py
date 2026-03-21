@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 from swarm.state.schema import AuditState
-from swarm.llm_factory import get_llm
+from swarm.runtime_adapters import build_llm_adapter
 from swarm.skill_loader import get_skill_by_id, get_focus_domains
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,12 @@ def challenger_review(state: AuditState) -> dict:
     """
     logger.info("[Challenger] Reviewing draft matrix for completeness and rigor...")
 
-    llm = get_llm(temperature=0)
-    if llm is None:
-        logger.info("[Challenger] No LLM available. Auto-approving for emulation.")
+    runtime = build_llm_adapter(temperature=0)
+    if not runtime.is_live:
+        logger.info("[Challenger] %s Auto-approving for emulation.", runtime.reason)
         return _emulate_challenger(state)
+    llm = runtime.llm
+    assert llm is not None
 
     # Serialize the matrix for the LLM context
     matrix_str = ""
@@ -149,9 +151,12 @@ def challenge_execution_findings(state: AuditState) -> dict:
         len(findings),
     )
 
-    llm = get_llm(temperature=0, prefer_fast=True)
-    if llm is None:
+    runtime = build_llm_adapter(temperature=0, prefer_fast=True)
+    if not runtime.is_live:
+        logger.info("[Phase2 Challenger] %s Emulating logic.", runtime.reason)
         return _emulate_phase2_challenger(state)
+    llm = runtime.llm
+    assert llm is not None
 
     # Serialize findings for LLM review
     findings_text = "\n\n".join(
