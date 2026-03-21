@@ -1,11 +1,12 @@
-from typing import List, Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 # --- Traceability & Audit Logging ---
 class AuditAction(BaseModel):
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     agent_or_user_id: str = Field(
         description="Who performed the action (e.g., 'ScopeAnalyzer', 'CloudSpecialist', or 'HumanAuditor')"
     )
@@ -49,22 +50,24 @@ class AuditFinding(BaseModel):
     agent_role: str = Field(
         description="The Swarm Worker role that generated this finding."
     )
-    status: str = Field(description="Must be exactly: 'Pass', 'Fail', or 'Exception'.")
+    status: Literal["Pass", "Fail", "Exception"] = Field(
+        description="Must be exactly: 'Pass', 'Fail', or 'Exception'."
+    )
     justification: str = Field(description="Detailed narrative explaining the status.")
     evidence_extracted: List[str] = Field(
         description="Exact quotes or data points from evidence."
     )
-    risk_rating: Optional[str] = Field(
+    risk_rating: Optional[Literal["High", "Medium", "Low"]] = Field(
         None, description="'High', 'Medium', 'Low', or None for Pass."
     )
     # Per-step results for the Findings Command Center UI
-    tod_result: Optional[str] = Field(
+    tod_result: Optional[Literal["Pass", "Fail"]] = Field(
         None, description="'Pass' or 'Fail' for Test of Design."
     )
-    toe_result: Optional[str] = Field(
+    toe_result: Optional[Literal["Pass", "Fail", "Exception"]] = Field(
         None, description="'Pass', 'Fail', or 'Exception' for Test of Effectiveness."
     )
-    substantive_result: Optional[str] = Field(
+    substantive_result: Optional[Literal["Pass", "Fail", "Exception"]] = Field(
         None, description="'Pass', 'Fail', or 'Exception' for Substantive Testing."
     )
 

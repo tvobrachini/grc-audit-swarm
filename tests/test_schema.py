@@ -9,7 +9,11 @@ state objects can be created and mutated without validation errors.
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from pydantic import ValidationError
 
 from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditAction
 
@@ -66,6 +70,27 @@ class TestAuditFinding:
                 evidence_extracted=["Evidence item."],
             )
             assert f.status == valid_status
+
+    def test_invalid_finding_status_is_rejected(self):
+        with pytest.raises(ValidationError):
+            AuditFinding(
+                control_id="TEST-01",
+                agent_role="TestAgent",
+                status="Unknown",
+                justification="Test.",
+                evidence_extracted=["Evidence item."],
+            )
+
+    def test_invalid_risk_rating_is_rejected(self):
+        with pytest.raises(ValidationError):
+            AuditFinding(
+                control_id="TEST-01",
+                agent_role="TestAgent",
+                status="Fail",
+                justification="Test.",
+                evidence_extracted=["Evidence item."],
+                risk_rating="Critical",
+            )
 
     def test_finding_evidence_extracted_is_list(self, pass_finding):
         assert isinstance(pass_finding.evidence_extracted, list)
