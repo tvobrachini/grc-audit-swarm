@@ -92,6 +92,7 @@ def _extract_themes_with_llm(scope_text: str):
             ("human", "Audit Scope Narrative:\n{scope}"),
         ]
     )
+    assert runtime.llm is not None
     chain = prompt | runtime.llm.with_structured_output(OrchestratorOutput)
     try:
         result = chain.invoke({"scope": scope_text})

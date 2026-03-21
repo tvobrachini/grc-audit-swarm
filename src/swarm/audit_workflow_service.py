@@ -47,7 +47,7 @@ def _describe_node_event(node: str, update: dict) -> str:
         if matrix:
             ids = ", ".join(
                 (
-                    m.get("control_id")
+                    m.get("control_id") or ""
                     if isinstance(m, dict)
                     else getattr(m, "control_id", "")
                 )

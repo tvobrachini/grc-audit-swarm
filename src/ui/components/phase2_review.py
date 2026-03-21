@@ -190,6 +190,7 @@ def render_phase2_review(
                 key=f"fb_{cid}",
                 label_visibility="collapsed",
             )
+            new_fb = new_fb or ""
             if new_fb.strip():
                 session_control_feedback[cid] = new_fb
                 has_pending_feedback = True
