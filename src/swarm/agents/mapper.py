@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 from typing import List
@@ -7,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from swarm.state.schema import AuditState, ControlMatrixItem, AuditProcedure
 from swarm.llm_factory import get_llm
+
+logger = logging.getLogger(__name__)
 
 
 # Helper function to get the SCF database path
@@ -65,17 +68,17 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
     Phase 2a: Pulls generic controls from SCF based on Orchestrator's risk themes.
     Phase 2b: Designs baseline test procedures for those controls.
     """
-    print(f"[Mapper] Analyzing risk themes: {', '.join(state.risk_themes)}")
+    logger.info("[Mapper] Analyzing risk themes: %s", ", ".join(state.risk_themes))
 
     # Ensure API Key
     if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
-        print("[Mapper] Warning: No API keys found. Emulating logic.")
+        logger.warning("[Mapper] No API keys found. Emulating logic.")
         return _emulate_mapping(state)
 
     # In a real environment, we'd use LangChain here.
     llm = get_llm(temperature=0)
     if llm is None:
-        print("[Mapper] No LLM available. Emulating logic.")
+        logger.warning("[Mapper] No LLM available. Emulating logic.")
         return _emulate_mapping(state)
 
     # --- Phase 2a: Control Retrieval (Simulated RAG/Search) ---
@@ -88,7 +91,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
         with open(scf_path, "r", encoding="utf-8") as f:
             scf_db = json.load(f)
     except FileNotFoundError:
-        print(f"[Mapper] Error: SCF database not found at {scf_path}. Emulating.")
+        logger.warning("[Mapper] SCF database not found at %s. Emulating.", scf_path)
         return _emulate_mapping(state)
 
     # Heuristic filtering: find controls whose domain or description matches the risk themes somewhat
@@ -124,7 +127,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
     top_candidates = candidate_controls[:20]
 
     if not top_candidates:
-        print("[Mapper] RAG heuristic found no matches. Defaulting.")
+        logger.info("[Mapper] RAG heuristic found no matches. Defaulting.")
         return _emulate_mapping(state)
 
     # Format context for LLM
@@ -151,7 +154,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
     structured_mapper = llm.with_structured_output(ScfMappingOutput)
     mapper_chain = mapping_prompt | structured_mapper
 
-    print("[Mapper] Asking LLM to select from candidate controls...")
+    logger.info("[Mapper] Asking LLM to select from candidate controls...")
     try:
         mapping_result = mapper_chain.invoke(
             {
@@ -163,7 +166,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
         selected_ids = mapping_result.selected_control_ids
         justification = mapping_result.mapping_justification
     except Exception as e:
-        print(f"[Mapper] LLM Mapping failed: {e}. Emulating.")
+        logger.warning("[Mapper] LLM mapping failed. Emulating. Error: %s", e)
         return _emulate_mapping(state)
 
     # Retrieve full definitions for selected controls
@@ -188,7 +191,7 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
 
     control_matrix = []
 
-    print("[Mapper] Asking LLM to design baseline audit procedures...")
+    logger.info("[Mapper] Asking LLM to design baseline audit procedures...")
     for control in selected_full_controls:
         try:
             procedure_result = designer_chain.invoke(
@@ -214,8 +217,10 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
             control_matrix.append(matrix_item)
 
         except Exception as e:
-            print(
-                f"[Mapper] LLM Procedure design failed for {control['control_id']}: {e}"
+            logger.warning(
+                "[Mapper] LLM procedure design failed for %s: %s",
+                control["control_id"],
+                e,
             )
             # Do not append if failed, skip to next
 
@@ -236,10 +241,12 @@ def map_controls_and_design_tests(state: AuditState) -> dict:
     ]
 
     if not control_matrix:
-        print("[Mapper] Matrix empty after processing, falling back to emulation.")
+        logger.warning(
+            "[Mapper] Matrix empty after processing, falling back to emulation."
+        )
         return _emulate_mapping(state)
 
-    print("[Mapper] Complete. Designed initial control matrix.")
+    logger.info("[Mapper] Complete. Designed initial control matrix.")
     return {
         "control_matrix": control_matrix,
         "audit_trail": state.audit_trail + audit_trail_entries,

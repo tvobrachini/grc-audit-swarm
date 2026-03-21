@@ -1,3 +1,4 @@
+import logging
 from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
@@ -5,6 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from swarm.state.schema import AuditState
 from swarm.llm_factory import get_llm
 from swarm.skill_loader import get_skill_by_id, get_focus_domains
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewOutput(BaseModel):
@@ -23,11 +26,11 @@ def challenger_review(state: AuditState) -> dict:
     Checks for logical gaps, missing obvious controls based on the scope,
     or vague procedures.
     """
-    print("[Challenger] Reviewing draft matrix for completeness and rigor...")
+    logger.info("[Challenger] Reviewing draft matrix for completeness and rigor...")
 
     llm = get_llm(temperature=0)
     if llm is None:
-        print("[Challenger] No LLM available. Auto-approving for emulation.")
+        logger.info("[Challenger] No LLM available. Auto-approving for emulation.")
         return _emulate_challenger(state)
 
     # Serialize the matrix for the LLM context
@@ -58,7 +61,7 @@ def challenger_review(state: AuditState) -> dict:
     reviewer_chain = review_prompt | structured_reviewer
 
     try:
-        print("[Challenger] Prompting Lead QA Partner LLM...")
+        logger.info("[Challenger] Prompting Lead QA Partner LLM...")
         result = reviewer_chain.invoke(
             {
                 "scope": state.audit_scope_narrative,
@@ -71,12 +74,12 @@ def challenger_review(state: AuditState) -> dict:
         feedback = result.feedback
 
     except Exception as e:
-        print(f"[Challenger] LLM Review failed: {e}")
+        logger.warning("[Challenger] LLM review failed: %s", e)
         return _emulate_challenger(state)
 
-    print(f"[Challenger] Status: {status}")
+    logger.info("[Challenger] Status: %s", status)
     if feedback:
-        print(f"[Challenger] Feedback: {feedback}")
+        logger.info("[Challenger] Feedback: %s", feedback)
 
     audit_trail_entries = [
         {
@@ -141,8 +144,9 @@ def challenge_execution_findings(state: AuditState) -> dict:
     if not findings:
         return {}
 
-    print(
-        f"[Phase2 Challenger] QA reviewing {len(findings)} findings for consistency and calibration..."
+    logger.info(
+        "[Phase2 Challenger] QA reviewing %d findings for consistency and calibration...",
+        len(findings),
     )
 
     llm = get_llm(temperature=0, prefer_fast=True)
@@ -217,10 +221,11 @@ def challenge_execution_findings(state: AuditState) -> dict:
                 f"- {note}" for note in result.calibration_notes
             )
 
-        print(f"[Phase2 Challenger] Quality review: {result.overall_quality}")
+        logger.info("[Phase2 Challenger] Quality review: %s", result.overall_quality)
         if result.calibration_notes:
-            print(
-                f"  {len(result.calibration_notes)} calibration note(s) added to findings."
+            logger.info(
+                "[Phase2 Challenger] %d calibration note(s) added to findings.",
+                len(result.calibration_notes),
             )
 
         return {
@@ -246,7 +251,7 @@ def challenge_execution_findings(state: AuditState) -> dict:
         }
 
     except Exception as e:
-        print(f"[Phase2 Challenger] Failed: {e}")
+        logger.warning("[Phase2 Challenger] Failed: %s", e)
         return _emulate_phase2_challenger(state)
 
 

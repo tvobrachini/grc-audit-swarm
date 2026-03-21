@@ -1,3 +1,4 @@
+import logging
 from typing import List
 from pydantic import BaseModel, Field
 
@@ -7,6 +8,8 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from swarm.state.schema import AuditState
 from swarm.llm_factory import get_llm
 from swarm.skill_loader import get_skill_by_id, get_researcher_context_hints
+
+logger = logging.getLogger(__name__)
 
 
 class SearchQueries(BaseModel):
@@ -27,7 +30,7 @@ def generate_risk_context(state: AuditState) -> dict:
     Takes the identified themes and scope, searches the web for recent data/breaches,
     and drafts a powerful 1-pager context doc with citations.
     """
-    print("[Researcher] Building 1-pager risk context document...")
+    logger.info("[Researcher] Building 1-pager risk context document...")
 
     llm = get_llm(temperature=0.1)
     if llm is None:
@@ -36,7 +39,9 @@ def generate_risk_context(state: AuditState) -> dict:
     try:
         search_tool = DuckDuckGoSearchRun()
     except Exception as e:
-        print(f"[Researcher] Search tool setup failed: {e}. Emulating logic.")
+        logger.warning(
+            "[Researcher] Search tool setup failed. Emulating logic. Error: %s", e
+        )
         return _emulate_researcher(state)
 
     # Load skill-specific research guidance
@@ -45,8 +50,9 @@ def generate_risk_context(state: AuditState) -> dict:
         skills = [s for sid in state.active_skill_ids if (s := get_skill_by_id(sid))]
         skill_hints = get_researcher_context_hints(skills)
         if skill_hints:
-            print(
-                f"[Researcher] Skill hints loaded for query guidance: {', '.join(state.active_skill_names)}"
+            logger.info(
+                "[Researcher] Skill hints loaded for query guidance: %s",
+                ", ".join(state.active_skill_names),
             )
 
     # Step 1: Generate optimal search queries
@@ -71,7 +77,7 @@ def generate_risk_context(state: AuditState) -> dict:
 
     search_results = ""
     try:
-        print("[Researcher] Generating search queries...")
+        logger.info("[Researcher] Generating search queries...")
         queries_res = query_chain.invoke(
             {
                 "themes": ", ".join(state.risk_themes),
@@ -81,12 +87,12 @@ def generate_risk_context(state: AuditState) -> dict:
 
         # Step 2: Execute searches
         for q in queries_res.queries:
-            print(f"  -> Searching: '{q}'")
+            logger.info("[Researcher] Searching: '%s'", q)
             res = search_tool.invoke(q)
             search_results += f"\\nQuery: {q}\\nResults: {res}\\n"
 
     except Exception as e:
-        print(f"[Researcher] Search failed: {e}")
+        logger.warning("[Researcher] Search failed: %s", e)
         search_results = "Search unavailable due to network/API constraints."
 
     # Step 3: Write the 1-Pager
@@ -106,7 +112,7 @@ def generate_risk_context(state: AuditState) -> dict:
     doc_chain = doc_prompt | llm.with_structured_output(RiskContextOutput)
 
     try:
-        print("[Researcher] Compiling 1-pager with real-world context...")
+        logger.info("[Researcher] Compiling 1-pager with real-world context...")
         final_doc = doc_chain.invoke(
             {
                 "themes": ", ".join(state.risk_themes),
@@ -116,7 +122,7 @@ def generate_risk_context(state: AuditState) -> dict:
         )
         risk_doc = final_doc.document_markdown
     except Exception as e:
-        print(f"[Researcher] Document generation failed: {e}")
+        logger.warning("[Researcher] Document generation failed: %s", e)
         return _emulate_researcher(state)
 
     audit_trail_entries = [
@@ -193,11 +199,12 @@ def research_failed_controls(state: AuditState) -> dict:
     failed = [f for f in findings if f.status in ("Fail", "Exception")]
 
     if not failed:
-        print("[Phase2 Researcher] No failures to research.")
+        logger.info("[Phase2 Researcher] No failures to research.")
         return {}
 
-    print(
-        f"[Phase2 Researcher] Researching real-world precedent for {len(failed)} failed controls..."
+    logger.info(
+        "[Phase2 Researcher] Researching real-world precedent for %d failed controls...",
+        len(failed),
     )
 
     llm = get_llm(temperature=0.1, prefer_fast=True)
@@ -207,7 +214,7 @@ def research_failed_controls(state: AuditState) -> dict:
     try:
         search_tool = DuckDuckGoSearchRun()
     except Exception as e:
-        print(f"[Phase2 Researcher] Search tool unavailable: {e}")
+        logger.warning("[Phase2 Researcher] Search tool unavailable: %s", e)
         return _emulate_phase2_researcher(state, failed)
 
     # Load skill-specific research hints for targeted queries
@@ -259,7 +266,7 @@ def research_failed_controls(state: AuditState) -> dict:
             # Execute the search
             search_result = ""
             try:
-                print(f"  → Searching: '{result.search_query}'")
+                logger.info("[Phase2 Researcher] Searching: '%s'", result.search_query)
                 search_result = search_tool.invoke(result.search_query)[:600]
             except Exception:
                 search_result = "Search unavailable."
@@ -277,9 +284,11 @@ def research_failed_controls(state: AuditState) -> dict:
                     )
                 }
             )
-            print(f"  ✓ Researched {finding.control_id}")
+            logger.info("[Phase2 Researcher] Researched %s", finding.control_id)
         except Exception as e:
-            print(f"[Phase2 Researcher] Failed for {finding.control_id}: {e}")
+            logger.warning(
+                "[Phase2 Researcher] Failed for %s: %s", finding.control_id, e
+            )
 
     return {
         "testing_findings": updated,
