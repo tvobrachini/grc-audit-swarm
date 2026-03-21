@@ -92,11 +92,23 @@ def run_all_workers_node(state: AuditState) -> dict:
     logger.info(
         "[Execution] Running workers for %d controls...", len(state.control_matrix)
     )
+    existing_findings = {
+        finding.control_id: finding for finding in state.testing_findings
+    }
     findings = []
-    status_map = {}
+    status_map = dict(state.execution_status)
 
     for control in state.control_matrix:
         cid = control.control_id
+        human_ctx = state.control_feedback.get(cid, "").strip()
+        should_rerun = not state.testing_findings or bool(human_ctx)
+
+        if not should_rerun and cid in existing_findings:
+            findings.append(existing_findings[cid])
+            status_map.setdefault(cid, "awaiting_review")
+            logger.info("  ↺ %s: preserved prior finding", cid)
+            continue
+
         status_map[cid] = "executing"
 
         # DDD Identity/Permissions Guardrail Execution Check
@@ -121,8 +133,6 @@ def run_all_workers_node(state: AuditState) -> dict:
             status_map[cid] = "blocked_by_guardrail"
             continue
 
-        # Check if human left feedback specifically for this control
-        human_ctx = state.control_feedback.get(cid, "")
         finding = run_control_test(control, state, human_context=human_ctx)
         findings.append(finding)
         status_map[cid] = "awaiting_review"
