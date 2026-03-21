@@ -41,13 +41,13 @@ graph TD
     Res --> Map[Control Mapper]:::phase1
     Map --> Spec[Dynamic Specialist]:::phase1
     Spec --> QA1[QA Challenger]:::phase1
-    QA1 -- Revise --> Res
+    QA1 -- Revise --> Map
     QA1 -- Proceed --> HR1{Human Review\nPhase 1}:::human
 
     HR1 -- Revise --> Res
     HR1 -- Approved --> Ev[Evidence Collector]:::phase2
 
-    Ev --> Workers[Execution Workers\none per control, sequential]:::phase2
+    Ev --> Workers[Execution Workers\none per control, parallel]:::phase2
     Workers --> Spec2[Specialist Annotator]:::phase2
     Spec2 --> Res2[Foundations Researcher]:::phase2
     Res2 --> QA2[Execution Challenger]:::phase2
@@ -69,13 +69,15 @@ graph TD
 ## 🚀 Key Features
 
 - **📡 Live Research:** Integrated web search (DDGS) for grounding audits in current threat data.
-- **🔌 Loadable Skill Modules:** Define specialized audit logic in YAML files (`skills/`) for easy extensibility.
-- **📊 Findings Command Center:** Interactive UI with KPI bars, expandable control drill-downs, and per-step result badges (✅/❌/⚠️).
-- **🛡️ Guardrail Test Suite (BDD):** 100 automated tests currently pass locally, including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
-- **💾 Persistent Sessions:** Audit scope text and activity history are persisted and restored across sessions via the session/storage layer.
+- **🔌 Loadable Skill Modules:** Define specialized audit logic in YAML files (`skills/`) for easy extensibility. Active skills are surfaced as badges in the Phase 1 review UI.
+- **⚡ Parallel Worker Execution:** Control tests run concurrently via `ThreadPoolExecutor` (up to 3 simultaneous LLM calls), dramatically reducing Phase 2 completion time.
+- **📊 Findings Command Center:** Interactive UI with KPI bars, expandable control drill-downs, per-step result badges (✅/❌/⚠️), and a layered finding view that separates worker findings from specialist and researcher context.
+- **🗺️ Phase Progress Strip:** Animated stepper tracks audit progress across Scope → Planning → Plan Review → Testing → Findings → Report.
+- **🛡️ Guardrail Test Suite (BDD):** 121 automated tests pass, including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
+- **💾 Persistent Sessions:** Audit scope, activity history, and phase status are persisted and restored across sessions, with per-session status badges in the sidebar.
 - **🧾 Typed Workflow & Evidence Models:** Workflow states use shared typed status values, and collected evidence is stored through structured control/tool evidence objects.
 - **📦 Containerized Dev Setup:** Dockerized, packaged with `uv`, and covered by SAST (`bandit`) and CI-oriented checks.
-- **⚡ LLM Rate-Limit Optimized:** Dynamically degrades to `llama-3.1-8b-instant` during batch execution to conquer Groq's 6,000 TPM limit while maintaining quality.
+- **🤖 LLM Rate-Limit Optimized:** Dynamically degrades to `llama-3.1-8b-instant` during batch execution to conquer Groq's 6,000 TPM limit while maintaining quality.
 
 ---
 
