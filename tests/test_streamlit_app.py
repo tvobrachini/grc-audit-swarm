@@ -17,8 +17,16 @@ def test_app_initial_screen_renders(monkeypatch):
     assert any(button.label == "🚀 Launch Swarm" for button in at.button)
 
 
-def test_scope_input_component_loads_lab_file_and_triggers_launch():
+def test_scope_input_component_loads_lab_file_and_triggers_launch(
+    tmp_path, monkeypatch
+):
+    lab_file = tmp_path / "aws_scope.txt"
+    expected_scope = "AWS IAM review\nValidate CloudTrail coverage\n"
+    lab_file.write_text(expected_scope, encoding="utf-8")
+    monkeypatch.setenv("TEST_LAB_DIR", str(tmp_path))
+
     def app():
+        import os
         import streamlit as st
 
         from ui.components.scope_input import render_scope_input
@@ -36,7 +44,7 @@ def test_scope_input_component_loads_lab_file_and_triggers_launch():
             }
 
         render_scope_input(
-            lab_dir="lab_data",
+            lab_dir=os.environ["TEST_LAB_DIR"],
             suggested_audit_name=st.session_state.captured_suggestion,
             suggest_audit_name=lambda text: text.splitlines()[-1],
             on_scope_change=on_scope_change,
@@ -45,13 +53,18 @@ def test_scope_input_component_loads_lab_file_and_triggers_launch():
 
     at = AppTest.from_function(app)
     at.run()
-    at.selectbox[0].set_value("aws_iam_cloudtrail_audit.txt")
+    lab_options = [option for option in at.selectbox[0].options if option != "None"]
+    assert lab_options
+
+    selected_lab = lab_options[0]
+
+    at.selectbox[0].set_value(selected_lab)
     at.run()
 
-    assert "AWS" in at.text_area[0].value
+    assert at.text_area[0].value == expected_scope
 
     at.button[0].click()
     at.run()
 
     launch_payload = at.session_state["launch_payload"]
-    assert "AWS" in launch_payload["scope_text"]
+    assert launch_payload["scope_text"] == expected_scope

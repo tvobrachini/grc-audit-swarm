@@ -102,9 +102,10 @@ def render_phase2_review(
                 height=90,
                 key=fb_key,
             )
-            session_control_feedback[cid] = new_fb
+            normalized_fb = new_fb or ""
+            session_control_feedback[cid] = normalized_fb
 
-            if new_fb.strip():
+            if normalized_fb.strip():
                 has_pending_feedback = True
 
             col_a, col_b, col_c = st.columns(3)
@@ -113,7 +114,7 @@ def render_phase2_review(
             if col_b.button("🚩 Flag as Finding", key=f"flag_{cid}"):
                 on_flag_finding(cid)
             if col_c.button("🔁 Re-test with My Context", key=f"retest_{cid}"):
-                on_rerun_control(cid, new_fb)
+                on_rerun_control(cid, normalized_fb)
 
     st.markdown("---")
     _, c_sub2, _ = st.columns([1, 2, 1])
