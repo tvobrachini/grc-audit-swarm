@@ -19,6 +19,14 @@ AUDIT_TOOL_MAP = {
 }
 
 
+def _store_tool_evidence(
+    evidence_updates: Dict[str, Any], prefix: str, tool_name: str, payload: Any
+) -> None:
+    """Accumulate evidence per control prefix instead of overwriting prior tool output."""
+    prefix_bucket = evidence_updates.setdefault(prefix, {})
+    prefix_bucket[tool_name] = _redact_aws_metadata(payload)
+
+
 async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
     """
     LangGraph Node: Evidence Collector (Local MCP version)
@@ -65,18 +73,21 @@ async def collect_aws_evidence(state: AuditState) -> Dict[str, Any]:
                                 raw_text = result.content[0].text
                                 try:
                                     data = json.loads(raw_text)
-                                    # Scrub sensitive Account IDs (12 digits) from keys and values
-                                    redacted_data = _redact_aws_metadata(data)
-                                    evidence_updates[prefix] = redacted_data
+                                    _store_tool_evidence(
+                                        evidence_updates, prefix, tool_name, data
+                                    )
                                 except Exception:
-                                    evidence_updates[prefix] = _redact_aws_metadata(
-                                        raw_text
+                                    _store_tool_evidence(
+                                        evidence_updates, prefix, tool_name, raw_text
                                     )
 
                         except Exception as tool_err:
                             print(f"  ! Tool call failed for {tool_name}: {tool_err}")
-                            evidence_updates[prefix] = (
-                                f"Error gathering evidence: {tool_err}"
+                            _store_tool_evidence(
+                                evidence_updates,
+                                prefix,
+                                tool_name,
+                                f"Error gathering evidence: {tool_err}",
                             )
 
     except Exception as e:
