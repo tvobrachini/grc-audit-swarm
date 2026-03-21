@@ -5,7 +5,14 @@ Stores a mapping of LangGraph thread_ids → human-readable audit names
 in a simple JSON file on disk so sessions survive Streamlit restarts.
 
 File: data/audit_sessions.json
-Schema: { "thread_id": {"name": "...", "created_at": "...", "scope_preview": "..."} }
+Schema: {
+  "thread_id": {
+    "name": "...",
+    "created_at": "...",
+    "scope_preview": "...",
+    "state_snapshot": {...}
+  }
+}
 """
 
 import json
