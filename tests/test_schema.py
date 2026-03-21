@@ -16,7 +16,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from pydantic import ValidationError
 
 from swarm.evidence import ControlEvidence, ToolEvidence
-from swarm.state.schema import AuditState, AuditFinding, ControlMatrixItem, AuditAction
+from swarm.state.schema import (
+    AuditAction,
+    AuditFinding,
+    AuditProcedure,
+    AuditState,
+    ControlMatrixItem,
+)
 
 
 class TestAuditStateDefaults:
@@ -57,6 +63,79 @@ class TestAuditStateDefaults:
                 )
             }
         )
+        assert (
+            state.evidence_log["AC-01"]
+            .tool_results["get_iam_password_policy"]
+            .payload["MinimumPasswordLength"]
+            == 14
+        )
+
+    def test_state_accepts_legacy_model_instances(self):
+        class LegacyAuditProcedure(AuditProcedure):
+            pass
+
+        class LegacyControlMatrixItem(ControlMatrixItem):
+            pass
+
+        class LegacyAuditFinding(AuditFinding):
+            pass
+
+        class LegacyAuditAction(AuditAction):
+            pass
+
+        class LegacyToolEvidence(ToolEvidence):
+            pass
+
+        class LegacyControlEvidence(ControlEvidence):
+            pass
+
+        procedure = LegacyAuditProcedure(
+            control_id="AC-01",
+            tod_steps=["Review policy"],
+            toe_steps=["Sample review"],
+            substantive_steps=["Inspect exceptions"],
+            erl_items=["Policy export"],
+        )
+        control = LegacyControlMatrixItem(
+            control_id="AC-01",
+            domain="Access Control",
+            description="Quarterly review",
+            procedures=procedure,
+        )
+        finding = LegacyAuditFinding(
+            control_id="AC-01",
+            agent_role="Worker",
+            status="Pass",
+            justification="All checks passed.",
+            evidence_extracted=["No exceptions found."],
+            tod_result="Pass",
+            toe_result="Pass",
+            substantive_result="Pass",
+        )
+        action = LegacyAuditAction(
+            agent_or_user_id="legacy",
+            action_taken="Loaded from legacy checkpoint.",
+        )
+        evidence = LegacyControlEvidence(
+            control_id="AC-01",
+            tool_results={
+                "get_iam_password_policy": LegacyToolEvidence(
+                    tool_name="get_iam_password_policy",
+                    payload={"MinimumPasswordLength": 14},
+                )
+            },
+        )
+
+        state = AuditState(
+            control_matrix=[control],
+            testing_findings=[finding],
+            audit_trail=[action],
+            evidence_log={"AC-01": evidence},
+        )
+
+        assert state.control_matrix[0].control_id == "AC-01"
+        assert state.testing_findings[0].status == "Pass"
+        assert state.audit_trail[0].agent_or_user_id == "legacy"
         assert (
             state.evidence_log["AC-01"]
             .tool_results["get_iam_password_policy"]
