@@ -19,6 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.graph import app as swarm_app  # noqa: E402
 from swarm.review_actions import (  # noqa: E402
+    build_phase1_review_patch,
     flag_control_for_finding,
     mark_control_clean,
     request_control_rerun,
@@ -365,19 +366,7 @@ else:
         )
         if fb:
             _append_chat_message("user", fb)
-            if fb.strip().lower() in [
-                "approve",
-                "approved",
-                "approve to start execution",
-                "ok",
-                "yes",
-                "lgtm",
-                "go",
-            ]:
-                swarm_app.update_state(config, {"revision_feedback": ""})
-            else:
-                swarm_app.update_state(config, {"revision_feedback": fb})
-
+            swarm_app.update_state(config, build_phase1_review_patch(fb))
             st.session_state.resume_swarm = True
             st.rerun()
 
