@@ -1,0 +1,8 @@
+{
+  "theme": "AWS S3 Public Exposure Risk",
+  "business_context": "The company recently launched an external facing analytics portal. We need to audit if any proprietary S3 buckets have been accidentally left public.",
+  "frameworks": ["CIS AWS Foundations Benchmark v3.0", "PCAOB AS 2201"],
+  "mock_evidence": {
+    "list_public_s3_buckets": "{\"Buckets\": [{\"Name\": \"internal-fin-data-prod\", \"PublicAccessBlockConfiguration\": {\"BlockPublicAcls\": false, \"IgnorePublicAcls\": false, \"BlockPublicPolicy\": false, \"RestrictPublicBuckets\": false}}]}"
+  }
+}
