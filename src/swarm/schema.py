@@ -28,3 +28,14 @@ class RiskControlMatrixSchema(BaseModel):
 class QA_PushbackSchema(BaseModel):
     approved: bool = Field(..., description="True if no errors found, False if the drafted artifact needs rework.")
     rejection_reason: Optional[str] = Field(None, description="Detailed critique mapping exactly to what the agents must fix based on PCAOB/IIA standards.")
+
+class AuditFindingSchema(BaseModel):
+    control_id: str = Field(..., description="The ID of the control being evaluated.")
+    vault_id_reference: str = Field(..., description="The immutable UUID hash belonging to the raw testing evidence.")
+    exact_quote_from_evidence: str = Field(..., description="Exact substring from the raw evidence proving the condition.")
+    test_conclusion: str = Field(..., description="Detailed description of execution results.")
+    severity: str = Field(..., description="Must be 'Pass', 'Control Deficiency', 'Significant Deficiency', or 'Material Weakness'.")
+
+class WorkingPaperSchema(BaseModel):
+    theme: str = Field(..., description="The overarching audit theme.")
+    findings: List[AuditFindingSchema] = Field(..., description="The evaluated findings mapping back to the RACM controls.")
