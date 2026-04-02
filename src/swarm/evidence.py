@@ -2,7 +2,7 @@ import hashlib
 import json
 import uuid
 import os
-from datetime import datetime
+import datetime
 
 class EvidenceAssuranceProtocol:
     """Implements PCAOB AS 1215 and IIA 2330 compliance by enforcing immutable hashing of payloads."""
@@ -24,7 +24,7 @@ class EvidenceAssuranceProtocol:
             "vault_id": vault_id,
             "sha256": sha256_hash,
             "mcp_source": source_mcp_operation,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "raw_payload": raw_payload
         }
         
