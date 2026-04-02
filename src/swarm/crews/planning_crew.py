@@ -2,6 +2,7 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task
 from swarm.schema import RiskControlMatrixSchema, QA_PushbackSchema
+from swarm.llm_factory import get_llm
 
 class PlanningCrew:
     def __init__(self):
@@ -12,14 +13,17 @@ class PlanningCrew:
             self.tasks_config = yaml.safe_load(f)
 
     def crew(self) -> Crew:
+        llm = get_llm()
+        
         # Instantiate Agents based on YAML configs
-        orchestrator = Agent(**self.agents_config['orchestrator'], verbose=True)
-        analyst = Agent(**self.agents_config['analyst'], verbose=True)
-        specialist = Agent(**self.agents_config['specialist'], verbose=True)
-        auditor = Agent(**self.agents_config['auditor'], verbose=True)
+        orchestrator = Agent(**self.agents_config['orchestrator'], verbose=True, llm=llm)
+        analyst = Agent(**self.agents_config['analyst'], verbose=True, llm=llm)
+        specialist = Agent(**self.agents_config['specialist'], verbose=True, llm=llm)
+        auditor = Agent(**self.agents_config['auditor'], verbose=True, llm=llm)
         
         # IIA Anti-Hallucination: QA Reviewer runs strictly at Temperature 0.0
-        qa_reviewer = Agent(**self.agents_config['qa_reviewer'], verbose=True, temperature=0.0)
+        qa_llm = get_llm(temperature=0.0)
+        qa_reviewer = Agent(**self.agents_config['qa_reviewer'], verbose=True, llm=qa_llm)
 
         # Instantiate Tasks dynamically
         context_task = Task(**self.tasks_config['context_task'], agent=orchestrator)
