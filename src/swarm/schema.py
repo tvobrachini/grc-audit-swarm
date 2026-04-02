@@ -39,3 +39,8 @@ class AuditFindingSchema(BaseModel):
 class WorkingPaperSchema(BaseModel):
     theme: str = Field(..., description="The overarching audit theme.")
     findings: List[AuditFindingSchema] = Field(..., description="The evaluated findings mapping back to the RACM controls.")
+
+class FinalReportSchema(BaseModel):
+    executive_summary: str = Field(..., description="Board-level executive summary summarizing major compliance gaps.")
+    detailed_report: str = Field(..., description="The comprehensive technical narrative mapping findings to original frameworks.")
+    compliance_tone_approved: bool = Field(..., description="Must be approved by QA Tone Gate before saving.")
