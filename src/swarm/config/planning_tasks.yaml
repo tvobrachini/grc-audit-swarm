@@ -1,0 +1,19 @@
+context_task:
+  description: "Consume the theme '{theme}' and business context '{business_context}'. Determine the audit objective."
+  expected_output: "A concise 2-paragraph Audit Scope and Objective memo."
+
+crosswalk_task:
+  description: "Crosswalk the '{theme}' against the provided frameworks: {frameworks}. Identify key threat vectors."
+  expected_output: "List of explicit regulatory requirements and recent threat vectors related to the scope."
+
+weighting_task:
+  description: "Take the threat vectors and the Scope Memo, and calculate the highest priority risks. Assign a severity weight to each."
+  expected_output: "A prioritized list of 3-5 major risks."
+
+racm_drafting_task:
+  description: "Translate the prioritized risks into a Risk and Control Matrix (RACM). Ensure every control has strict ToD and ToE steps."
+  expected_output: "A structured RACM matching exactly the required JSON/Pydantic schema."
+
+qa_gate_task:
+  description: "Review the drafted RACM. If it lacks substantive testing details, or if ToE relies only on inquiry, you MUST reject it with a specific rejection_reason. Otherwise, approve it."
+  expected_output: "A QA_PushbackSchema object validating the RACM."
