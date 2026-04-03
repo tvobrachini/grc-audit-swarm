@@ -2,6 +2,7 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task, LLM
 from swarm.schema import FinalReportSchema, QA_PushbackSchema
+from swarm.llm_factory import get_crew_llm
 
 class ReportingCrew:
     def __init__(self):
@@ -12,11 +13,11 @@ class ReportingCrew:
             self.tasks_config = yaml.safe_load(f)
 
     def crew(self) -> Crew:
-        base_llm = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1)
+        base_llm = get_crew_llm(temperature=0.1)
         writer = Agent(**self.agents_config['lead_writer'], verbose=True, llm=base_llm)
         concluder = Agent(**self.agents_config['concluder'], verbose=True, llm=base_llm)
         # Tone adherence must be perfectly objective (temperature 0)
-        qa_llm = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.0)
+        qa_llm = get_crew_llm(temperature=0.0)
         qa_reviewer = Agent(**self.agents_config['qa_tone_reviewer'], verbose=True, llm=qa_llm)
 
         drafting = Task(**self.tasks_config['drafting_task'], agent=writer)

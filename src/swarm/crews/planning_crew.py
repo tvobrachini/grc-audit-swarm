@@ -2,6 +2,7 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task, LLM
 from swarm.schema import RiskControlMatrixSchema, QA_PushbackSchema
+from swarm.llm_factory import get_crew_llm
 
 class PlanningCrew:
     def __init__(self):
@@ -12,8 +13,8 @@ class PlanningCrew:
             self.tasks_config = yaml.safe_load(f)
 
     def crew(self) -> Crew:
-        # Use native litellm groq integration
-        base_llm = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1)
+        # Dynamically map the LLM based on user's active API keys
+        base_llm = get_crew_llm(temperature=0.1)
         
         # Instantiate Agents based on YAML configs
         orchestrator = Agent(**self.agents_config['orchestrator'], verbose=True, llm=base_llm)
@@ -22,7 +23,7 @@ class PlanningCrew:
         auditor = Agent(**self.agents_config['auditor'], verbose=True, llm=base_llm)
         
         # IIA Anti-Hallucination: QA Reviewer runs strictly at Temperature 0.0
-        qa_llm = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.0)
+        qa_llm = get_crew_llm(temperature=0.0)
         qa_reviewer = Agent(**self.agents_config['qa_reviewer'], verbose=True, llm=qa_llm)
 
         # Instantiate Tasks dynamically
