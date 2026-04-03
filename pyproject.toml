@@ -27,6 +27,8 @@ dependencies = [
     "crewai-tools>=0.14.0",
     "litellm>=1.83.0",
     "groq>=0.37.1",
+    "pygments>=2.20.0",
+    "requests>=2.33.0",
 ]
 
 [tool.bandit]
