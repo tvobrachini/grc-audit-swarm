@@ -2,6 +2,7 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task, LLM
 from swarm.schema import WorkingPaperSchema, QA_PushbackSchema
+from swarm.tools.aws_tools import get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets
 
 class FieldworkCrew:
     def __init__(self):
@@ -13,7 +14,12 @@ class FieldworkCrew:
 
     def crew(self) -> Crew:
         base_llm = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1)
-        collector = Agent(**self.agents_config['evidence_collector'], verbose=True, llm=base_llm)
+        collector = Agent(
+            **self.agents_config['evidence_collector'], 
+            verbose=True, 
+            llm=base_llm,
+            tools=[get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets]
+        )
         auditor = Agent(**self.agents_config['field_auditor'], verbose=True, llm=base_llm)
         
         # Anti-Hallucination: QA runs at temp 0.0
