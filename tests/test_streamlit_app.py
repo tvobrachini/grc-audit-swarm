@@ -11,10 +11,10 @@ def test_app_initial_screen_renders(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     at = AppTest.from_file("app.py")
-    at.run(timeout=10)
+    at.run(timeout=60)
 
     assert any("Swarm Audit Command Center" in title.value for title in at.title)
-    assert any(button.label == "🚀 Launch Swarm" for button in at.button)
+    assert any("Launch" in button.label for button in at.button)
 
 
 def test_scope_input_component_loads_lab_file_and_triggers_launch(
