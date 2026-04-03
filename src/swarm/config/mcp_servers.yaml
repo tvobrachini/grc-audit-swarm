@@ -1,0 +1,4 @@
+mcpServers:
+  aws-audit-agent:
+    command: "python"
+    args: ["src/swarm/mcp_server.py"]

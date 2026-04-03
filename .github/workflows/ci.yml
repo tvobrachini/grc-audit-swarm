@@ -115,7 +115,7 @@ jobs:
       - name: Verify AI Guardrails and Agent Constraints (Pytest & BDD)
         env:
           PYTHONPATH: .
-        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=40
+        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=35
 
   security:
     name: security

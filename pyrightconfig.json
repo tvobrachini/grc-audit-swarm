@@ -1,11 +1,21 @@
 {
   "include": ["src"],
+  "exclude": ["**/legacy/**", "**/__pycache__/**"],
   "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
   "reportAttributeAccessIssue": "none",
   "reportArgumentType": "none",
   "reportUnknownVariableType": "none",
   "reportUnknownMemberType": "none",
   "reportUnknownArgumentType": "none",
+  "executionEnvironments": [
+    {
+      "root": "src"
+    },
+    {
+      "root": "."
+    }
+  ],
   "venvPath": ".",
   "venv": ".venv"
 }

@@ -1,0 +1,15 @@
+drafting_task:
+  description: "Consume original Phase 1 Scope and Phase 2 Working Papers. Write the full comprehensive Draft Audit Report. Highlight severe findings distinctly."
+  expected_output: "A detailed drafting of the technical report."
+
+executive_summary_task:
+  description: "Consume the Draft Audit Report. Distill the most severe elements into a succinct Executive Summary."
+  expected_output: "Board-ready Executive Summary overview."
+
+tone_qa_task:
+  description: "Review both the Draft Report and the Executive Summary. If the language is subjective, inflammatory, or confusing, reject it with rejection_reasons. Otherwise, approve it."
+  expected_output: "A QA_PushbackSchema object validating the report tone and completeness."
+
+final_report_assembly_task:
+  description: "Take the QA-approved components and structure them into the FinalReportSchema."
+  expected_output: "The strict Pydantic FinalReportSchema output."

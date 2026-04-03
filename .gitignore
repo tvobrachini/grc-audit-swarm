@@ -39,3 +39,5 @@ lab_data/
 
 # Streamlit cache
 .streamlit/
+evidence_vault/
+ci_logs.txt
