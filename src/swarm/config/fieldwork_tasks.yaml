@@ -1,0 +1,11 @@
+evidence_collection_task:
+  description: "Using the required testing procedures from the RACM: {racm_string}, use the appropriate tools to collect system state data."
+  expected_output: "Raw system state descriptions mapped to specific Control-IDs, ready for evaluation."
+
+execution_evaluation_task:
+  description: "Evaluate the collected evidence. For each Control-ID, write an AuditFindingSchema. You MUST include the exact substring quote from the collected data."
+  expected_output: "A structured list of findings mapped to the WorkingPaperSchema."
+
+eval_qa_gate_task:
+  description: "Review the generated Working Papers. Ensure the severity matches PCAOB standards for the given quoted evidence. Do not minimize material weaknesses."
+  expected_output: "A QA_PushbackSchema object validating the Working Papers."
