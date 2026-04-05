@@ -61,9 +61,23 @@ def render_phase1_review(
                             f"- {step.get('step_description')} (Expect: {step.get('expected_result')})"
                         )
 
-                # Build excel rows
+                # Build excel rows with full testing procedure detail
+                def _steps(step_list):
+                    return "; ".join(
+                        f"{s.get('step_description')} (Expect: {s.get('expected_result')})"
+                        for s in step_list
+                    )
+
                 rows.append(
-                    {"Risk ID": r_id, "Control ID": c_id, "Description": c_desc}
+                    {
+                        "Risk ID": r_id,
+                        "Regulatory Mapping": r_regs,
+                        "Control ID": c_id,
+                        "Description": c_desc,
+                        "ToD Steps": _steps(tod),
+                        "ToE Steps": _steps(toe),
+                        "Substantive Steps": _steps(sub),
+                    }
                 )
 
     if rows:

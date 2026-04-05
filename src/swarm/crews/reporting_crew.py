@@ -15,25 +15,38 @@ class ReportingCrew:
 
     def crew(self) -> Crew:
         base_llm = get_crew_llm(temperature=0.1)
-        writer = Agent(**self.agents_config["lead_writer"], verbose=True, llm=base_llm)
-        concluder = Agent(**self.agents_config["concluder"], verbose=True, llm=base_llm)
+        writer = Agent(
+            **self.agents_config["lead_writer"], verbose=True, llm=base_llm, max_iter=5
+        )
+        concluder = Agent(
+            **self.agents_config["concluder"], verbose=True, llm=base_llm, max_iter=5
+        )
         # Tone adherence must be perfectly objective (temperature 0)
         qa_llm = get_crew_llm(temperature=0.0)
         qa_reviewer = Agent(
-            **self.agents_config["qa_tone_reviewer"], verbose=True, llm=qa_llm
+            **self.agents_config["qa_tone_reviewer"],
+            verbose=True,
+            llm=qa_llm,
+            max_iter=3,
         )
 
         drafting = Task(**self.tasks_config["drafting_task"], agent=writer)
-        summary = Task(**self.tasks_config["executive_summary_task"], agent=concluder)
+        summary = Task(
+            **self.tasks_config["executive_summary_task"],
+            agent=concluder,
+            context=[drafting],  # only the full report, not working papers too
+        )
         qa = Task(
             **self.tasks_config["tone_qa_task"],
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
+            context=[drafting, summary],  # review both sections
         )
         assembly = Task(
             **self.tasks_config["final_report_assembly_task"],
             agent=writer,
             output_pydantic=FinalReportSchema,
+            context=[drafting, summary],  # assemble from the two text sections
         )
 
         return Crew(
@@ -41,4 +54,5 @@ class ReportingCrew:
             tasks=[drafting, summary, qa, assembly],
             process=Process.sequential,
             verbose=True,
+            max_rpm=1,
         )

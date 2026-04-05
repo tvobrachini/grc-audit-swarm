@@ -3,7 +3,7 @@ evidence_collection_task:
   expected_output: "Raw system state descriptions mapped to specific Control-IDs, ready for evaluation."
 
 execution_evaluation_task:
-  description: "Evaluate the collected evidence. For each Control-ID, write an AuditFindingSchema. You MUST include the exact substring quote from the collected data."
+  description: "Evaluate the collected evidence. For each Control-ID, write an AuditFindingSchema. You MUST include the exact substring quote from the collected data.{qa_feedback}"
   expected_output: "A structured list of findings mapped to the WorkingPaperSchema."
 
 eval_qa_gate_task:
