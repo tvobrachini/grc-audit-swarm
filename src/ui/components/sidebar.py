@@ -17,21 +17,22 @@ def render_sidebar():
     """Renders the sidebar with audit history and system status."""
     with st.sidebar:
         st.markdown(
-            '<div class="hero-badge">🤖 Groq + LangGraph</div>', unsafe_allow_html=True
+            '<div class="hero-badge">🤖 CrewAI Multi-Agent</div>',
+            unsafe_allow_html=True,
         )
         st.title("GRC Audit Swarm")
         st.caption("AI Multi-Agent Audit System")
         st.markdown("---")
 
-        # ── LLM status indicator ───────────────────────────────────────────────
-        g = os.environ.get("GROQ_API_KEY")
-        o = os.environ.get("OPENAI_API_KEY")
-        if g:
-            st.success("✅ Groq (llama-3.3-70b)")
-        elif o:
-            st.warning("⚠️ OpenAI fallback")
+        # ── LLM status indicator (matches llm_factory priority: Groq → Gemini → OpenAI) ──
+        if os.environ.get("GROQ_API_KEY"):
+            st.success("✅ Groq llama-3.3-70b-versatile")
+        elif os.environ.get("GEMINI_API_KEY"):
+            st.success("✅ Gemini 2.0 Flash")
+        elif os.environ.get("OPENAI_API_KEY"):
+            st.success("✅ OpenAI GPT-4o-mini")
         else:
-            st.info("ℹ️ Mock mode")
+            st.info("ℹ️ No LLM key — mock mode")
 
         st.markdown("---")
         st.header("🗂️ Audit History")
@@ -52,12 +53,8 @@ def render_sidebar():
                     key=f"load_{tid}",
                     use_container_width=True,
                 ):
-                    st.session_state.thread_id = tid
-                    st.session_state.scope_submitted = True
-                    st.session_state.chat_history = meta.get("chat_history", [])
-                    st.session_state.scope_text_cache = meta.get(
-                        "scope_text", meta.get("scope_preview", "")
-                    )
+                    st.session_state.clear()
+                    st.session_state.load_session_id = tid
                     st.rerun()
 
                 # Status badge rendered as a separate small markdown below the button
