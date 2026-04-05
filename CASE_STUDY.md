@@ -1,7 +1,7 @@
 # Case Study: Scalable Multi-Agent Swarms for Recursive Auditing
 
 **Role:** Senior IT Auditor / Audit Engineer
-**Core Technologies:** Python, LangGraph, AWS MCP (Model Context Protocol), Streamlit, DuckDuckGo Search API, Pytest, YAML
+**Core Technologies:** Python, CrewAI, AWS MCP (Model Context Protocol), Streamlit, DuckDuckGo Search API, Pytest, YAML
 **Frameworks Covered:** Secure Controls Framework (SCF), AWS Cloud Security (Live), PCI-DSS, GDPR, HIPAA
 
 ---
@@ -23,29 +23,29 @@ However, a real-world audit is not linear. It is a **recursive conversation**. A
 
 I built **GRC Audit Swarm** to move beyond static mapping and into **Autonomous Audit Execution**.
 
-Using **LangGraph**, I architected a stateful "Swarm" of specialized AI agents that collaborate, research, and challenge each other to produce a verified, high-fidelity audit report.
+Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent crews that collaborate, research, and challenge each other to produce a verified, high-fidelity audit report.
 
 ### Key Architectural Decisions:
 
-1. **Stateful Cycle Management (LangGraph):**
-   - *Decision:* Replaced linear LangChain sequences with a cyclical LangGraph state machine.
-   - *Why:* Audits require loops. If the "Challenger" agent rejects an audit procedure, the graph must autonomously route the work back to the "Mapper" for revision without human intervention.
+1. **Multi-Phase Crew Orchestration (CrewAI):**
+   - *Decision:* Implemented three distinct sequential crews: **Planning**, **Fieldwork**, and **Reporting**.
+   - *Why:* Audits are naturally phase-based. By isolating the Planning (RACM creation) from Execution (evidence testing), we ensure specialized agents focus on their specific domain of expertise.
 
-2. **The "Lead Partner" Quality Loop (Adversarial AI):**
-   - *Decision:* Implemented a **QA Challenger** agent acting as a simulated Audit Partner.
-   - *Why:* This agent is programmed to be "pedantic." It analyzes the proposed control matrix and rejects it if procedures are vague or evidence request lists (ERLs) are incomplete. This forces a 2-cycle refinement loop before the human even sees the first draft.
+2. **The "IIA 2340" Human Gates:**
+   - *Decision:* Integrated stateful human-in-the-loop (HITL) gates between every phase.
+   - *Why:* Professional standards (IIA 2340) require supervisor approval of audit programs and working papers. The swarm "pauses" and waits for a human signature before moving from Planning to Fieldwork.
 
-3. **Domain-Specific Skill Injection (YAML Modules):**
-   - *Decision:* Created a decoupled `skills/` directory where specialists (AWS, PCI, GDPR) are defined in YAML.
-   - *Why:* This allows the platform to be "framework agnostic." By simply adding a YAML file, the swarm can instantly gain expertise in a new regulation without changing a single line of core Python logic.
+3. **The "QA Pushback" Loop (Adversarial AI):**
+   - *Decision:* Each crew includes a **QA Reviewer** agent with `temperature=0` that must explicitly approve the output.
+   - *Why:* This agent is programmed to be "pedantic." It analyzes the proposed RACM or Working Paper and rejects it if procedures are vague or evidence is missing. This triggers an autonomous **auto-retry loop** where the rejection reason is injected as context for refinement.
 
-4. **Audit Engineering Guardrails (80+ Tests):**
-   - *Decision:* Built a dedicated `pytest` suite for agent contracts, graph topology, and BDD (Behavior-Driven Development) rules.
-   - *Why:* LLMs are non-deterministic. "Audit Engineering" means ensuring that the swarm's logic is predictable. The tests verify that an "AWS Scope" *always* triggers a Researcher search for AWS breaches and *always* maps to the correct SCF Cloud domains.
+4. **Immutable Evidence Vault (Security-by-Design):**
+   - *Decision:* Built an Evidence Assurance Protocol that hashes all collected data using **SHA-256**.
+   - *Why:* To meet PCAOB AS 1215 standards, audit evidence must be immutable. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim, untampered snippet from the source evidence.
 
-5. **Live Evidence Bridging (AWS MCP):**
-   - *Decision:* Integrated the **Model Context Protocol (MCP)** to provide a secure "Sidecar" for live AWS discovery.
-   - *Why:* Real audits need real data. By building a custom Python MCP server, the swarm can now "see" actual IAM policies, MFA status, and public S3 buckets in real-time, moving from static simulation to live technical verification.
+5. **Live Evidence Bridging (AWS Tools):**
+   - *Decision:* Integrated native CrewAI tools to call real **AWS APIs** (IAM, S3, etc.) during the Fieldwork phase.
+   - *Why:* Real audits need real data. By providing the swarm with live read-only access to cloud environments, we move from static checklists to live technical verification of MFA, password policies, and bucket ACLs.
 
 6. **Ironclad Safeguards (Privacy & Cost):**
    - *Decision:* Implemented a recursive **Account ID Redaction** engine and forced a "Read-Only Audit Context."
@@ -55,12 +55,12 @@ Using **LangGraph**, I architected a stateful "Swarm" of specialized AI agents t
 
 ## 📈 The Impact: From Mapping to Insight
 
-By shifting from a single-agent "Crosswalker" to a multi-agent "Swarm," the depth of the audit output increases significantly:
+By shifting from a single-agent "Crosswalker" to a multi-phase "Swarm," the depth of the audit output increases significantly:
 
-- **Context-Aware Auditing:** The report doesn't just say "Fix AC-01." It provides a **1-Pager Risk Context** citing a specific 2024 breach that occurred because $AC-01$ was weak, grounding the "Fix" in business reality.
-- **Evidence-to-Finding Automation:** By connecting to **AWS MCP**, the swarm identifies real misconfigurations (e.g., missing password policies) and automatically scrubs sensitive metadata for privacy-first reporting.
-- **Human-in-the-Loop Efficiency:** The UI pauses at critical "Checkpoints," allowing the human auditor to act as a **Reviewer** rather than a **Data Entry Clerk**.
-- **Scalable Specialization:** One GRC Engineer can now oversee multiple complex technical audits (AWS, PCI, and GDPR) simultaneously, as the swarm handles the heavy lifting of research, mapping, and preliminary testing.
+- **Context-Aware Auditing:** The report doesn't just say "Fix AC-01." It provides a **1-Pager Risk Context** citing specific threat vectors, grounding the "Fix" in business reality.
+- **Evidence-to-Finding Automation:** By connecting to **AWS**, the swarm identifies real misconfigurations and automatically generates Working Papers with per-control severity ratings.
+- **Human-in-the-Loop Efficiency:** The human auditor acts as a **Supervisor**, reviewing high-quality drafts and evidence instead of performing manual data entry.
+- **Scalable Specialization:** One GRC Engineer can now oversee multiple complex technical audits simultaneously, as the swarm handles the heavy lifting of research, mapping, and preliminary testing.
 
 ---
 
@@ -68,11 +68,11 @@ By shifting from a single-agent "Crosswalker" to a multi-agent "Swarm," the dept
 
 Explore the results of the swarm's collaborative intelligence in this repository:
 
-1. **The Infrastructure:** `src/swarm/graph.py` (The stateful routing logic).
-2. **The Bridging:** `src/swarm/mcp_server.py` (The AWS Audit MCP Sidecar).
-3. **The Intelligence:** `skills/aws_cloud_security.yaml` (How the AI is taught to audit AWS).
-4. **The Privacy:** `src/swarm/agents/evidence_collector.py` (The metadata redaction engine).
-5. **The Guardrails:** `tests/test_bdd_evaluation.py` (BDD verification of audit rules).
+1. **The Infrastructure:** `src/swarm/audit_flow.py` (The phase orchestration logic).
+2. **The Intelligence:** `src/swarm/crews/planning_crew.py` (How the RACM is built).
+3. **The Execution:** `src/swarm/crews/fieldwork_crew.py` (Live AWS evidence testing).
+4. **The Proof:** `src/swarm/evidence.py` (The SHA-256 Evidence Vault).
+5. **The Guardrails:** `src/swarm/crews/config/agents.yaml` (Hardened system prompts).
 6. **The UI:** `app.py` (The Findings Command Center where results are visualized).
 
 ---
