@@ -1,31 +1,43 @@
 # 🎯 GRC Audit Swarm
 
-> **AI Multi-Agent Swarm for Adaptive Audit Planning & Execution**
+> **AI Multi-Agent GRC Audit Platform powered by CrewAI & Groq**
 
-GRC Audit Swarm is a stateful, interactive AI platform designed to transform audit narratives into actionable findings. Powered by **LangGraph**, it coordinates a swarm of specialized agents that research real-world risks, map controls from the **Secure Controls Framework (SCF)**, and execute audit workflows against simulated or collected evidence to generate a Findings Command Center.
+GRC Audit Swarm is a stateful, three-phase audit automation platform that converts a plain-language scope into a fully documented audit report. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by an immutable evidence vault.
 
 > [!NOTE]
-> **View the Complete Portfolio Case Study:** I've documented the architectural shift from static mapping to recursive autonomous auditing in **[CASE_STUDY.md](CASE_STUDY.md)**.
+> **View the Complete Portfolio Case Study:** The architectural decisions and design rationale are documented in **[CASE_STUDY.md](CASE_STUDY.md)**.
 
 ---
 
-## 🛠️ The Swarm Ecosystem
+## 🛠️ The Three-Phase Audit Workflow
 
-### 🧠 Phase 1: Planning & Strategy (The Brain)
-A collaborative team of agents researches the problem space and builds a custom audit plan:
-- **Researcher:** Uses Google/DuckDuckGo to find real-world breaches and regulatory citations relevant to your scope.
-- **Control Mapper:** Direct retrieval from your local SCF database (1,100+ controls) via a RAG heuristic.
-- **Dynamic Specialist:** Injects domain-specific procedures (AWS, PCI-DSS, GDPR, HIPAA, ITGC) based on auto-detected scope keywords.
-- **QA Challenger:** Acts as a Lead Partner, rejecting and revising weak audit plans until they meet "Partner" standards.
-- **Human Snapshot:** Execution pauses for your approval of the 1-Pager Risk Context and the Control Matrix.
+### 🧠 Phase 1: Planning (The Brain)
+Five sequential agents build and validate a Risk and Control Matrix (RACM):
 
-### ⚙️ Phase 2: Execution & Findings (The Engine)
-Once approved, the swarm shifts from planning to testing:
-- **Worker Agents:** Each control is assigned to a worker that "interviews" evidence (simulated or real) and performs Test of Design (TOD) and Test of Effectiveness (TOE).
-- **Specialist Annotator:** Tags failed findings with technical root causes and remediation SLAs.
-- **Foundations Researcher:** Cross-references failures against historical breach patterns for risk calibration.
-- **Execution Challenger:** Validates finding consistency (e.g., flags "Pass" statuses that have zero extracted evidence).
-- **Executive Concluder:** Aggregates all data into a high-level risk score and Executive Summary.
+- **Audit Director:** Consumes scope and business context; produces a 2-paragraph Audit Scope & Objective memo.
+- **Regulatory & Threat Analyst:** Crosswalks the theme against selected frameworks (CIS, NIST, PCI-DSS, etc.) and identifies key threat vectors.
+- **Risk & Threat Specialist:** Ranks and weights the top 3 risks from the threat analysis.
+- **Senior IT Auditor:** Drafts the full RACM — every control must include Test of Design, Test of Effectiveness, and Substantive Testing steps.
+- **QA Reviewer (temp=0):** Independently validates the RACM; rejects if substantive testing is missing or ToE relies only on inquiry. On rejection, the crew auto-retries once with the rejection reason injected as context.
+
+Human approval is required before Phase 2 begins (IIA 2340 stamping).
+
+### ⚙️ Phase 2: Fieldwork (The Engine)
+Three agents execute live evidence collection and evaluate controls:
+
+- **Evidence Collector:** Calls native AWS tools (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) to gather real evidence.
+- **Field Auditor:** Evaluates each control against the collected evidence and produces a Working Paper with per-control severity ratings.
+- **QA Field Reviewer (temp=0):** Validates finding consistency; rejects if Pass ratings lack supporting evidence. Auto-retries once on rejection.
+
+All evidence is hashed and stored in the **Evidence Vault** (PCAOB AS 1215 / IIA 2330). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
+
+### 📝 Phase 3: Reporting (The Pen)
+Four sequential tasks produce the final deliverable:
+
+- **Lead Report Writer:** Synthesises Phase 1 scope and Phase 2 working papers into a structured audit report body.
+- **Executive Concluder:** Drafts a concise executive summary from the report.
+- **Tone & QA Reviewer (temp=0):** Rejects the report if language is subjective, inflammatory, or confusing.
+- **Assembly (Lead Writer):** Packages both sections into the `FinalReportSchema` for download.
 
 ### 🔄 Architecture Flow
 
@@ -35,49 +47,44 @@ graph TD
     classDef human fill:#ea580c,color:#fff,stroke:#fff
     classDef phase1 fill:#0ea5e9,color:#fff,stroke:#fff
     classDef phase2 fill:#10b981,color:#fff,stroke:#fff
+    classDef phase3 fill:#8b5cf6,color:#fff,stroke:#fff
 
-    Start((Audit Scope)):::init --> Orch[Orchestrator]:::phase1
-    Orch --> Res[Researcher]:::phase1
-    Res --> Map[Control Mapper]:::phase1
-    Map --> Spec[Dynamic Specialist]:::phase1
-    Spec --> QA1[QA Challenger]:::phase1
-    QA1 -- Revise --> Map
-    QA1 -- Proceed --> HR1{Human Review\nPhase 1}:::human
+    Start((Audit Scope)):::init --> Dir[Audit Director]:::phase1
+    Dir --> Ana[Threat Analyst]:::phase1
+    Ana --> Spec[Risk Specialist]:::phase1
+    Spec --> Aud[IT Auditor]:::phase1
+    Aud --> QA1[QA Reviewer]:::phase1
+    QA1 -- Rejected → auto-retry --> Aud
+    QA1 -- Approved --> HR1{Human Gate 1\nIIA 2340}:::human
 
-    HR1 -- Revise --> Res
-    HR1 -- Approved --> Ev[Evidence Collector]:::phase2
+    HR1 -- Revise --> Dir
+    HR1 -- Approved --> Col[Evidence Collector\nAWS Tools]:::phase2
+    Col --> FA[Field Auditor]:::phase2
+    FA --> QA2[QA Field Reviewer]:::phase2
+    QA2 -- Rejected → auto-retry --> FA
+    QA2 -- Approved --> HR2{Human Gate 2\nIIA 2340}:::human
 
-    Ev --> Workers[Execution Workers\none per control, parallel]:::phase2
-    Workers --> Spec2[Specialist Annotator]:::phase2
-    Spec2 --> Res2[Foundations Researcher]:::phase2
-    Res2 --> QA2[Execution Challenger]:::phase2
-    QA2 --> Conc[Executive Concluder]:::phase2
-    Conc --> HR2{Human Review\nPhase 2}:::human
-
-    HR2 -- Re-run controls --> Workers
-    HR2 -- Approved --> End((Final Artifacts)):::init
+    HR2 -- Approved --> Wr[Report Writer]:::phase3
+    Wr --> Ex[Executive Concluder]:::phase3
+    Ex --> QA3[Tone QA Reviewer]:::phase3
+    QA3 --> Asm[Final Assembly]:::phase3
+    Asm --> End((Final Report\n+ Evidence Vault)):::init
 ```
-
-### 🧱 Current App Boundaries
-- **Streamlit UI Components:** Scope intake, Phase 1 review, and Phase 2 findings review are split into dedicated component modules instead of living in a single monolithic page.
-- **Workflow Action Helpers:** Review commands, session resets, and app routing/phase detection are isolated into small helper modules for easier testing.
-- **Graph Interaction Service:** The UI reaches LangGraph through a thin service layer instead of calling the compiled graph directly.
-- **Structured Evidence Pipeline:** MCP-collected evidence is stored as typed control/tool evidence objects before worker serialization.
 
 ---
 
 ## 🚀 Key Features
 
-- **📡 Live Research:** Integrated web search (DDGS) for grounding audits in current threat data.
-- **🔌 Loadable Skill Modules:** Define specialized audit logic in YAML files (`skills/`) for easy extensibility. Active skills are surfaced as badges in the Phase 1 review UI.
-- **⚡ Parallel Worker Execution:** Control tests run concurrently via `ThreadPoolExecutor` (up to 3 simultaneous LLM calls), dramatically reducing Phase 2 completion time.
-- **📊 Findings Command Center:** Interactive UI with KPI bars, expandable control drill-downs, per-step result badges (✅/❌/⚠️), and a layered finding view that separates worker findings from specialist and researcher context.
-- **🗺️ Phase Progress Strip:** Animated stepper tracks audit progress across Scope → Planning → Plan Review → Testing → Findings → Report.
-- **🛡️ Guardrail Test Suite (BDD):** 121 automated tests pass, including Pytest-BDD scenarios that enforce strict data rules (e.g., AI cannot pass if evidence is missing).
-- **💾 Persistent Sessions:** Audit scope, activity history, and phase status are persisted and restored across sessions, with per-session status badges in the sidebar.
-- **🧾 Typed Workflow & Evidence Models:** Workflow states use shared typed status values, and collected evidence is stored through structured control/tool evidence objects.
-- **📦 Containerized Dev Setup:** Dockerized, packaged with `uv`, and covered by SAST (`bandit`) and CI-oriented checks.
-- **🤖 LLM Rate-Limit Optimized:** Dynamically degrades to `llama-3.1-8b-instant` during batch execution to conquer Groq's 6,000 TPM limit while maintaining quality.
+- **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
+- **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
+- **🔐 Immutable Evidence Vault:** SHA-256 hashed evidence files (PCAOB AS 1215). `verify_exact_quote()` confirms agent quotes are verbatim from collected data, preventing hallucinations.
+- **☁️ Live AWS Evidence Collection:** Native CrewAI tools call real AWS APIs (IAM password policy, MFA status, S3 bucket ACLs) during fieldwork.
+- **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
+- **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Material Weakness counts), expandable per-control drill-downs, and vault verification badges.
+- **📥 Excel Exports:** Download RACM (with ToD/ToE/Substantive steps) and Working Papers directly from the review screens.
+- **⚡ Token Budget Controls:** `max_rpm=1` per crew and explicit `context=` per task keep requests under Groq's 6,000 TPM free-tier cap.
+- **🔄 Multi-LLM Fallback:** Priority order Groq → Gemini → OpenAI. Set whichever key you have — the factory binds automatically.
+- **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` in `.env` to bypass all crews with hardcoded schemas for UI development.
 
 ---
 
@@ -88,45 +95,69 @@ graph TD
 git clone https://github.com/tvobrachini/grc-audit-swarm
 cd grc-audit-swarm
 
-# 2. Environment Setup
+# 2. Environment setup
 cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
+# Add at least one LLM key: GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY
+# Optionally add AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for live evidence collection
 
-# 3. Launch the Command Center
-# Option A: Docker Compose (Recommended)
-docker-compose up --build -d
-# App accessible at http://localhost:8502
-
-# Option B: Native uv invocation
+# 3. Install dependencies
 uv sync
+
+# 4. Launch
 uv run streamlit run app.py --server.port 8502
+# App accessible at http://localhost:8502
 ```
+
+**LLM provider priority** (set whichever key you have):
+
+| Key | Model | Notes |
+|-----|-------|-------|
+| `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Recommended — free tier, fast |
+| `GEMINI_API_KEY` | `gemini-2.0-flash` | Free tier with daily quota |
+| `OPENAI_API_KEY` | `gpt-4o-mini` | Paid |
 
 ---
 
-## 🔬 Reliability & Testing
-This project follows an "Audit Engineering" mindset. To run the full verification suite:
+## 🔬 Testing
 
 ```bash
+# Full test suite
 uv run pytest tests/ -v
+
+# Headless end-to-end monitor (all 3 phases)
+python run_monitor.py
+
+# Phase 1 only
+python run_monitor.py --phase1-only
+
+# Skip live AWS calls
+python run_monitor.py --skip-aws
 ```
 
-The suite covers:
-- **Agents:** Contract compliance for the planning, execution, review, and summary nodes in the swarm workflow.
-- **Graph:** Topology validation (ensuring Phase 1 -> Phase 2 flow is unbroken).
-- **Behavior-Driven Development (BDD):** Enforces strict "Missing Evidence" constraints to preempt AI hallucinations.
-- **Skills:** Auto-detection accuracy across 5 key domains.
-- **Schema & Workflow Types:** Strict Pydantic data modeling for findings, state, workflow statuses, and collected evidence.
-
-Notes:
-- The live AWS MCP smoke test is opt-in and runs only when `RUN_AWS_MCP_INTEGRATION=1`.
-- The LLM-as-a-judge evaluation skips automatically when no reachable model provider is configured.
+The `run_monitor.py` script validates the full crew execution pipeline — timing, QA gate outcomes, vault file creation, and final status — without the Streamlit UI.
 
 ---
 
-## 🔗 Repository Roles
-- **[scf-auto-crosswalker](https://github.com/tvobrachini/scf-auto-crosswalker):** The Master Data Hub hosting the SCF framework parsed JSON.
-- **[grc-audit-swarm](https://github.com/tvobrachini/grc-audit-swarm):** (This Repo) The Recursive Execution Engine for swarm-based auditing.
+## 🧱 Project Structure
+
+```
+src/
+  swarm/
+    crews/          # PlanningCrew, FieldworkCrew, ReportingCrew
+    config/         # YAML agent + task definitions per crew
+    state/          # AuditState Pydantic schema
+    tools/          # Native AWS CrewAI tools
+    evidence.py     # EvidenceAssuranceProtocol (SHA-256 vault)
+    audit_flow.py   # AuditFlow orchestrator (plain class, 3 methods)
+    llm_factory.py  # Multi-provider LLM binding
+    schema.py       # RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
+    session_manager.py
+  ui/
+    components/     # sidebar, phase0_scope, phase1_review, phase2_review, phase3_report
+app.py              # Streamlit entry point
+run_monitor.py      # Headless E2E test runner
+```
 
 ---
+
 *Developed by TVobrachini. Open-source under CC BY-ND 4.0.*
