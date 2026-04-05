@@ -3,7 +3,7 @@ from typing import Any, TypeAlias
 
 from langchain_community.tools import DuckDuckGoSearchRun
 
-from swarm.llm_factory import get_llm
+from swarm.llm_factory import get_llm  # noqa: F401 (alias defined in llm_factory)
 
 
 @dataclass(frozen=True)
