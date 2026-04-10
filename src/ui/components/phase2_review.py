@@ -72,15 +72,23 @@ def render_phase2_review(
 
     # Download working papers as Excel
     if findings:
+
+        def sanitize_cell(value: str) -> str:
+            if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+                return f"'{value}"
+            return value
+
         rows = []
         for f in findings:
             rows.append(
                 {
-                    "Control ID": f.get("control_id", ""),
-                    "Severity": f.get("severity", ""),
-                    "Conclusion": f.get("test_conclusion", ""),
-                    "Evidence Quote": f.get("exact_quote_from_evidence", ""),
-                    "Vault ID": f.get("vault_id_reference", ""),
+                    "Control ID": sanitize_cell(str(f.get("control_id", ""))),
+                    "Severity": sanitize_cell(str(f.get("severity", ""))),
+                    "Conclusion": sanitize_cell(str(f.get("test_conclusion", ""))),
+                    "Evidence Quote": sanitize_cell(
+                        str(f.get("exact_quote_from_evidence", ""))
+                    ),
+                    "Vault ID": sanitize_cell(str(f.get("vault_id_reference", ""))),
                 }
             )
         buf = io.BytesIO()
