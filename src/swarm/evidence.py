@@ -72,10 +72,19 @@ class EvidenceAssuranceProtocol:
         filepath = os.path.join(
             EvidenceAssuranceProtocol.EVIDENCE_DIR, f"{vault_id}.json"
         )
+
+        resolved = os.path.realpath(filepath)
+        expected_dir = os.path.realpath(EvidenceAssuranceProtocol.EVIDENCE_DIR)
+        if not resolved.startswith(expected_dir):
+            return False
+
         if not os.path.exists(filepath):
             return False
 
-        with open(filepath, "r") as f:
-            evidence_record = json.load(f)
+        try:
+            with open(filepath, "r") as f:
+                evidence_record = json.load(f)
 
-        return exact_quote_claim in evidence_record["raw_payload"]
+            return exact_quote_claim in evidence_record["raw_payload"]
+        except (KeyError, json.JSONDecodeError, OSError):
+            return False
