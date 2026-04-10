@@ -374,10 +374,17 @@ elif st.session_state.phase == 3:
         st.markdown("---")
 
     st.markdown("### 📊 Board Executive Summary")
-    st.info(rep.get("executive_summary", "No summary provided."))
+
+    import re
+
+    def sanitize_report(text: str) -> str:
+        # Strip markdown images to prevent blind SSRF / Data Exfiltration (GRC-01)
+        return re.sub(r"!\[.*?\]\(.*?\)", "[Image Removed for Security]", text)
+
+    st.info(sanitize_report(rep.get("executive_summary", "No summary provided.")))
 
     with st.expander("📄 Detailed Engineering Report", expanded=False):
-        st.markdown(rep.get("detailed_report", "No details provided."))
+        st.markdown(sanitize_report(rep.get("detailed_report", "No details provided.")))
 
     # Download final report
     executive_summary = rep.get("executive_summary", "")
