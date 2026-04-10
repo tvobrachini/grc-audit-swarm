@@ -19,18 +19,22 @@ class PlanningCrew:
 
         # Instantiate Agents based on YAML configs
         orchestrator = Agent(
-            **self.agents_config["orchestrator"], verbose=True, llm=base_llm
+            **self.agents_config["orchestrator"], verbose=True, llm=base_llm, max_iter=5
         )
-        analyst = Agent(**self.agents_config["analyst"], verbose=True, llm=base_llm)
+        analyst = Agent(
+            **self.agents_config["analyst"], verbose=True, llm=base_llm, max_iter=5
+        )
         specialist = Agent(
-            **self.agents_config["specialist"], verbose=True, llm=base_llm
+            **self.agents_config["specialist"], verbose=True, llm=base_llm, max_iter=5
         )
-        auditor = Agent(**self.agents_config["auditor"], verbose=True, llm=base_llm)
+        auditor = Agent(
+            **self.agents_config["auditor"], verbose=True, llm=base_llm, max_iter=5
+        )
 
         # IIA Anti-Hallucination: QA Reviewer runs strictly at Temperature 0.0
         qa_llm = get_crew_llm(temperature=0.0)
         qa_reviewer = Agent(
-            **self.agents_config["qa_reviewer"], verbose=True, llm=qa_llm
+            **self.agents_config["qa_reviewer"], verbose=True, llm=qa_llm, max_iter=3
         )
 
         # Instantiate Tasks dynamically
@@ -38,16 +42,20 @@ class PlanningCrew:
         crosswalk_task = Task(**self.tasks_config["crosswalk_task"], agent=analyst)
         weighting_task = Task(**self.tasks_config["weighting_task"], agent=specialist)
 
-        # Pydantic Enforcement
+        # Pydantic Enforcement.
+        # Context is limited explicitly to avoid stacking all prior outputs
+        # into a single prompt — Groq/free-tier providers cap single requests at ~6k tokens.
         racm_task = Task(
             **self.tasks_config["racm_drafting_task"],
             agent=auditor,
             output_pydantic=RiskControlMatrixSchema,
+            context=[],  # no prior task context — inputs injected via kickoff; keeps request under 6k TPM
         )
         qa_task = Task(
             **self.tasks_config["qa_gate_task"],
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
+            context=[racm_task],  # only needs the RACM to review
         )
 
         return Crew(
@@ -55,4 +63,5 @@ class PlanningCrew:
             tasks=[context_task, crosswalk_task, weighting_task, racm_task, qa_task],
             process=Process.sequential,
             verbose=True,
+            max_rpm=1,
         )
