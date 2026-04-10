@@ -24,6 +24,7 @@ class FieldworkCrew:
             **self.agents_config["evidence_collector"],
             verbose=True,
             llm=base_llm,
+            max_iter=5,
             tools=[
                 get_iam_password_policy,
                 list_iam_users_with_mfa,
@@ -31,13 +32,19 @@ class FieldworkCrew:
             ],
         )
         auditor = Agent(
-            **self.agents_config["field_auditor"], verbose=True, llm=base_llm
+            **self.agents_config["field_auditor"],
+            verbose=True,
+            llm=base_llm,
+            max_iter=5,
         )
 
         # Anti-Hallucination: QA runs at temp 0.0
         qa_llm = get_crew_llm(temperature=0.0)
         qa_reviewer = Agent(
-            **self.agents_config["qa_field_reviewer"], verbose=True, llm=qa_llm
+            **self.agents_config["qa_field_reviewer"],
+            verbose=True,
+            llm=qa_llm,
+            max_iter=3,
         )
 
         collection_task = Task(
@@ -47,11 +54,13 @@ class FieldworkCrew:
             **self.tasks_config["execution_evaluation_task"],
             agent=auditor,
             output_pydantic=WorkingPaperSchema,
+            context=[collection_task],  # only the collected evidence
         )
         qa_task = Task(
             **self.tasks_config["eval_qa_gate_task"],
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
+            context=[evaluation_task],  # only the working papers
         )
 
         return Crew(
@@ -59,4 +68,5 @@ class FieldworkCrew:
             tasks=[collection_task, evaluation_task, qa_task],
             process=Process.sequential,
             verbose=True,
+            max_rpm=1,
         )

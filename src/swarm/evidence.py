@@ -3,6 +3,32 @@ import json
 import uuid
 import os
 import datetime
+from dataclasses import dataclass, field
+from typing import List
+
+
+@dataclass
+class ControlEvidence:
+    """Raw evidence collected for a single control, keyed by control_id."""
+
+    control_id: str
+    vault_ids: List[str] = field(default_factory=list)
+    raw_payloads: List[str] = field(default_factory=list)
+    sources: List[str] = field(default_factory=list)
+
+
+def serialize_control_evidence(evidence: ControlEvidence) -> str:
+    """Produce a text summary of all evidence for a control, for LLM context."""
+    parts = []
+    for i, payload in enumerate(evidence.raw_payloads):
+        source = evidence.sources[i] if i < len(evidence.sources) else "unknown"
+        vault_id = evidence.vault_ids[i] if i < len(evidence.vault_ids) else "n/a"
+        parts.append(f"[Source: {source} | Vault: {vault_id}]\n{payload}")
+    return (
+        "\n\n".join(parts)
+        if parts
+        else f"No evidence collected for {evidence.control_id}."
+    )
 
 
 class EvidenceAssuranceProtocol:
@@ -46,10 +72,19 @@ class EvidenceAssuranceProtocol:
         filepath = os.path.join(
             EvidenceAssuranceProtocol.EVIDENCE_DIR, f"{vault_id}.json"
         )
+
+        resolved = os.path.realpath(filepath)
+        expected_dir = os.path.realpath(EvidenceAssuranceProtocol.EVIDENCE_DIR)
+        if not resolved.startswith(expected_dir):
+            return False
+
         if not os.path.exists(filepath):
             return False
 
-        with open(filepath, "r") as f:
-            evidence_record = json.load(f)
+        try:
+            with open(filepath, "r") as f:
+                evidence_record = json.load(f)
 
-        return exact_quote_claim in evidence_record["raw_payload"]
+            return exact_quote_claim in evidence_record["raw_payload"]
+        except (KeyError, json.JSONDecodeError, OSError):
+            return False
