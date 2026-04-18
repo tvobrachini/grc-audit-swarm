@@ -27,10 +27,13 @@ class TestGetIamPasswordPolicy:
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         policy = {"MinimumPasswordLength": 14, "RequireSymbols": True}
         mock_client = MagicMock()
-        mock_client.get_account_password_policy.return_value = {"PasswordPolicy": policy}
+        mock_client.get_account_password_policy.return_value = {
+            "PasswordPolicy": policy
+        }
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
             from swarm.tools.aws_tools import get_iam_password_policy
+
             result = get_iam_password_policy.run("")
 
         assert "Vault ID:" in result
@@ -43,11 +46,13 @@ class TestGetIamPasswordPolicy:
         mock_client = MagicMock()
         mock_client.exceptions.NoSuchEntityException = ClientError
         mock_client.get_account_password_policy.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchEntity", "Message": ""}}, "GetAccountPasswordPolicy"
+            {"Error": {"Code": "NoSuchEntity", "Message": ""}},
+            "GetAccountPasswordPolicy",
         )
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
             from swarm.tools.aws_tools import get_iam_password_policy
+
             result = get_iam_password_policy.run("")
 
         assert "Vault ID:" in result
@@ -62,6 +67,7 @@ class TestGetIamPasswordPolicy:
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
             from swarm.tools.aws_tools import get_iam_password_policy
+
             result = get_iam_password_policy.run("")
 
         assert "123456789012" not in result
@@ -91,6 +97,7 @@ class TestListIamUsersWithMfa:
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_iam_users_with_mfa
+
             result = list_iam_users_with_mfa.run("")
 
         assert '"MFA_Enabled": "Yes"' in result
@@ -102,6 +109,7 @@ class TestListIamUsersWithMfa:
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_iam_users_with_mfa
+
             result = list_iam_users_with_mfa.run("")
 
         assert '"MFA_Enabled": "No"' in result
@@ -113,6 +121,7 @@ class TestListIamUsersWithMfa:
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_iam_users_with_mfa
+
             result = list_iam_users_with_mfa.run("")
 
         assert "alice" in result
@@ -164,6 +173,7 @@ class TestListPublicS3Buckets:
         )
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
+
             result = list_public_s3_buckets.run("")
 
         data = json.loads(result.split("\nRaw Output: ", 1)[1])
@@ -183,6 +193,7 @@ class TestListPublicS3Buckets:
         )
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
+
             result = list_public_s3_buckets.run("")
 
         data = json.loads(result.split("\nRaw Output: ", 1)[1])
@@ -192,16 +203,25 @@ class TestListPublicS3Buckets:
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         acl_grants = {
             "acl-bucket": [
-                {"Grantee": {"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AllUsers"}, "Permission": "READ"}
+                {
+                    "Grantee": {
+                        "Type": "Group",
+                        "URI": "http://acs.amazonaws.com/groups/global/AllUsers",
+                    },
+                    "Permission": "READ",
+                }
             ]
         }
         client = self._make_s3_client(
             [{"Name": "acl-bucket"}],
-            {"acl-bucket": self._fully_blocked_pab()},  # PAB is on, but ACL has public grant
+            {
+                "acl-bucket": self._fully_blocked_pab()
+            },  # PAB is on, but ACL has public grant
             acl_grants=acl_grants,
         )
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
+
             result = list_public_s3_buckets.run("")
 
         data = json.loads(result.split("\nRaw Output: ", 1)[1])
@@ -222,6 +242,7 @@ class TestListPublicS3Buckets:
         )
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
+
             result = list_public_s3_buckets.run("")
 
         data = json.loads(result.split("\nRaw Output: ", 1)[1])
@@ -234,6 +255,7 @@ class TestListPublicS3Buckets:
         client = self._make_s3_client([], {})
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
+
             result = list_public_s3_buckets.run("")
 
         assert "Vault ID:" in result

@@ -25,6 +25,7 @@ def _get_fernet():
         return None
     try:
         from cryptography.fernet import Fernet
+
         key_bytes = base64.urlsafe_b64decode(key_b64.encode())
         if len(key_bytes) != 32:
             raise ValueError("VAULT_ENCRYPTION_KEY must be 32 bytes (base64-encoded).")

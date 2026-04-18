@@ -33,9 +33,14 @@ from ui.components.phase2_review import render_phase2_review  # noqa: E402
 DEMO_MODE = os.environ.get("DEMO_MODE", "0") == "1"
 
 # Guard: warn loudly if DEMO_MODE is active outside of local development.
-_is_local = os.environ.get("ENVIRONMENT", "local").lower() in ("local", "dev", "development")
+_is_local = os.environ.get("ENVIRONMENT", "local").lower() in (
+    "local",
+    "dev",
+    "development",
+)
 if DEMO_MODE and not _is_local:
     import warnings
+
     warnings.warn(
         "DEMO_MODE=1 is set in a non-local environment. "
         "LLM crews are bypassed — all findings are hardcoded. "
@@ -252,7 +257,6 @@ if st.session_state.phase == 0:
 # PHASE 1 — Planning Phase Gate (RACM)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 1:
-
     # IIA 2340: capture approver identity before the gate fires.
     gate1_approver = st.text_input(
         "Approver Name / Email (IIA 2340 Gate 1)",
@@ -315,7 +319,9 @@ elif st.session_state.phase == 1:
             "Phase 2 Execution Crew querying vaults & hashing evidence… "
             "(this takes several minutes — the page will update automatically)"
         ):
-            done = _run_crew_async(flow.generate_fieldwork, "crew_phase2", human_id=approver)
+            done = _run_crew_async(
+                flow.generate_fieldwork, "crew_phase2", human_id=approver
+            )
             if not done:
                 st.rerun()
                 st.stop()
@@ -347,16 +353,21 @@ elif st.session_state.phase == 1:
                 key="p2_override_justification",
             )
             if st.button("✅ Override and Proceed to Reporting", type="primary"):
-                approver = st.session_state.get("gate1_approver", "OVERRIDE").strip() or "OVERRIDE"
+                approver = (
+                    st.session_state.get("gate1_approver", "OVERRIDE").strip()
+                    or "OVERRIDE"
+                )
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append({
-                        "gate": "Gate 2 (Fieldwork — QA Override)",
-                        "human": approver,
-                        "justification": override_justification.strip(),
-                        "timestamp": datetime.datetime.utcnow().isoformat(),
-                    })
+                    flow.state.approval_trail.append(
+                        {
+                            "gate": "Gate 2 (Fieldwork — QA Override)",
+                            "human": approver,
+                            "justification": override_justification.strip(),
+                            "timestamp": datetime.datetime.utcnow().isoformat(),
+                        }
+                    )
                     flow.state.status = "WAITING_HUMAN_GATE_2"
                     st.session_state.phase = 2
                     _persist_session()
@@ -378,11 +389,12 @@ elif st.session_state.phase == 1:
 # PHASE 2 — Execution Phase Gate (Working Papers)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 2:
-
     # IIA 2340: capture approver identity before the gate fires.
     gate2_approver = st.text_input(
         "Approver Name / Email (IIA 2340 Gate 2)",
-        value=st.session_state.get("gate2_approver", st.session_state.get("gate1_approver", "")),
+        value=st.session_state.get(
+            "gate2_approver", st.session_state.get("gate1_approver", "")
+        ),
         placeholder="e.g. jane.doe@company.com",
         key="gate2_approver_input",
     )
@@ -434,7 +446,9 @@ elif st.session_state.phase == 2:
                 "Reporting Phase: AI crew is generating the final audit report… "
                 "(this takes several minutes — the page will update automatically)"
             ):
-                done = _run_crew_async(flow.generate_reporting, "crew_phase3", human_id=approver)
+                done = _run_crew_async(
+                    flow.generate_reporting, "crew_phase3", human_id=approver
+                )
                 if not done:
                     st.rerun()
                     st.stop()
@@ -465,16 +479,21 @@ elif st.session_state.phase == 2:
                 key="p3_override_justification",
             )
             if st.button("✅ Override and Accept Report", type="primary"):
-                approver = st.session_state.get("gate2_approver", "OVERRIDE").strip() or "OVERRIDE"
+                approver = (
+                    st.session_state.get("gate2_approver", "OVERRIDE").strip()
+                    or "OVERRIDE"
+                )
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append({
-                        "gate": "Gate 3 (Reporting — QA Override)",
-                        "human": approver,
-                        "justification": override_justification.strip(),
-                        "timestamp": datetime.datetime.utcnow().isoformat(),
-                    })
+                    flow.state.approval_trail.append(
+                        {
+                            "gate": "Gate 3 (Reporting — QA Override)",
+                            "human": approver,
+                            "justification": override_justification.strip(),
+                            "timestamp": datetime.datetime.utcnow().isoformat(),
+                        }
+                    )
                     flow.state.status = "COMPLETED"
                     st.session_state.phase = 3
                     _persist_session()

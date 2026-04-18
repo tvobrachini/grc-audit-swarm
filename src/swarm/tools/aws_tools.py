@@ -15,7 +15,9 @@ def get_iam_password_policy(context: str = "") -> str:
     try:
         client = _boto_client("iam")
         response = client.get_account_password_policy()
-        raw_output = json.dumps(response.get("PasswordPolicy", {}), indent=2, default=str)
+        raw_output = json.dumps(
+            response.get("PasswordPolicy", {}), indent=2, default=str
+        )
     except client.exceptions.NoSuchEntityException:
         raw_output = "Finding: No IAM password policy is defined for this account."
     except (ClientError, NoCredentialsError) as e:
@@ -68,22 +70,34 @@ def list_public_s3_buckets(context: str = "") -> str:
         results = []
         for bucket in buckets:
             name = bucket["Name"]
-            entry: dict = {"Bucket": name, "PublicAccessBlockEnabled": None, "ACL": None, "IsPublic": False}
+            entry: dict = {
+                "Bucket": name,
+                "PublicAccessBlockEnabled": None,
+                "ACL": None,
+                "IsPublic": False,
+            }
 
             # Check bucket-level Public Access Block settings.
             try:
-                pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
-                all_blocked = all([
-                    pab.get("BlockPublicAcls", False),
-                    pab.get("IgnorePublicAcls", False),
-                    pab.get("BlockPublicPolicy", False),
-                    pab.get("RestrictPublicBuckets", False),
-                ])
+                pab = s3.get_public_access_block(Bucket=name)[
+                    "PublicAccessBlockConfiguration"
+                ]
+                all_blocked = all(
+                    [
+                        pab.get("BlockPublicAcls", False),
+                        pab.get("IgnorePublicAcls", False),
+                        pab.get("BlockPublicPolicy", False),
+                        pab.get("RestrictPublicBuckets", False),
+                    ]
+                )
                 entry["PublicAccessBlockEnabled"] = all_blocked
                 if not all_blocked:
                     entry["IsPublic"] = True
             except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchPublicAccessBlockConfiguration":
+                if (
+                    e.response["Error"]["Code"]
+                    == "NoSuchPublicAccessBlockConfiguration"
+                ):
                     # No block config means public access controls are not restricted at bucket level.
                     entry["PublicAccessBlockEnabled"] = False
                     entry["IsPublic"] = True

@@ -135,28 +135,35 @@ class TestVerifyExactQuote:
     def test_encrypted_vault_verify_works_with_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
         result = EvidenceAssuranceProtocol.register_evidence("secret payload", "op")
         # Vault file should NOT contain plaintext
         import json as _json
+
         with open(tmp_path / f"{result['vault_id']}.json") as f:
             record = _json.load(f)
         assert "secret payload" not in record["raw_payload"]
         assert record["encrypted"] is True
         # Verification still works
-        assert EvidenceAssuranceProtocol.verify_exact_quote(result["vault_id"], "secret payload")
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "secret payload"
+        )
 
     def test_encrypted_vault_verify_fails_without_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
         result = EvidenceAssuranceProtocol.register_evidence("secret", "op")
         monkeypatch.delenv("VAULT_ENCRYPTION_KEY")
-        assert not EvidenceAssuranceProtocol.verify_exact_quote(result["vault_id"], "secret")
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "secret"
+        )
 
     def test_partial_quote_returns_true(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))

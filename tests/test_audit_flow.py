@@ -6,9 +6,8 @@ Covers: Phase 3 auto-retry, approval trail stamping, QA rejection states.
 
 import os
 import sys
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -110,7 +109,9 @@ class TestGenerateReportingPhase3Retry:
             flow.generate_reporting(human_id="auditor@co.com")
 
         second_call_inputs = mock_crew.kickoff.call_args_list[1][1]["inputs"]
-        assert "Subjective language used" in second_call_inputs.get("tone_qa_feedback", "")
+        assert "Subjective language used" in second_call_inputs.get(
+            "tone_qa_feedback", ""
+        )
 
     def test_double_rejection_sets_qa_rejected_phase_3(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
