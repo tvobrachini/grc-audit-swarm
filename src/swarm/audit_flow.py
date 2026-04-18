@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 
 from swarm.state.schema import AuditState  # noqa: F401 (re-exported for backwards compat)
 from swarm.crews.planning_crew import PlanningCrew
@@ -94,7 +94,7 @@ class AuditFlow:
             {
                 "gate": "Gate 1 (Planning)",
                 "human": human_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -164,7 +164,7 @@ class AuditFlow:
             {
                 "gate": "Gate 2 (Fieldwork)",
                 "human": human_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 
@@ -175,6 +175,7 @@ class AuditFlow:
         inputs = {
             "scope_string": self.state.business_context,
             "working_papers_string": str(self.state.working_papers),
+            "tone_qa_feedback": "",
         }
 
         try:
@@ -193,6 +194,31 @@ class AuditFlow:
         qa_output = (
             result.tasks_output[-2].pydantic if len(result.tasks_output) >= 2 else None
         )
+
+        if qa_output and hasattr(qa_output, "approved") and not qa_output.approved:
+            # Auto-retry once with the tone rejection reason injected as feedback
+            logger.warning(
+                "QA rejected Report tone — auto-retrying with feedback: %s",
+                getattr(qa_output, "rejection_reason", None),
+            )
+            inputs["tone_qa_feedback"] = (
+                f" IMPORTANT: A previous draft was rejected for tone — fix all issues: "
+                f"{getattr(qa_output, 'rejection_reason', '')}"
+            )
+            try:
+                crew = ReportingCrew().crew()
+                result = crew.kickoff(inputs=inputs)
+            except Exception as exc:
+                logger.exception("Reporting crew retry failed")
+                self.state.status = "ERROR"
+                self.state.qa_rejection_reason = f"Reporting crew retry error: {exc}"
+                return
+            report_output = result.pydantic
+            qa_output = (
+                result.tasks_output[-2].pydantic
+                if len(result.tasks_output) >= 2
+                else None
+            )
 
         if qa_output and hasattr(qa_output, "approved") and not qa_output.approved:
             self.state.status = "QA_REJECTED_PHASE_3"
