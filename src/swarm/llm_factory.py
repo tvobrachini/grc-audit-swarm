@@ -13,10 +13,6 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
       2. OpenAI (Enterprise standard)
       3. Groq (Fastest, but harsh TPM limits)
     """
-    if os.environ.get("GROQ_API_KEY"):
-        logger.info("[LLM Factory] Binding to Groq Llama 3.3 70B Versatile.")
-        return LLM(model="groq/llama-3.3-70b-versatile", temperature=temperature)
-
     if os.environ.get("GEMINI_API_KEY"):
         logger.info("[LLM Factory] Binding to Gemini 2.0 Flash.")
         return LLM(model="gemini/gemini-2.0-flash", temperature=temperature)
@@ -24,6 +20,10 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
     if os.environ.get("OPENAI_API_KEY"):
         logger.info("[LLM Factory] Binding to OpenAI GPT-4o-mini.")
         return LLM(model="openai/gpt-4o-mini", temperature=temperature)
+
+    if os.environ.get("GROQ_API_KEY"):
+        logger.info("[LLM Factory] Binding to Groq Llama 3.3 70B Versatile.")
+        return LLM(model="groq/llama-3.3-70b-versatile", temperature=temperature)
 
     logger.warning(
         "[LLM Factory] No API keys found! Defaulting to mocked/fallback LLM."
