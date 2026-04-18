@@ -1,5 +1,5 @@
 drafting_task:
-  description: "Consume original Phase 1 Scope and Phase 2 Working Papers. Write the full comprehensive Draft Audit Report. Highlight severe findings distinctly."
+  description: "Consume original Phase 1 Scope '{scope_string}' and Phase 2 Working Papers. Write the full comprehensive Draft Audit Report. Highlight severe findings distinctly.{tone_qa_feedback}"
   expected_output: "A detailed drafting of the technical report."
 
 executive_summary_task:
