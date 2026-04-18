@@ -11,7 +11,7 @@ weighting_task:
   expected_output: "A concise numbered list of exactly 3 major risks. Format: RISK-XX | Short title | One-sentence description. No prose, no headers."
 
 racm_drafting_task:
-  description: "Using the prioritised risk list provided, draft the Risk and Control Matrix. For EVERY control you MUST include: (1) test_of_design steps, (2) test_of_effectiveness steps with sampling instructions, AND (3) substantive_testing steps — never leave substantive_testing null or empty.{qa_feedback}"
+  description: "Audit scope — theme: '{theme}', business context: '{business_context}', frameworks: {frameworks}. Using the prioritised risk list for this scope, draft the Risk and Control Matrix. For EVERY control you MUST include: (1) test_of_design steps, (2) test_of_effectiveness steps with sampling instructions, AND (3) substantive_testing steps — never leave substantive_testing null or empty.{qa_feedback}"
   expected_output: "A structured RACM matching exactly the required JSON/Pydantic schema with substantive_testing populated for every control."
 
 qa_gate_task:
