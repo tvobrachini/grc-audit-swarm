@@ -5,7 +5,7 @@ Ensures Gemini > OpenAI > Groq selection when multiple keys are set.
 
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
