@@ -8,8 +8,6 @@ import json
 import os
 import sys
 
-import pytest
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
@@ -135,7 +133,8 @@ class TestVerifyExactQuote:
         )
 
     def test_encrypted_vault_verify_works_with_key(self, tmp_path, monkeypatch):
-        import base64, os as _os
+        import base64
+        import os as _os
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
@@ -150,7 +149,8 @@ class TestVerifyExactQuote:
         assert EvidenceAssuranceProtocol.verify_exact_quote(result["vault_id"], "secret payload")
 
     def test_encrypted_vault_verify_fails_without_key(self, tmp_path, monkeypatch):
-        import base64, os as _os
+        import base64
+        import os as _os
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
