@@ -1,84 +1,131 @@
-import subprocess
 import json
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 from crewai.tools import tool
-from swarm.evidence import EvidenceAssuranceProtocol
+from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
+
+
+def _boto_client(service: str):
+    return boto3.client(service)
 
 
 @tool("Get IAM Password Policy")
 def get_iam_password_policy(context: str = "") -> str:
     """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance."""
     try:
-        result = subprocess.run(
-            ["aws", "iam", "get-account-password-policy"],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        client = _boto_client("iam")
+        response = client.get_account_password_policy()
+        raw_output = json.dumps(
+            response.get("PasswordPolicy", {}), indent=2, default=str
         )
-        raw_output = (
-            result.stdout
-            if result.returncode == 0
-            else f"Finding: No policy defined. Error: {result.stderr}"
-        )
+    except client.exceptions.NoSuchEntityException:
+        raw_output = "Finding: No IAM password policy is defined for this account."
+    except (ClientError, NoCredentialsError) as e:
+        raw_output = f"Error fetching password policy: {e}"
 
-        vault_record = EvidenceAssuranceProtocol.register_evidence(
-            raw_output, "aws.iam.get_password_policy"
-        )
-        return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {raw_output}"
-    except Exception as e:
-        return f"Error executing tool: {e}"
+    vault_record = EvidenceAssuranceProtocol.register_evidence(
+        raw_output, "aws.iam.get_account_password_policy"
+    )
+    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
 
 
 @tool("List AWS IAM Users with MFA")
 def list_iam_users_with_mfa(context: str = "") -> str:
     """Lists IAM users and indicates if MFA is enabled. Essential for AC-02 access compliance."""
     try:
-        users_res = subprocess.run(
-            ["aws", "iam", "list-users"], capture_output=True, text=True, timeout=30
-        )
-        if users_res.returncode != 0:
-            return f"Error listing users: {users_res.stderr}"
-
-        users = json.loads(users_res.stdout).get("Users", [])
+        client = _boto_client("iam")
+        paginator = client.get_paginator("list_users")
         report = []
-        for user in users:
-            name = user["UserName"]
-            mfa_res = subprocess.run(
-                ["aws", "iam", "list-mfa-devices", "--user-name", name],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            has_mfa = (
-                "Yes"
-                if mfa_res.returncode == 0
-                and json.loads(mfa_res.stdout).get("MFADevices")
-                else "No"
-            )
-            report.append({"UserName": name, "MFA_Enabled": has_mfa})
+        for page in paginator.paginate():
+            for user in page.get("Users", []):
+                name = user["UserName"]
+                try:
+                    mfa_resp = client.list_mfa_devices(UserName=name)
+                    has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
+                except ClientError:
+                    has_mfa = "Unknown"
+                report.append({"UserName": name, "MFA_Enabled": has_mfa})
 
         raw_output = json.dumps(report, indent=2)
-        vault_record = EvidenceAssuranceProtocol.register_evidence(
-            raw_output, "aws.iam.list_users_mfa"
-        )
-        return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {raw_output}"
-    except Exception as e:
-        return f"Error executing tool: {e}"
+    except (ClientError, NoCredentialsError) as e:
+        raw_output = f"Error listing IAM users: {e}"
+
+    vault_record = EvidenceAssuranceProtocol.register_evidence(
+        raw_output, "aws.iam.list_users_mfa"
+    )
+    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
 
 
 @tool("List Public S3 Buckets")
 def list_public_s3_buckets(context: str = "") -> str:
-    """Checks for S3 buckets that might have public access. Essential for data security audit."""
+    """
+    Checks each S3 bucket for public access by inspecting the bucket-level
+    PublicAccessBlock configuration and bucket ACL. Essential for data security audit.
+    """
     try:
-        result = subprocess.run(
-            ["aws", "s3api", "list-buckets"], capture_output=True, text=True, timeout=30
-        )
-        raw_output = (
-            result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
-        )
+        s3 = _boto_client("s3")
+        buckets_resp = s3.list_buckets()
+        buckets = buckets_resp.get("Buckets", [])
 
-        vault_record = EvidenceAssuranceProtocol.register_evidence(
-            raw_output, "aws.s3.list_buckets"
-        )
-        return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {raw_output}"
-    except Exception as e:
-        return f"Error executing tool: {e}"
+        results = []
+        for bucket in buckets:
+            name = bucket["Name"]
+            entry: dict = {
+                "Bucket": name,
+                "PublicAccessBlockEnabled": None,
+                "ACL": None,
+                "IsPublic": False,
+            }
+
+            # Check bucket-level Public Access Block settings.
+            try:
+                pab = s3.get_public_access_block(Bucket=name)[
+                    "PublicAccessBlockConfiguration"
+                ]
+                all_blocked = all(
+                    [
+                        pab.get("BlockPublicAcls", False),
+                        pab.get("IgnorePublicAcls", False),
+                        pab.get("BlockPublicPolicy", False),
+                        pab.get("RestrictPublicBuckets", False),
+                    ]
+                )
+                entry["PublicAccessBlockEnabled"] = all_blocked
+                if not all_blocked:
+                    entry["IsPublic"] = True
+            except ClientError as e:
+                if (
+                    e.response["Error"]["Code"]
+                    == "NoSuchPublicAccessBlockConfiguration"
+                ):
+                    # No block config means public access controls are not restricted at bucket level.
+                    entry["PublicAccessBlockEnabled"] = False
+                    entry["IsPublic"] = True
+                else:
+                    entry["PublicAccessBlockEnabled"] = f"Error: {e}"
+
+            # Check bucket ACL for any public grants.
+            try:
+                acl = s3.get_bucket_acl(Bucket=name)
+                public_grantees = [
+                    g["Grantee"].get("URI", "")
+                    for g in acl.get("Grants", [])
+                    if "URI" in g.get("Grantee", {})
+                    and "AllUsers" in g["Grantee"].get("URI", "")
+                ]
+                entry["ACL"] = "Public" if public_grantees else "Private"
+                if public_grantees:
+                    entry["IsPublic"] = True
+            except ClientError as e:
+                entry["ACL"] = f"Error: {e}"
+
+            results.append(entry)
+
+        raw_output = json.dumps(results, indent=2, default=str)
+    except (ClientError, NoCredentialsError) as e:
+        raw_output = f"Error listing S3 buckets: {e}"
+
+    vault_record = EvidenceAssuranceProtocol.register_evidence(
+        raw_output, "aws.s3.list_public_buckets"
+    )
+    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"

@@ -21,9 +21,10 @@ import tempfile
 from datetime import datetime
 from typing import Dict, Optional
 
-SESSIONS_PATH = os.path.join(
+_DEFAULT_SESSIONS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "../../data/audit_sessions.json"
 )
+SESSIONS_PATH = os.environ.get("SESSIONS_PATH", _DEFAULT_SESSIONS_PATH)
 
 
 def _load() -> Dict:
