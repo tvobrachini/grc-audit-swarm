@@ -66,16 +66,21 @@ def list_public_s3_buckets() -> str:
                 pab = s3.get_public_access_block(Bucket=name)[
                     "PublicAccessBlockConfiguration"
                 ]
-                all_blocked = all([
-                    pab.get("BlockPublicAcls", False),
-                    pab.get("IgnorePublicAcls", False),
-                    pab.get("BlockPublicPolicy", False),
-                    pab.get("RestrictPublicBuckets", False),
-                ])
+                all_blocked = all(
+                    [
+                        pab.get("BlockPublicAcls", False),
+                        pab.get("IgnorePublicAcls", False),
+                        pab.get("BlockPublicPolicy", False),
+                        pab.get("RestrictPublicBuckets", False),
+                    ]
+                )
                 if not all_blocked:
                     entry["IsPublic"] = True
             except ClientError as e:
-                if e.response["Error"]["Code"] == "NoSuchPublicAccessBlockConfiguration":
+                if (
+                    e.response["Error"]["Code"]
+                    == "NoSuchPublicAccessBlockConfiguration"
+                ):
                     entry["IsPublic"] = True
             try:
                 acl = s3.get_bucket_acl(Bucket=name)

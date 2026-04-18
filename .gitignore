@@ -44,3 +44,7 @@ ci_logs.txt
 
 # Operational tmux logs — never commit
 tmux-*.log
+
+# Local tooling config — not for version control
+.claude/
+.genie/
