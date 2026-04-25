@@ -53,3 +53,4 @@ repos:
     rev: v2.10.0
     hooks:
       - id: pip-audit
+        args: ["--ignore-vuln", "CVE-2026-3219"]  # pip 26.x vuln, no fix available yet
