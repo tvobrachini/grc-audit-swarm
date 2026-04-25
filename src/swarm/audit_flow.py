@@ -18,7 +18,7 @@ class AuditFlow:
     def __init__(self):
         self.state = AuditState()
 
-    def generate_planning(self):
+    def generate_planning(self, event_callback=None):
         """Phase 1 — Run the Planning Crew to produce a RACM."""
         logger.info("Starting Planning Phase...")
         self.state.status = "RUNNING_PHASE_1"
@@ -32,7 +32,7 @@ class AuditFlow:
         }
 
         try:
-            crew = PlanningCrew().crew()
+            crew = PlanningCrew(event_callback=event_callback).crew()
             result = crew.kickoff(inputs=inputs)
         except Exception as exc:
             logger.exception("Planning crew failed")
@@ -57,7 +57,7 @@ class AuditFlow:
                 f" IMPORTANT: A previous draft was rejected for the following reason — fix all issues before re-drafting: {qa_output.rejection_reason}"
             )
             try:
-                crew = PlanningCrew().crew()
+                crew = PlanningCrew(event_callback=event_callback).crew()
                 result = crew.kickoff(inputs=inputs)
             except Exception as exc:
                 logger.exception("Planning crew retry failed")
@@ -87,7 +87,7 @@ class AuditFlow:
             "Please review the RACM below for final IIA 2340 approval."
         )
 
-    def generate_fieldwork(self, human_id: str):
+    def generate_fieldwork(self, human_id: str, event_callback=None):
         """Phase 2 — Run the Fieldwork Crew to produce Working Papers."""
         # IIA 2340 approval stamping
         self.state.approval_trail.append(
@@ -105,7 +105,7 @@ class AuditFlow:
         inputs = {"racm_string": str(self.state.racm_plan), "qa_feedback": ""}
 
         try:
-            crew = FieldworkCrew().crew()
+            crew = FieldworkCrew(event_callback=event_callback).crew()
             result = crew.kickoff(inputs=inputs)
         except Exception as exc:
             logger.exception("Fieldwork crew failed")
@@ -129,7 +129,7 @@ class AuditFlow:
                 f" IMPORTANT: A previous evaluation was rejected — fix all severity and evidence issues: {qa_output.rejection_reason}"
             )
             try:
-                crew = FieldworkCrew().crew()
+                crew = FieldworkCrew(event_callback=event_callback).crew()
                 result = crew.kickoff(inputs=inputs)
             except Exception as exc:
                 logger.exception("Fieldwork crew retry failed")
@@ -157,7 +157,7 @@ class AuditFlow:
             "Please review Findings for final IIA 2340 approval."
         )
 
-    def generate_reporting(self, human_id: str):
+    def generate_reporting(self, human_id: str, event_callback=None):
         """Phase 3 — Run the Reporting Crew to produce the Final Report."""
         # IIA 2340 approval stamping
         self.state.approval_trail.append(
@@ -179,7 +179,7 @@ class AuditFlow:
         }
 
         try:
-            crew = ReportingCrew().crew()
+            crew = ReportingCrew(event_callback=event_callback).crew()
             result = crew.kickoff(inputs=inputs)
         except Exception as exc:
             logger.exception("Reporting crew failed")
@@ -206,7 +206,7 @@ class AuditFlow:
                 f"{getattr(qa_output, 'rejection_reason', '')}"
             )
             try:
-                crew = ReportingCrew().crew()
+                crew = ReportingCrew(event_callback=event_callback).crew()
                 result = crew.kickoff(inputs=inputs)
             except Exception as exc:
                 logger.exception("Reporting crew retry failed")
