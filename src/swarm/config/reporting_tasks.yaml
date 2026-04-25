@@ -13,3 +13,7 @@ tone_qa_task:
 final_report_assembly_task:
   description: "Take the QA-approved components and structure them into the FinalReportSchema."
   expected_output: "The strict Pydantic FinalReportSchema output."
+
+generate_oscal_sar_task:
+  description: "Translate the narrative audit findings and working papers into a standardized machine-readable format using the OSCAL_SAR_Schema. Map every finding to its corresponding control_id and vault_id evidence."
+  expected_output: "A complete OSCAL_SAR_Schema object."

@@ -102,3 +102,43 @@ class FinalReportSchema(BaseModel):
     compliance_tone_approved: bool = Field(
         ..., description="Must be approved by QA Tone Gate before saving."
     )
+    oscal_sar: Optional["OSCAL_SAR_Schema"] = Field(
+        None, description="The machine-readable OSCAL Security Assessment Report."
+    )
+
+
+class OSCAL_SAR_Metadata(BaseModel):
+    title: str = Field(..., description="Report title.")
+    last_modified: str = Field(
+        ..., description="ISO 8601 timestamp of last modification."
+    )
+    version: str = Field(..., description="Report version string.")
+    oscal_version: str = Field(default="1.1.2", description="OSCAL schema version.")
+
+
+class OSCAL_SAR_Observation(BaseModel):
+    observation_id: str = Field(..., description="Unique identifier for the finding.")
+    description: str = Field(..., description="The narrative finding or deficiency.")
+    methods: List[str] = Field(
+        ..., description="Assessment methods used: examine, test, or interview."
+    )
+    subjects: List[str] = Field(
+        ..., description="The control IDs or system components assessed."
+    )
+    relevant_evidence: List[str] = Field(
+        ..., description="Vault ID hashes mapping to evidence stored in the vault."
+    )
+
+
+class OSCAL_SAR_Result(BaseModel):
+    assessment_result_id: str = Field(..., description="Unique ID for this result set.")
+    start_date: str = Field(..., description="ISO 8601 assessment start.")
+    end_date: str = Field(..., description="ISO 8601 assessment end.")
+    observations: List[OSCAL_SAR_Observation] = Field(
+        ..., description="Technical findings and gaps identified."
+    )
+
+
+class OSCAL_SAR_Schema(BaseModel):
+    metadata: OSCAL_SAR_Metadata
+    results: List[OSCAL_SAR_Result]

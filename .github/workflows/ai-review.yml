@@ -24,5 +24,5 @@ jobs:
           github_action_config.auto_describe: "true"
           github_action_config.auto_improve: "true"
           pr_description.extra_instructions: "Ensure code uses `uv` for dependencies. Verify no tests are deleted."
-          pr_reviewer.extra_instructions: "CRITICAL DOMAIN RULE: If the PR touches `worker.py` or agent logic, ensure it does NOT allow the AI to pass a control if evidence is missing. Missing evidence = Fail/Exception."
+          pr_reviewer.extra_instructions: "CRITICAL DOMAIN RULE: If the PR touches agent logic or audit crews, ensure it does NOT allow the AI to pass a control if evidence is missing. Missing evidence = Fail/Exception. Evidence must be registered via EvidenceAssuranceProtocol and verified with verify_exact_quote before any finding can be marked compliant."
           pr_code_suggestions.extra_instructions: "Enforce DDD AuthContext guidelines. Ensure no remediation steps are added to the execution phase. Check for proper Pydantic validations."
