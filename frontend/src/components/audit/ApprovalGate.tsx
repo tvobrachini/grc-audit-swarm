@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
 import type { SessionDetail } from "@/api/client";
 
@@ -35,12 +35,26 @@ export function ApprovalGate({ session }: Props) {
     mutationFn: () =>
       api.sessions.approve(session.session_id, gateInfo.gate, humanId),
     onSuccess: () => {
+      // Immediately update cache so polling can't flip back to gate state
+      qc.setQueryData(["session", session.session_id], (old: SessionDetail | undefined) =>
+        old ? { ...old, status: `RUNNING_PHASE_${gateInfo.gate + 1}`, needs_input: false } : old
+      );
       qc.invalidateQueries({ queryKey: ["sessions"] });
       qc.invalidateQueries({ queryKey: ["session", session.session_id] });
     },
   });
 
-  if (!gateInfo) return null;
+  // Don't render gate if approval was already sent this session
+  if (!gateInfo || mutation.isSuccess) return null;
+
+  if (mutation.isPending) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-amber-700/40 bg-amber-900/10 px-5 py-4">
+        <Loader2 size={14} className="animate-spin text-amber-400" />
+        <span className="text-sm text-amber-300">Submitting approval...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-amber-700/40 bg-amber-900/10 p-5">
@@ -63,10 +77,10 @@ export function ApprovalGate({ session }: Props) {
         />
         <button
           onClick={() => mutation.mutate()}
-          disabled={!humanId.trim() || mutation.isPending}
+          disabled={!humanId.trim()}
           className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
         >
-          {mutation.isPending ? "Approving..." : "Approve & Proceed"}
+          Approve & Proceed
         </button>
       </div>
 

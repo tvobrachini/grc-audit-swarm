@@ -164,6 +164,7 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
     flow.state.theme = req.theme
     flow.state.business_context = req.business_context
     flow.state.frameworks = req.frameworks
+    flow.state.status = "RUNNING_PHASE_1"  # stamp before thread so polls see correct state
     set_flow(session_id, flow)
 
     save_session(
@@ -226,10 +227,15 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
     else:
         raise HTTPException(status_code=400, detail="gate_number must be 1 or 2")
 
+    # Stamp status synchronously BEFORE thread starts so any poll sees the
+    # new state immediately — prevents the gate re-appearing on fast refetch.
+    next_status = f"RUNNING_PHASE_{req.gate_number + 1}"
+    flow = get_flow(session_id)
+    if flow:
+        flow.state.status = next_status
+
     t.start()
 
-    flow = get_flow(session_id)
-    next_status = f"RUNNING_PHASE_{req.gate_number + 1}"
     return SessionSummary(
         session_id=session_id,
         name=data.get("name", session_id),
