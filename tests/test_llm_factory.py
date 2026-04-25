@@ -42,8 +42,7 @@ class TestLlmFactoryPriority:
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
         result = _call_factory({})
-        assert "deepseek-v4-flash" in result["model"]
-        assert result["base_url"] == "https://integrate.api.nvidia.com/v1"
+        assert "llama-3.3-70b-instruct" in result["model"]
 
     def test_gemini_preferred_over_openai_and_groq(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")

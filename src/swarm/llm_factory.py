@@ -23,7 +23,7 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
             model=f"ollama/{model_name}",
             base_url="http://localhost:11434",
             temperature=temperature,
-            timeout=120
+            timeout=120,
         )
 
     if os.environ.get("NVIDIA_API_KEY"):
@@ -32,17 +32,19 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
             os.environ["NVIDIA_NIM_API_KEY"] = os.environ["NVIDIA_API_KEY"]
             # Also set OPENAI_API_KEY as a backup for compatibility layers
             os.environ["OPENAI_API_KEY"] = os.environ["NVIDIA_API_KEY"]
-            
+
             model_name = "meta/llama-3.3-70b-instruct"
             logger.info(f"[LLM Factory] Binding to NVIDIA NIM: {model_name}.")
             return LLM(
                 model=f"nvidia_nim/{model_name}",
                 api_key=os.environ.get("NVIDIA_API_KEY"),
                 temperature=temperature,
-                timeout=120
+                timeout=120,
             )
         except Exception as e:
-            logger.warning(f"[LLM Factory] NVIDIA NIM failed to initialize: {e}. Falling back to Gemini.")
+            logger.warning(
+                f"[LLM Factory] NVIDIA NIM failed to initialize: {e}. Falling back to Gemini."
+            )
 
     if os.environ.get("GEMINI_API_KEY"):
         logger.info("[LLM Factory] Binding to Gemini 2.0 Flash.")
