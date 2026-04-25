@@ -33,12 +33,12 @@ def _make_report_output():
 
 
 def _make_crew_result(report_output, qa_output):
-    """Build a mock crew kickoff result with 4 tasks (drafting, summary, qa, assembly)."""
+    """Build a mock crew kickoff result with 5 tasks (drafting, summary, qa, oscal, assembly)."""
     result = MagicMock()
     result.pydantic = report_output
-    t1, t2, t3, t4 = MagicMock(), MagicMock(), MagicMock(), MagicMock()
-    t3.pydantic = qa_output  # tasks_output[-2] = qa task
-    result.tasks_output = [t1, t2, t3, t4]
+    t1, t2, t3, t4, t5 = MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    t3.pydantic = qa_output  # tasks_output[-3] = qa task
+    result.tasks_output = [t1, t2, t3, t4, t5]
     return result
 
 
