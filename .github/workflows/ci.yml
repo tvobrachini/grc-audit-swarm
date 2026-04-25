@@ -141,7 +141,7 @@ jobs:
         run: uv run bandit -c pyproject.toml -r .
 
       - name: Dependency Vulnerability Scan (pip-audit)
-        run: uvx pip-audit
+        run: uvx pip-audit --ignore-vuln CVE-2026-3219  # pip 26.x vuln, no fix available yet
 
   build:
     name: build
