@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 @pytest.fixture(autouse=True)
 def clear_api_keys(monkeypatch):
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"):
+    for key in ("NVIDIA_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -25,9 +25,10 @@ def _call_factory(monkeypatch_env: dict, temperature: float = 0.1):
     captured = {}
 
     class FakeLLM:
-        def __init__(self, model, temperature):
+        def __init__(self, model, temperature, **kwargs):
             captured["model"] = model
             captured["temperature"] = temperature
+            captured.update(kwargs)
 
     with patch.object(factory, "LLM", FakeLLM):
         factory.get_crew_llm(temperature=temperature)
@@ -36,6 +37,14 @@ def _call_factory(monkeypatch_env: dict, temperature: float = 0.1):
 
 
 class TestLlmFactoryPriority:
+    def test_nvidia_preferred_over_all(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+        result = _call_factory({})
+        assert "deepseek-v4-flash" in result["model"]
+        assert result["base_url"] == "https://integrate.api.nvidia.com/v1"
+
     def test_gemini_preferred_over_openai_and_groq(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")

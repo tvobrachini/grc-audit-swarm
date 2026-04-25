@@ -187,12 +187,12 @@ class AuditFlow:
             self.state.qa_rejection_reason = f"Reporting crew error: {exc}"
             return
 
-        # Reporting crew order: drafting → summary → qa_tone → assembly (last)
+        # Reporting crew order: drafting → summary → qa_tone → oscal → assembly (last)
         # result.pydantic = FinalReportSchema (last task = assembly)
-        # tasks_output[-2].pydantic = QA_PushbackSchema (tone QA gate)
+        # tasks_output[-3].pydantic = QA_PushbackSchema (tone QA gate)
         report_output = result.pydantic
         qa_output = (
-            result.tasks_output[-2].pydantic if len(result.tasks_output) >= 2 else None
+            result.tasks_output[-3].pydantic if len(result.tasks_output) >= 3 else None
         )
 
         if qa_output and hasattr(qa_output, "approved") and not qa_output.approved:
@@ -215,8 +215,8 @@ class AuditFlow:
                 return
             report_output = result.pydantic
             qa_output = (
-                result.tasks_output[-2].pydantic
-                if len(result.tasks_output) >= 2
+                result.tasks_output[-3].pydantic
+                if len(result.tasks_output) >= 3
                 else None
             )
 
