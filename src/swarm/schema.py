@@ -109,7 +109,9 @@ class FinalReportSchema(BaseModel):
 
 class OSCAL_SAR_Metadata(BaseModel):
     title: str = Field(..., description="Report title.")
-    last_modified: str = Field(..., description="ISO 8601 timestamp of last modification.")
+    last_modified: str = Field(
+        ..., description="ISO 8601 timestamp of last modification."
+    )
     version: str = Field(..., description="Report version string.")
     oscal_version: str = Field(default="1.1.2", description="OSCAL schema version.")
 
