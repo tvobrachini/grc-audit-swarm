@@ -63,5 +63,5 @@ class PlanningCrew:
             tasks=[context_task, crosswalk_task, weighting_task, racm_task, qa_task],
             process=Process.sequential,
             verbose=True,
-            max_rpm=1,
+            max_rpm=20,
         )

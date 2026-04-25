@@ -68,5 +68,5 @@ class FieldworkCrew:
             tasks=[collection_task, evaluation_task, qa_task],
             process=Process.sequential,
             verbose=True,
-            max_rpm=1,
+            max_rpm=20,
         )

@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task
-from swarm.schema import FinalReportSchema, QA_PushbackSchema
+from swarm.schema import FinalReportSchema, QA_PushbackSchema, OSCAL_SAR_Schema
 from swarm.llm_factory import get_crew_llm
 
 
@@ -29,6 +29,12 @@ class ReportingCrew:
             llm=qa_llm,
             max_iter=3,
         )
+        oscal_engineer = Agent(
+            **self.agents_config["oscal_engineer"],
+            verbose=True,
+            llm=base_llm,
+            max_iter=5,
+        )
 
         drafting = Task(**self.tasks_config["drafting_task"], agent=writer)
         summary = Task(
@@ -42,17 +48,23 @@ class ReportingCrew:
             output_pydantic=QA_PushbackSchema,
             context=[drafting, summary],  # review both sections
         )
+        oscal = Task(
+            **self.tasks_config["generate_oscal_sar_task"],
+            agent=oscal_engineer,
+            output_pydantic=OSCAL_SAR_Schema,
+            context=[drafting],  # Needs the technical details to map to OSCAL
+        )
         assembly = Task(
             **self.tasks_config["final_report_assembly_task"],
             agent=writer,
             output_pydantic=FinalReportSchema,
-            context=[drafting, summary],  # assemble from the two text sections
+            context=[drafting, summary, oscal],  # assemble from text and OSCAL sections
         )
 
         return Crew(
-            agents=[writer, concluder, qa_reviewer],
-            tasks=[drafting, summary, qa, assembly],
+            agents=[writer, concluder, qa_reviewer, oscal_engineer],
+            tasks=[drafting, summary, qa, oscal, assembly],
             process=Process.sequential,
             verbose=True,
-            max_rpm=1,
+            max_rpm=20,
         )
