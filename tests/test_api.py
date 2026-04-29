@@ -22,8 +22,6 @@ from api.job_store import (
     set_job,
 )
 from api.models import (
-    SessionDetail,
-    SessionSummary,
     _needs_input,
     _phase_from_status,
 )
