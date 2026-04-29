@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from api.job_store import get_flow, get_job, push_event, remove_flow, set_flow, set_job
+from api.job_store import get_flow, push_event, remove_flow, set_flow, set_job
 from api.models import (
     ApproveGateRequest,
     CreateSessionRequest,
@@ -15,23 +15,40 @@ from api.models import (
     _phase_from_status,
 )
 from swarm.audit_flow import AuditFlow
-from swarm.session_manager import delete_session, get_session, list_sessions, save_session
+from swarm.session_manager import (
+    delete_session,
+    get_session,
+    list_sessions,
+    save_session,
+)
 
 router = APIRouter()
 
 
 def _make_event_callback(session_id: str):
     """Returns a step_callback for CrewAI that pushes agent_step events to SSE queue."""
+
     def callback(step_output) -> None:
         try:
             agent = getattr(step_output, "agent", "") or ""
             if hasattr(step_output, "output"):
                 preview = str(step_output.output)[:300]
-                push_event(session_id, {"type": "agent_step", "agent": agent, "preview": preview})
+                push_event(
+                    session_id,
+                    {"type": "agent_step", "agent": agent, "preview": preview},
+                )
             elif hasattr(step_output, "tool"):
-                push_event(session_id, {"type": "agent_log", "agent": agent, "raw": str(step_output)[:300]})
-        except Exception:
+                push_event(
+                    session_id,
+                    {
+                        "type": "agent_log",
+                        "agent": agent,
+                        "raw": str(step_output)[:300],
+                    },
+                )
+        except Exception:  # nosec B110 — event callback must never crash the crew thread
             pass
+
     return callback
 
 
@@ -101,7 +118,10 @@ def _run_phase_1(session_id: str, job_id: str) -> None:
         push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_1"})
         flow.generate_planning(event_callback=_make_event_callback(session_id))
         push_event(session_id, {"type": "status", "status": flow.state.status})
-        push_event(session_id, {"type": "complete", "status": flow.state.status, "artifact": "racm_plan"})
+        push_event(
+            session_id,
+            {"type": "complete", "status": flow.state.status, "artifact": "racm_plan"},
+        )
         _persist_snapshot(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
@@ -116,9 +136,18 @@ def _run_phase_2(session_id: str, job_id: str, human_id: str) -> None:
         return
     try:
         push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_2"})
-        flow.generate_fieldwork(human_id, event_callback=_make_event_callback(session_id))
+        flow.generate_fieldwork(
+            human_id, event_callback=_make_event_callback(session_id)
+        )
         push_event(session_id, {"type": "status", "status": flow.state.status})
-        push_event(session_id, {"type": "complete", "status": flow.state.status, "artifact": "working_papers"})
+        push_event(
+            session_id,
+            {
+                "type": "complete",
+                "status": flow.state.status,
+                "artifact": "working_papers",
+            },
+        )
         _persist_snapshot(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
@@ -133,9 +162,18 @@ def _run_phase_3(session_id: str, job_id: str, human_id: str) -> None:
         return
     try:
         push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_3"})
-        flow.generate_reporting(human_id, event_callback=_make_event_callback(session_id))
+        flow.generate_reporting(
+            human_id, event_callback=_make_event_callback(session_id)
+        )
         push_event(session_id, {"type": "status", "status": flow.state.status})
-        push_event(session_id, {"type": "complete", "status": flow.state.status, "artifact": "final_report"})
+        push_event(
+            session_id,
+            {
+                "type": "complete",
+                "status": flow.state.status,
+                "artifact": "final_report",
+            },
+        )
         _persist_snapshot(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
@@ -151,6 +189,7 @@ def _persist_snapshot(session_id: str, flow: AuditFlow) -> None:
         scope_text=flow.state.business_context,
     )
     from swarm.session_manager import update_session
+
     update_session(session_id, state_snapshot=flow.state.model_dump())
 
 
@@ -164,7 +203,9 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
     flow.state.theme = req.theme
     flow.state.business_context = req.business_context
     flow.state.frameworks = req.frameworks
-    flow.state.status = "RUNNING_PHASE_1"  # stamp before thread so polls see correct state
+    flow.state.status = (
+        "RUNNING_PHASE_1"  # stamp before thread so polls see correct state
+    )
     set_flow(session_id, flow)
 
     save_session(
@@ -173,6 +214,7 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
         scope_text=req.business_context,
     )
     from swarm.session_manager import update_session
+
     update_session(session_id, status="RUNNING_PHASE_1", created_at=created_at)
 
     # Auto-launch Phase 1 in background
@@ -221,9 +263,13 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
     set_job(job_id, "running")
 
     if req.gate_number == 1:
-        t = threading.Thread(target=_run_phase_2, args=(session_id, job_id, req.human_id), daemon=True)
+        t = threading.Thread(
+            target=_run_phase_2, args=(session_id, job_id, req.human_id), daemon=True
+        )
     elif req.gate_number == 2:
-        t = threading.Thread(target=_run_phase_3, args=(session_id, job_id, req.human_id), daemon=True)
+        t = threading.Thread(
+            target=_run_phase_3, args=(session_id, job_id, req.human_id), daemon=True
+        )
     else:
         raise HTTPException(status_code=400, detail="gate_number must be 1 or 2")
 
