@@ -11,7 +11,8 @@ from swarm.llm_factory import get_crew_llm
 
 
 class FieldworkCrew:
-    def __init__(self):
+    def __init__(self, event_callback=None):
+        self._event_callback = event_callback
         base_dir = Path(__file__).parent.parent
         with open(base_dir / "config" / "fieldwork_agents.yaml", "r") as f:
             self.agents_config = yaml.safe_load(f)
@@ -69,4 +70,5 @@ class FieldworkCrew:
             process=Process.sequential,
             verbose=True,
             max_rpm=20,
+            step_callback=self._event_callback,
         )
