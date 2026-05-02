@@ -294,3 +294,21 @@ class TestApproveGate:
         data = resp.json()
         assert data["status"] == "RUNNING_PHASE_2"
         assert data["needs_input"] is False
+
+
+class TestJobStatus:
+    def test_anonymous_request_is_rejected(self, client):
+        resp = client.get("/api/jobs/job-123/status")
+        assert resp.status_code == 401
+
+    def test_missing_job_returns_404(self, client):
+        with patch("api.routers.phases.get_job", return_value=None):
+            resp = client.get("/api/jobs/nonexistent/status", headers=_auth_headers())
+        assert resp.status_code == 404
+
+    def test_existing_job_returns_200(self, client):
+        job_data = {"status": "completed", "error": None}
+        with patch("api.routers.phases.get_job", return_value=job_data):
+            resp = client.get("/api/jobs/job-1/status", headers=_auth_headers())
+        assert resp.status_code == 200
+        assert resp.json() == job_data
