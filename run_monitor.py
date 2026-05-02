@@ -45,10 +45,12 @@ def section(title: str):
 
 def check_env():
     section("ENV CHECK")
-    
+
     def is_set(k):
         if k == "AWS_REGION":
-            return bool(os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
+            return bool(
+                os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+            )
         return bool(os.environ.get(k))
 
     keys_to_check = [
@@ -59,12 +61,14 @@ def check_env():
         "AWS_SECRET_ACCESS_KEY",
         "AWS_REGION",
     ]
-    
+
     for k in keys_to_check:
         status = "✅ SET" if is_set(k) else "❌ MISSING"
         print(f"  {status}  {k}")
-        
-    if not any([is_set("GEMINI_API_KEY"), is_set("GROQ_API_KEY"), is_set("OPENAI_API_KEY")]):
+
+    if not any(
+        [is_set("GEMINI_API_KEY"), is_set("GROQ_API_KEY"), is_set("OPENAI_API_KEY")]
+    ):
         print("\n  FATAL: No LLM API key found. Aborting.")
         sys.exit(1)
     print()
