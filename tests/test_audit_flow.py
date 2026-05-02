@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.audit_flow import AuditFlow
-from swarm.schema import FinalReportSchema, QA_PushbackSchema
+from swarm.schema import FinalReportSchema, QA_PushbackSchema, WorkingPaperSchema
 
 
 def _make_qa_output(approved: bool, reason: str = ""):
@@ -178,8 +178,7 @@ class TestApprovalTrail:
         t_collection.name = "evidence_collection_task"
         t_evaluation = MagicMock()
         t_evaluation.name = "execution_evaluation_task"
-        t_evaluation.pydantic = MagicMock()
-        t_evaluation.pydantic.model_dump.return_value = {}
+        t_evaluation.pydantic = WorkingPaperSchema(theme="S3", findings=[])
         t_qa = MagicMock()
         t_qa.name = "eval_qa_gate_task"
         t_qa.pydantic = qa_ok
@@ -203,7 +202,7 @@ class TestApprovalTrail:
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_2")
         flow.state.business_context = "ctx"
-        flow.state.working_papers = {}
+        flow.state.working_papers = {"theme": "S3", "findings": []}
 
         # begin_phase_3 stamps the trail before the crew runs
         flow.begin_phase_3("cfo@company.com")
