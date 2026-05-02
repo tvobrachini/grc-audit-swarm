@@ -9,9 +9,11 @@ from typing import Any, Optional
 
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
 
+
 def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     global _main_loop
     _main_loop = loop
+
 
 # session_id → AuditFlow instance
 _flows: dict[str, Any] = {}
@@ -57,9 +59,7 @@ def get_queue(session_id: str) -> asyncio.Queue:
             asyncio.get_running_loop()
             new_q = asyncio.Queue()
         except RuntimeError:
-            future = asyncio.run_coroutine_threadsafe(
-                _create_queue(), _main_loop
-            )
+            future = asyncio.run_coroutine_threadsafe(_create_queue(), _main_loop)
             new_q = future.result()
     else:
         new_q = asyncio.Queue()
@@ -70,8 +70,10 @@ def get_queue(session_id: str) -> asyncio.Queue:
             _event_queues[session_id] = new_q
         return _event_queues[session_id]
 
+
 async def _create_queue() -> asyncio.Queue:
     return asyncio.Queue()
+
 
 def push_event(session_id: str, event: dict) -> None:
     q = get_queue(session_id)
