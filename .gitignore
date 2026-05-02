@@ -42,6 +42,10 @@ lab_data/
 evidence_vault/
 ci_logs.txt
 
+# Test/build caches
+.coverage
+frontend/.vite/
+
 # Operational tmux logs — never commit
 tmux-*.log
 

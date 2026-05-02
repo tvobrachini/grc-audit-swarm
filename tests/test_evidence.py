@@ -132,6 +132,31 @@ class TestVerifyExactQuote:
             "../../../etc/passwd", "root"
         )
 
+    def test_sibling_prefix_traversal_attempt_returns_false(
+        self, tmp_path, monkeypatch
+    ):
+        vault = tmp_path / "vault"
+        sibling = tmp_path / "vault_backup"
+        vault.mkdir()
+        sibling.mkdir()
+        with open(sibling / "leaked.json", "w") as f:
+            json.dump(
+                {
+                    "vault_id": "leaked",
+                    "sha256": "unused",
+                    "mcp_source": "test",
+                    "timestamp": "2026-05-02T00:00:00Z",
+                    "raw_payload": "secret marker",
+                    "encrypted": False,
+                },
+                f,
+            )
+
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(vault))
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            "../vault_backup/leaked", "secret marker"
+        )
+
     def test_encrypted_vault_verify_works_with_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os

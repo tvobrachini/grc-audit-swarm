@@ -2,8 +2,10 @@
 Shared Pydantic state models used across agents, workers, and the flow orchestrator.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
+
+from swarm.schema import RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
 
 
 class AuditProcedures(BaseModel):
@@ -46,14 +48,16 @@ class AuditState(BaseModel):
     Shared by AuditFlow and agent utilities (specialist, worker).
     """
 
+    model_config = ConfigDict(validate_assignment=True)
+
     theme: str = ""
     business_context: str = ""
     frameworks: List[str] = Field(default_factory=list)
 
-    # Artifact payloads saved after each phase
-    racm_plan: Optional[Dict[str, Any]] = None
-    working_papers: Optional[Dict[str, Any]] = None
-    final_report: Optional[Dict[str, Any]] = None
+    # Artifact payloads saved after each phase — typed for schema validation on load
+    racm_plan: Optional[RiskControlMatrixSchema] = None
+    working_papers: Optional[WorkingPaperSchema] = None
+    final_report: Optional[FinalReportSchema] = None
 
     # Human review routing and dossier state
     current_human_dossier: str = ""
