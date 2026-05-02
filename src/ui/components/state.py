@@ -41,8 +41,7 @@ def build_session_reset(thread_id: str, existing_keys) -> tuple[dict, list[str]]
     clear_keys = [
         key
         for key in existing_keys
-        if key in TRANSIENT_SESSION_KEYS
-        or any(key.startswith(prefix) for prefix in TRANSIENT_SESSION_PREFIXES)
+        if key in TRANSIENT_SESSION_KEYS or key.startswith(TRANSIENT_SESSION_PREFIXES)
     ]
     return update_values, clear_keys
 
