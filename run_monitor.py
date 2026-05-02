@@ -45,19 +45,30 @@ def section(title: str):
 
 def check_env():
     section("ENV CHECK")
-    keys = {
-        "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),
-        "GROQ_API_KEY": os.environ.get("GROQ_API_KEY"),
-        "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
-        "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID"),
-        "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
-        "AWS_REGION": os.environ.get("AWS_REGION")
-        or os.environ.get("AWS_DEFAULT_REGION"),
-    }
-    for k, v in keys.items():
-        status = "✅ SET" if v else "❌ MISSING"
+
+    def is_set(k):
+        if k == "AWS_REGION":
+            return bool(
+                os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+            )
+        return bool(os.environ.get(k))
+
+    keys_to_check = [
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENAI_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION",
+    ]
+
+    for k in keys_to_check:
+        status = "✅ SET" if is_set(k) else "❌ MISSING"
         print(f"  {status}  {k}")
-    if not any([keys["GEMINI_API_KEY"], keys["GROQ_API_KEY"], keys["OPENAI_API_KEY"]]):
+
+    if not any(
+        [is_set("GEMINI_API_KEY"), is_set("GROQ_API_KEY"), is_set("OPENAI_API_KEY")]
+    ):
         print("\n  FATAL: No LLM API key found. Aborting.")
         sys.exit(1)
     print()
