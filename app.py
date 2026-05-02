@@ -220,7 +220,7 @@ if st.session_state.phase == 0:
                                 ],
                             )
                         ],
-                    ).model_dump()
+                    )
                     flow.state.status = "WAITING_HUMAN_GATE_1"
                     st.session_state.phase = 1
                     _persist_session()
@@ -294,7 +294,7 @@ elif st.session_state.phase == 1:
                                 severity="Pass",
                             )
                         ],
-                    ).model_dump()
+                    )
 
                     flow.state.approval_trail.append(
                         {
@@ -315,13 +315,12 @@ elif st.session_state.phase == 1:
                         st.code(traceback.format_exc(), language="python")
             return
 
+        flow.begin_phase_2(approver)
         with st.spinner(
             "Phase 2 Execution Crew querying vaults & hashing evidence… "
             "(this takes several minutes — the page will update automatically)"
         ):
-            done = _run_crew_async(
-                flow.generate_fieldwork, "crew_phase2", human_id=approver
-            )
+            done = _run_crew_async(flow.generate_fieldwork, "crew_phase2")
             if not done:
                 st.rerun()
                 st.stop()
@@ -422,7 +421,7 @@ elif st.session_state.phase == 2:
                             "Vault hashes have been verified against raw evidence."
                         ),
                         compliance_tone_approved=True,
-                    ).model_dump()
+                    )
 
                     flow.state.approval_trail.append(
                         {
@@ -442,13 +441,12 @@ elif st.session_state.phase == 2:
                     with st.expander("Show Detailed Error Log", expanded=True):
                         st.code(traceback.format_exc(), language="python")
         else:
+            flow.begin_phase_3(approver)
             with st.spinner(
                 "Reporting Phase: AI crew is generating the final audit report… "
                 "(this takes several minutes — the page will update automatically)"
             ):
-                done = _run_crew_async(
-                    flow.generate_reporting, "crew_phase3", human_id=approver
-                )
+                done = _run_crew_async(flow.generate_reporting, "crew_phase3")
                 if not done:
                     st.rerun()
                     st.stop()

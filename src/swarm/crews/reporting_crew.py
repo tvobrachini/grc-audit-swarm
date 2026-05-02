@@ -6,8 +6,9 @@ from swarm.llm_factory import get_crew_llm
 
 
 class ReportingCrew:
-    def __init__(self, event_callback=None):
+    def __init__(self, event_callback=None, skill_context=None):
         self._event_callback = event_callback
+        self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent
         with open(base_dir / "config" / "reporting_agents.yaml", "r") as f:
             self.agents_config = yaml.safe_load(f)
@@ -16,9 +17,17 @@ class ReportingCrew:
 
     def crew(self) -> Crew:
         base_llm = get_crew_llm(temperature=0.1)
-        writer = Agent(
-            **self.agents_config["lead_writer"], verbose=True, llm=base_llm, max_iter=5
-        )
+
+        # Augment lead writer backstory with domain skill prompts if detected
+        writer_config = dict(self.agents_config["lead_writer"])
+        if self._skill_context:
+            from swarm.skill_loader import get_specialist_prompt
+            extra = get_specialist_prompt(self._skill_context)
+            writer_config["backstory"] = (
+                writer_config.get("backstory", "") + "\n\n" + extra
+            ).strip()
+        writer = Agent(**writer_config, verbose=True, llm=base_llm, max_iter=5)
+
         concluder = Agent(
             **self.agents_config["concluder"], verbose=True, llm=base_llm, max_iter=5
         )
@@ -37,26 +46,30 @@ class ReportingCrew:
             max_iter=5,
         )
 
-        drafting = Task(**self.tasks_config["drafting_task"], agent=writer)
+        drafting = Task(**self.tasks_config["drafting_task"], name="drafting_task", agent=writer)
         summary = Task(
             **self.tasks_config["executive_summary_task"],
+            name="executive_summary_task",
             agent=concluder,
             context=[drafting],  # only the full report, not working papers too
         )
         qa = Task(
             **self.tasks_config["tone_qa_task"],
+            name="tone_qa_task",
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
             context=[drafting, summary],  # review both sections
         )
         oscal = Task(
             **self.tasks_config["generate_oscal_sar_task"],
+            name="generate_oscal_sar_task",
             agent=oscal_engineer,
             output_pydantic=OSCAL_SAR_Schema,
             context=[drafting],  # Needs the technical details to map to OSCAL
         )
         assembly = Task(
             **self.tasks_config["final_report_assembly_task"],
+            name="final_report_assembly_task",
             agent=writer,
             output_pydantic=FinalReportSchema,
             context=[drafting, summary, oscal],  # assemble from text and OSCAL sections

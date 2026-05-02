@@ -11,8 +11,9 @@ from swarm.llm_factory import get_crew_llm
 
 
 class FieldworkCrew:
-    def __init__(self, event_callback=None):
+    def __init__(self, event_callback=None, skill_context=None):
         self._event_callback = event_callback
+        self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent
         with open(base_dir / "config" / "fieldwork_agents.yaml", "r") as f:
             self.agents_config = yaml.safe_load(f)
@@ -32,12 +33,16 @@ class FieldworkCrew:
                 list_public_s3_buckets,
             ],
         )
-        auditor = Agent(
-            **self.agents_config["field_auditor"],
-            verbose=True,
-            llm=base_llm,
-            max_iter=5,
-        )
+
+        # Augment field auditor backstory with domain skill prompts if detected
+        auditor_config = dict(self.agents_config["field_auditor"])
+        if self._skill_context:
+            from swarm.skill_loader import get_specialist_prompt
+            extra = get_specialist_prompt(self._skill_context)
+            auditor_config["backstory"] = (
+                auditor_config.get("backstory", "") + "\n\n" + extra
+            ).strip()
+        auditor = Agent(**auditor_config, verbose=True, llm=base_llm, max_iter=5)
 
         # Anti-Hallucination: QA runs at temp 0.0
         qa_llm = get_crew_llm(temperature=0.0)
@@ -49,16 +54,20 @@ class FieldworkCrew:
         )
 
         collection_task = Task(
-            **self.tasks_config["evidence_collection_task"], agent=collector
+            **self.tasks_config["evidence_collection_task"],
+            name="evidence_collection_task",
+            agent=collector,
         )
         evaluation_task = Task(
             **self.tasks_config["execution_evaluation_task"],
+            name="execution_evaluation_task",
             agent=auditor,
             output_pydantic=WorkingPaperSchema,
             context=[collection_task],  # only the collected evidence
         )
         qa_task = Task(
             **self.tasks_config["eval_qa_gate_task"],
+            name="eval_qa_gate_task",
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
             context=[evaluation_task],  # only the working papers
