@@ -9,5 +9,5 @@ def get_value(obj, key, default=""):
 def step_badge(result):
     if not result:
         return "—"
-    icons = {"Pass": "✅", "Fail": "❌", "Exception": "⚠️"}
+    icons = {"Pass": "✅", "Fail": "❌", "Exception": "⚠️"}  # nosec B105
     return icons.get(result, result)
