@@ -101,6 +101,16 @@ class TestJobStore:
     def test_get_missing_job_returns_none(self):
         assert get_job("nonexistent-job-xyz") is None
 
+    def test_set_flow(self):
+        flow = MagicMock()
+        set_flow("sess-test-set", flow)
+        assert get_flow("sess-test-set") is flow
+
+        # Test overwriting
+        flow2 = MagicMock()
+        set_flow("sess-test-set", flow2)
+        assert get_flow("sess-test-set") is flow2
+
     def test_set_and_remove_flow(self):
         flow = MagicMock()
         set_flow("sess-1", flow)
