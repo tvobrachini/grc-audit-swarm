@@ -1,10 +1,10 @@
-import threading
 import uuid
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from api.executor import get_executor
 from api.job_store import get_flow, push_event, remove_flow, set_flow, set_job
 from api.models import (
     ApproveGateRequest,
@@ -21,8 +21,10 @@ from swarm.session_manager import (
     list_sessions,
     save_session,
 )
+from swarm.state.repository import FlowRepository
 
 router = APIRouter()
+_repo = FlowRepository()
 
 
 def _make_event_callback(session_id: str):
@@ -50,6 +52,35 @@ def _make_event_callback(session_id: str):
             pass
 
     return callback
+
+
+def _get_or_load_flow(session_id: str) -> AuditFlow | None:
+    """Return in-memory flow, or load and cache from disk on miss."""
+    flow = get_flow(session_id)
+    if flow:
+        return flow
+    result = _repo.load(session_id)
+    if result is None:
+        return None
+    if not result.is_clean:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Session %s loaded with schema mismatches: %s",
+            session_id,
+            result.skipped_fields,
+        )
+    set_flow(session_id, result.flow)
+    return result.flow
+
+
+def _artifact_dict(artifact) -> dict[str, Any] | None:
+    """Serialize a typed Pydantic artifact to dict for the API response."""
+    if artifact is None:
+        return None
+    if hasattr(artifact, "model_dump"):
+        return artifact.model_dump()
+    return artifact  # already a dict (snapshot path)
 
 
 def _build_summary(session_id: str, data: dict[str, Any]) -> SessionSummary:
@@ -81,9 +112,9 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
             business_context=s.business_context,
             frameworks=s.frameworks,
             current_human_dossier=s.current_human_dossier,
-            racm_plan=s.racm_plan,
-            working_papers=s.working_papers,
-            final_report=s.final_report,
+            racm_plan=_artifact_dict(s.racm_plan),
+            working_papers=_artifact_dict(s.working_papers),
+            final_report=_artifact_dict(s.final_report),
             approval_trail=s.approval_trail,
             qa_rejection_reason=s.qa_rejection_reason,
         )
@@ -110,7 +141,7 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
 
 
 def _run_phase_1(session_id: str, job_id: str) -> None:
-    flow = get_flow(session_id)
+    flow = _get_or_load_flow(session_id)
     if not flow:
         set_job(job_id, "failed", "flow not found")
         return
@@ -122,23 +153,21 @@ def _run_phase_1(session_id: str, job_id: str) -> None:
             session_id,
             {"type": "complete", "status": flow.state.status, "artifact": "racm_plan"},
         )
-        _persist_snapshot(session_id, flow)
+        _repo.save(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
         push_event(session_id, {"type": "error", "reason": str(exc)})
         set_job(job_id, "failed", str(exc))
 
 
-def _run_phase_2(session_id: str, job_id: str, human_id: str) -> None:
-    flow = get_flow(session_id)
+def _run_phase_2(session_id: str, job_id: str) -> None:
+    flow = _get_or_load_flow(session_id)
     if not flow:
         set_job(job_id, "failed", "flow not found")
         return
     try:
         push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_2"})
-        flow.generate_fieldwork(
-            human_id, event_callback=_make_event_callback(session_id)
-        )
+        flow.generate_fieldwork(event_callback=_make_event_callback(session_id))
         push_event(session_id, {"type": "status", "status": flow.state.status})
         push_event(
             session_id,
@@ -148,23 +177,21 @@ def _run_phase_2(session_id: str, job_id: str, human_id: str) -> None:
                 "artifact": "working_papers",
             },
         )
-        _persist_snapshot(session_id, flow)
+        _repo.save(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
         push_event(session_id, {"type": "error", "reason": str(exc)})
         set_job(job_id, "failed", str(exc))
 
 
-def _run_phase_3(session_id: str, job_id: str, human_id: str) -> None:
-    flow = get_flow(session_id)
+def _run_phase_3(session_id: str, job_id: str) -> None:
+    flow = _get_or_load_flow(session_id)
     if not flow:
         set_job(job_id, "failed", "flow not found")
         return
     try:
         push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_3"})
-        flow.generate_reporting(
-            human_id, event_callback=_make_event_callback(session_id)
-        )
+        flow.generate_reporting(event_callback=_make_event_callback(session_id))
         push_event(session_id, {"type": "status", "status": flow.state.status})
         push_event(
             session_id,
@@ -174,23 +201,11 @@ def _run_phase_3(session_id: str, job_id: str, human_id: str) -> None:
                 "artifact": "final_report",
             },
         )
-        _persist_snapshot(session_id, flow)
+        _repo.save(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
         push_event(session_id, {"type": "error", "reason": str(exc)})
         set_job(job_id, "failed", str(exc))
-
-
-def _persist_snapshot(session_id: str, flow: AuditFlow) -> None:
-    data = get_session(session_id) or {}
-    save_session(
-        thread_id=session_id,
-        name=data.get("name", session_id),
-        scope_text=flow.state.business_context,
-    )
-    from swarm.session_manager import update_session
-
-    update_session(session_id, state_snapshot=flow.state.model_dump())
 
 
 @router.post("", response_model=SessionSummary, status_code=201)
@@ -203,25 +218,19 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
     flow.state.theme = req.theme
     flow.state.business_context = req.business_context
     flow.state.frameworks = req.frameworks
-    flow.state.status = (
-        "RUNNING_PHASE_1"  # stamp before thread so polls see correct state
-    )
+
+    # Stamp RUNNING_PHASE_1 synchronously so polls see correct state immediately
+    flow.begin_phase_1()
     set_flow(session_id, flow)
 
-    save_session(
-        thread_id=session_id,
-        name=name,
-        scope_text=req.business_context,
-    )
+    save_session(thread_id=session_id, name=name, scope_text=req.business_context)
     from swarm.session_manager import update_session
 
     update_session(session_id, status="RUNNING_PHASE_1", created_at=created_at)
 
-    # Auto-launch Phase 1 in background
     job_id = str(uuid.uuid4())
     set_job(job_id, "running")
-    t = threading.Thread(target=_run_phase_1, args=(session_id, job_id), daemon=True)
-    t.start()
+    get_executor().submit(session_id, _run_phase_1, session_id, job_id)
 
     return SessionSummary(
         session_id=session_id,
@@ -262,25 +271,21 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
     job_id = str(uuid.uuid4())
     set_job(job_id, "running")
 
+    flow = _get_or_load_flow(session_id)
+
     if req.gate_number == 1:
-        t = threading.Thread(
-            target=_run_phase_2, args=(session_id, job_id, req.human_id), daemon=True
-        )
+        # Stamp trail + transition machine synchronously before thread starts
+        if flow:
+            flow.begin_phase_2(req.human_id)
+        get_executor().submit(session_id, _run_phase_2, session_id, job_id)
+        next_status = "RUNNING_PHASE_2"
     elif req.gate_number == 2:
-        t = threading.Thread(
-            target=_run_phase_3, args=(session_id, job_id, req.human_id), daemon=True
-        )
+        if flow:
+            flow.begin_phase_3(req.human_id)
+        get_executor().submit(session_id, _run_phase_3, session_id, job_id)
+        next_status = "RUNNING_PHASE_3"
     else:
         raise HTTPException(status_code=400, detail="gate_number must be 1 or 2")
-
-    # Stamp status synchronously BEFORE thread starts so any poll sees the
-    # new state immediately — prevents the gate re-appearing on fast refetch.
-    next_status = f"RUNNING_PHASE_{req.gate_number + 1}"
-    flow = get_flow(session_id)
-    if flow:
-        flow.state.status = next_status
-
-    t.start()
 
     return SessionSummary(
         session_id=session_id,

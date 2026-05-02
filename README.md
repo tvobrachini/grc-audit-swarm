@@ -123,6 +123,8 @@ uv run streamlit run app.py --server.port 8502
 | `EVIDENCE_VAULT_PATH` | Override vault storage directory (useful for Docker volume mounts) |
 | `SESSIONS_PATH` | Override session file path |
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
+| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes |
+| `VITE_API_AUTH_TOKEN` | Frontend build-time token used to call the protected API in single-user deployments |
 | `DEMO_MODE` | Set to `1` to bypass LLM crews for UI development |
 | `ENVIRONMENT` | Set to `production` or `staging` to enforce DEMO_MODE guard |
 

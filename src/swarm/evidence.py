@@ -16,6 +16,9 @@ EVIDENCE_DIR = os.environ.get("EVIDENCE_VAULT_PATH", _DEFAULT_EVIDENCE_DIR)
 
 # Matches 12-digit AWS account IDs (standalone — not part of longer numbers).
 _ACCOUNT_ID_RE = re.compile(r"(?<!\d)\d{12}(?!\d)")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 def _get_fernet():
@@ -119,12 +122,15 @@ class EvidenceAssuranceProtocol:
         Deterministic Anti-Hallucination check.
         Returns True ONLY if the exact_quote mathematically exists within the hashed raw payload.
         """
+        if not _UUID_RE.fullmatch(vault_id):
+            return False
+
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
         filepath = os.path.join(evidence_dir, f"{vault_id}.json")
 
         resolved = os.path.realpath(filepath)
         expected_dir = os.path.realpath(evidence_dir)
-        if not resolved.startswith(expected_dir):
+        if os.path.commonpath([expected_dir, resolved]) != expected_dir:
             return False
 
         if not os.path.exists(filepath):
