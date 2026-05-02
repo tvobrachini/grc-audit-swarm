@@ -148,16 +148,29 @@ def _make_mock_flow(status="WAITING_FOR_SCOPE"):
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setenv("API_AUTH_TOKEN", "test-token")
     from api.main import app
 
     return TestClient(app)
 
 
+def _auth_headers() -> dict[str, str]:
+    return {"Authorization": "Bearer test-token"}
+
+
 class TestSessionsList:
+    def test_anonymous_request_is_rejected(self, client):
+        resp = client.get("/api/sessions")
+        assert resp.status_code == 401
+
+    def test_health_check_remains_public(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+
     def test_empty_list_returns_200(self, client):
         with patch("api.routers.sessions.list_sessions", return_value={}):
-            resp = client.get("/api/sessions")
+            resp = client.get("/api/sessions", headers=_auth_headers())
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -173,7 +186,7 @@ class TestSessionsList:
             patch("api.routers.sessions.list_sessions", return_value=sessions),
             patch("api.routers.sessions.get_flow", return_value=None),
         ):
-            resp = client.get("/api/sessions")
+            resp = client.get("/api/sessions", headers=_auth_headers())
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -184,7 +197,7 @@ class TestSessionsList:
 class TestSessionsGet:
     def test_missing_session_returns_404(self, client):
         with patch("api.routers.sessions.get_session", return_value=None):
-            resp = client.get("/api/sessions/nonexistent-id")
+            resp = client.get("/api/sessions/nonexistent-id", headers=_auth_headers())
         assert resp.status_code == 404
 
     def test_existing_session_returns_detail(self, client):
@@ -197,7 +210,7 @@ class TestSessionsGet:
             patch("api.routers.sessions.get_session", return_value=data),
             patch("api.routers.sessions.get_flow", return_value=None),
         ):
-            resp = client.get("/api/sessions/some-id")
+            resp = client.get("/api/sessions/some-id", headers=_auth_headers())
         assert resp.status_code == 200
         assert resp.json()["name"] == "S3 Audit"
 
@@ -208,23 +221,24 @@ class TestSessionsDelete:
             patch("api.routers.sessions.delete_session"),
             patch("api.routers.sessions.remove_flow"),
         ):
-            resp = client.delete("/api/sessions/sess-del")
+            resp = client.delete("/api/sessions/sess-del", headers=_auth_headers())
         assert resp.status_code == 204
 
 
 class TestSessionsCreate:
     def test_create_launches_phase_1(self, client):
         mock_flow = _make_mock_flow("RUNNING_PHASE_1")
+        mock_executor = MagicMock()
         with (
             patch("api.routers.sessions.AuditFlow", return_value=mock_flow),
             patch("api.routers.sessions.set_flow"),
             patch("api.routers.sessions.save_session"),
             patch("api.routers.sessions.set_job"),
-            patch("threading.Thread") as mock_thread,
+            patch("api.routers.sessions.get_executor", return_value=mock_executor),
         ):
-            mock_thread.return_value.start = MagicMock()
             resp = client.post(
                 "/api/sessions",
+                headers=_auth_headers(),
                 json={
                     "theme": "IAM Review",
                     "business_context": "AWS IAM posture review",
@@ -242,6 +256,7 @@ class TestApproveGate:
         with patch("api.routers.sessions.get_session", return_value=None):
             resp = client.patch(
                 "/api/sessions/nonexistent/approve",
+                headers=_auth_headers(),
                 json={"gate_number": 1, "human_id": "alice"},
             )
         assert resp.status_code == 404
@@ -255,6 +270,7 @@ class TestApproveGate:
         ):
             resp = client.patch(
                 "/api/sessions/sess-x/approve",
+                headers=_auth_headers(),
                 json={"gate_number": 3, "human_id": "alice"},
             )
         assert resp.status_code == 400
@@ -262,15 +278,16 @@ class TestApproveGate:
     def test_gate_1_approval_starts_phase_2(self, client):
         session_data = {"name": "IAM Audit", "created_at": "2026-01-01T00:00:00"}
         mock_flow = _make_mock_flow("WAITING_HUMAN_GATE_1")
+        mock_executor = MagicMock()
         with (
             patch("api.routers.sessions.get_session", return_value=session_data),
             patch("api.routers.sessions.get_flow", return_value=mock_flow),
             patch("api.routers.sessions.set_job"),
-            patch("threading.Thread") as mock_thread,
+            patch("api.routers.sessions.get_executor", return_value=mock_executor),
         ):
-            mock_thread.return_value.start = MagicMock()
             resp = client.patch(
                 "/api/sessions/sess-g1/approve",
+                headers=_auth_headers(),
                 json={"gate_number": 1, "human_id": "alice"},
             )
         assert resp.status_code == 200

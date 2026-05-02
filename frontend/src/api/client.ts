@@ -1,4 +1,5 @@
 export const API_URL = "";
+const API_AUTH_TOKEN = import.meta.env.VITE_API_AUTH_TOKEN as string | undefined;
 
 export interface SessionSummary {
   session_id: string;
@@ -36,8 +37,13 @@ export interface AuditEvent {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (API_AUTH_TOKEN) {
+    headers.Authorization = `Bearer ${API_AUTH_TOKEN}`;
+  }
+
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...init,
   });
   if (!res.ok) {
@@ -67,7 +73,10 @@ export const api = {
         body: JSON.stringify({ gate_number, human_id }),
       }),
     delete: (id: string) =>
-      fetch(`${API_URL}/api/sessions/${id}`, { method: "DELETE" }),
+      fetch(`${API_URL}/api/sessions/${id}`, {
+        method: "DELETE",
+        headers: API_AUTH_TOKEN ? { Authorization: `Bearer ${API_AUTH_TOKEN}` } : undefined,
+      }),
   },
   evidence: {
     verify: (vault_id: string, exact_quote: string) =>
