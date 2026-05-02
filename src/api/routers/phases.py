@@ -1,6 +1,5 @@
 import asyncio
 import json
-import queue
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -23,12 +22,11 @@ async def stream_events(session_id: str) -> StreamingResponse:
     q = get_queue(session_id)
 
     async def generator():
-        loop = asyncio.get_event_loop()
         while True:
             try:
-                event = await loop.run_in_executor(None, lambda: q.get(timeout=1))
+                event = await asyncio.wait_for(q.get(), timeout=1.0)
                 yield f"data: {json.dumps(event)}\n\n"
-            except queue.Empty:
+            except asyncio.TimeoutError:
                 yield ": heartbeat\n\n"
 
     return StreamingResponse(
