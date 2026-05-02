@@ -33,7 +33,9 @@ app.include_router(
     tags=["sessions"],
     dependencies=_api_auth,
 )
-app.include_router(phases.router, prefix="/api", tags=["phases"], dependencies=_api_auth)
+app.include_router(
+    phases.router, prefix="/api", tags=["phases"], dependencies=_api_auth
+)
 app.include_router(
     evidence.router,
     prefix="/api/evidence",

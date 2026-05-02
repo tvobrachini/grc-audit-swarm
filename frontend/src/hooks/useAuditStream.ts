@@ -3,15 +3,17 @@ import { type AuditEvent } from "@/api/client";
 
 export function useAuditStream(sessionId: string | null) {
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [prevSessionId, setPrevSessionId] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
-  useEffect(() => {
-    if (!sessionId) {
-      setEvents([]);
-      return;
-    }
-
+  if (sessionId !== prevSessionId) {
     setEvents([]);
+    setPrevSessionId(sessionId);
+  }
+
+  useEffect(() => {
+    if (!sessionId) return;
+
     const es = new EventSource(`/api/stream/${sessionId}`);
     esRef.current = es;
 

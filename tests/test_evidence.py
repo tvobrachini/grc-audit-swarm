@@ -132,7 +132,9 @@ class TestVerifyExactQuote:
             "../../../etc/passwd", "root"
         )
 
-    def test_sibling_prefix_traversal_attempt_returns_false(self, tmp_path, monkeypatch):
+    def test_sibling_prefix_traversal_attempt_returns_false(
+        self, tmp_path, monkeypatch
+    ):
         vault = tmp_path / "vault"
         sibling = tmp_path / "vault_backup"
         vault.mkdir()

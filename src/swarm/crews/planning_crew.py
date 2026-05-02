@@ -31,6 +31,7 @@ class PlanningCrew:
         specialist_config = dict(self.agents_config["specialist"])
         if self._skill_context:
             from swarm.skill_loader import get_specialist_prompt
+
             extra = get_specialist_prompt(self._skill_context)
             specialist_config["backstory"] = (
                 specialist_config.get("backstory", "") + "\n\n" + extra
@@ -48,9 +49,17 @@ class PlanningCrew:
         )
 
         # Instantiate Tasks with explicit names for result_adapter lookup
-        context_task = Task(**self.tasks_config["context_task"], name="context_task", agent=orchestrator)
-        crosswalk_task = Task(**self.tasks_config["crosswalk_task"], name="crosswalk_task", agent=analyst)
-        weighting_task = Task(**self.tasks_config["weighting_task"], name="weighting_task", agent=specialist)
+        context_task = Task(
+            **self.tasks_config["context_task"], name="context_task", agent=orchestrator
+        )
+        crosswalk_task = Task(
+            **self.tasks_config["crosswalk_task"], name="crosswalk_task", agent=analyst
+        )
+        weighting_task = Task(
+            **self.tasks_config["weighting_task"],
+            name="weighting_task",
+            agent=specialist,
+        )
 
         # Pydantic Enforcement.
         # Context is limited explicitly to avoid stacking all prior outputs

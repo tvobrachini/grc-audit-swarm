@@ -22,6 +22,7 @@ class ReportingCrew:
         writer_config = dict(self.agents_config["lead_writer"])
         if self._skill_context:
             from swarm.skill_loader import get_specialist_prompt
+
             extra = get_specialist_prompt(self._skill_context)
             writer_config["backstory"] = (
                 writer_config.get("backstory", "") + "\n\n" + extra
@@ -46,7 +47,9 @@ class ReportingCrew:
             max_iter=5,
         )
 
-        drafting = Task(**self.tasks_config["drafting_task"], name="drafting_task", agent=writer)
+        drafting = Task(
+            **self.tasks_config["drafting_task"], name="drafting_task", agent=writer
+        )
         summary = Task(
             **self.tasks_config["executive_summary_task"],
             name="executive_summary_task",

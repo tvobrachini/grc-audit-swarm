@@ -64,8 +64,11 @@ def _get_or_load_flow(session_id: str) -> AuditFlow | None:
         return None
     if not result.is_clean:
         import logging
+
         logging.getLogger(__name__).warning(
-            "Session %s loaded with schema mismatches: %s", session_id, result.skipped_fields
+            "Session %s loaded with schema mismatches: %s",
+            session_id,
+            result.skipped_fields,
         )
     set_flow(session_id, result.flow)
     return result.flow
@@ -222,6 +225,7 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
 
     save_session(thread_id=session_id, name=name, scope_text=req.business_context)
     from swarm.session_manager import update_session
+
     update_session(session_id, status="RUNNING_PHASE_1", created_at=created_at)
 
     job_id = str(uuid.uuid4())

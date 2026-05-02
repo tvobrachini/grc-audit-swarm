@@ -38,6 +38,7 @@ class FieldworkCrew:
         auditor_config = dict(self.agents_config["field_auditor"])
         if self._skill_context:
             from swarm.skill_loader import get_specialist_prompt
+
             extra = get_specialist_prompt(self._skill_context)
             auditor_config["backstory"] = (
                 auditor_config.get("backstory", "") + "\n\n" + extra

@@ -12,7 +12,9 @@ class PhaseExecutor:
     """Bounded thread pool for audit phase execution."""
 
     def __init__(self, max_workers: int = _MAX_WORKERS) -> None:
-        self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="phase")
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="phase"
+        )
 
     def submit(self, session_id: str, fn: Callable, *args) -> Future:
         logger.debug("Submitting phase task for session %s", session_id)
