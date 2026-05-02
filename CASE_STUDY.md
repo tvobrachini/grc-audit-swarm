@@ -61,7 +61,6 @@ By shifting from a single-agent "Crosswalker" to a multi-phase "Swarm," the dept
 - **Evidence-to-Finding Automation:** By connecting to **AWS**, the swarm identifies real misconfigurations and automatically generates Working Papers with per-control severity ratings.
 - **Human-in-the-Loop Efficiency:** The human auditor acts as a **Supervisor**, reviewing high-quality drafts and evidence instead of performing manual data entry.
 - **Scalable Specialization:** One GRC Engineer can now oversee multiple complex technical audits simultaneously, as the swarm handles the heavy lifting of research, mapping, and preliminary testing.
-- **True Compliance-as-Code:** The swarm moves beyond narrative Word documents. Phase 3 includes a dedicated **Compliance Documentation Engineer** that translates all findings and evidence mappings into strict **NIST OSCAL JSON** formats (`OSCAL_SAR_Schema`) for automated GRC ingestion.
 
 ---
 

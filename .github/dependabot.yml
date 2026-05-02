@@ -5,7 +5,17 @@
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "pip" # Python dependencies
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions" # GitHub Actions
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker" # Dockerfile base images
+    directory: "/"
     schedule:
       interval: "weekly"

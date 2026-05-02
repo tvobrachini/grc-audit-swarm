@@ -32,13 +32,12 @@ Three agents execute live evidence collection and evaluate controls:
 All evidence is hashed and stored in the **Evidence Vault** (PCAOB AS 1215 / IIA 2330). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
 
 ### 📝 Phase 3: Reporting (The Pen)
-Five sequential tasks across four agents produce the final deliverable:
+Four sequential tasks produce the final deliverable:
 
 - **Lead Report Writer:** Synthesises Phase 1 scope and Phase 2 working papers into a structured audit report body.
 - **Executive Concluder:** Drafts a concise executive summary from the report.
 - **Tone & QA Reviewer (temp=0):** Rejects the report if language is subjective, inflammatory, or confusing.
-- **Compliance Documentation Engineer:** Translates the narrative findings and evidence into a machine-readable NIST OSCAL format (`OSCAL_SAR_Schema`) for automated GRC platform ingestion.
-- **Assembly (Lead Writer):** Packages all sections (narrative, executive, and OSCAL) into the `FinalReportSchema` for download.
+- **Assembly (Lead Writer):** Packages both sections into the `FinalReportSchema` for download.
 
 ### 🔄 Architecture Flow
 
@@ -68,9 +67,8 @@ graph TD
     HR2 -- Approved --> Wr[Report Writer]:::phase3
     Wr --> Ex[Executive Concluder]:::phase3
     Ex --> QA3[Tone QA Reviewer]:::phase3
-    QA3 --> Osc[OSCAL Engineer]:::phase3
-    Osc --> Asm[Final Assembly]:::phase3
-    Asm --> End((Final Report + OSCAL\n+ Evidence Vault)):::init
+    QA3 --> Asm[Final Assembly]:::phase3
+    Asm --> End((Final Report\n+ Evidence Vault)):::init
 ```
 
 ---
@@ -105,24 +103,18 @@ cp .env.example .env
 # 3. Install dependencies
 uv sync
 
-# 4. Launch (Full Stack)
-# Starts FastAPI backend, React frontend, and Streamlit app
-docker-compose up --build
-
-# Alternatively, launch just the Streamlit interface:
+# 4. Launch
 uv run streamlit run app.py --server.port 8502
 # App accessible at http://localhost:8502
 ```
 
-**LLM provider priority** (the factory dynamically binds based on available keys/vars):
+**LLM provider priority** (set whichever key you have):
 
 | Priority | Key | Model | Notes |
 |----------|-----|-------|-------|
-| 1 | `OLLAMA_MODEL` | (Local) e.g., `llama3` | Fully private, zero-cost local inference |
-| 2 | `NVIDIA_API_KEY` | `llama-3.3-70b-instruct`| NVIDIA NIM infrastructure |
-| 3 | `GEMINI_API_KEY` | `gemini-2.0-flash` | Recommended cloud tier — highly capable |
-| 4 | `OPENAI_API_KEY` | `gpt-4o-mini` | Standard cloud fallback |
-| 5 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fast inference, strict rate limits |
+| 1 | `GEMINI_API_KEY` | `gemini-2.0-flash` | Recommended — generous free tier |
+| 2 | `OPENAI_API_KEY` | `gpt-4o-mini` | Paid |
+| 3 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Free tier, rate-limited |
 
 **Optional environment variables:**
 
@@ -182,16 +174,11 @@ src/
     schema.py           # RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
     session_manager.py  # Persistent audit session serialization
     skill_loader.py     # Dynamic CrewAI skill registration
-  api/
-    main.py             # FastAPI backend for headless/React consumption
   ui/
-    components/         # Streamlit UI components
-frontend/               # React + Vite modern web interface
-skills/                 # YAML definitions for domain-specific audit skills (GDPR, HIPAA, etc.)
+    components/         # sidebar, scope_input, phase1_review, phase2_review, progress, styles
 app.py                  # Streamlit entry point
 aws_safety_heartbeat.py # Standalone boto3 script to verify $0 AWS resource usage
 run_monitor.py          # Headless E2E test runner
-docker-compose.yml      # Orchestrates API, Frontend, and Streamlit services
 ```
 
 ---
