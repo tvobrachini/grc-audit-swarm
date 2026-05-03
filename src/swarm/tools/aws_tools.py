@@ -1,5 +1,6 @@
-import json
 import concurrent.futures
+import json
+
 import boto3
 from botocore.exceptions import (
     ClientError,
@@ -7,6 +8,7 @@ from botocore.exceptions import (
     OperationNotPageableError,
 )
 from crewai.tools import tool
+
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 
 
