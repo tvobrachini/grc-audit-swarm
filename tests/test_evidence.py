@@ -160,7 +160,9 @@ class TestVerifyExactQuote:
     def test_encrypted_vault_verify_works_with_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+        from swarm.evidence import _get_fernet
 
+        _get_fernet.cache_clear()
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
@@ -180,12 +182,15 @@ class TestVerifyExactQuote:
     def test_encrypted_vault_verify_fails_without_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+        from swarm.evidence import _get_fernet
 
+        _get_fernet.cache_clear()
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
         result = EvidenceAssuranceProtocol.register_evidence("secret", "op")
         monkeypatch.delenv("VAULT_ENCRYPTION_KEY")
+        _get_fernet.cache_clear()
         assert not EvidenceAssuranceProtocol.verify_exact_quote(
             result["vault_id"], "secret"
         )
