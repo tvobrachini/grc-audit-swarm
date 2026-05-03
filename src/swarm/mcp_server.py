@@ -52,9 +52,7 @@ def list_iam_users_with_mfa() -> str:
 def _check_bucket_public_access_mcp(s3, name: str) -> dict:
     entry: dict = {"Bucket": name, "IsPublic": False}
     try:
-        pab = s3.get_public_access_block(Bucket=name)[
-            "PublicAccessBlockConfiguration"
-        ]
+        pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
         all_blocked = all(
             [
                 pab.get("BlockPublicAcls", False),
@@ -66,10 +64,7 @@ def _check_bucket_public_access_mcp(s3, name: str) -> dict:
         if not all_blocked:
             entry["IsPublic"] = True
     except ClientError as e:
-        if (
-            e.response["Error"]["Code"]
-            == "NoSuchPublicAccessBlockConfiguration"
-        ):
+        if e.response["Error"]["Code"] == "NoSuchPublicAccessBlockConfiguration":
             entry["IsPublic"] = True
     try:
         acl = s3.get_bucket_acl(Bucket=name)

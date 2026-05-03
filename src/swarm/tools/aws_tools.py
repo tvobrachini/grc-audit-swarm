@@ -67,9 +67,7 @@ def _check_bucket_public_access(s3, name: str) -> dict:
 
     # Check bucket-level Public Access Block settings.
     try:
-        pab = s3.get_public_access_block(Bucket=name)[
-            "PublicAccessBlockConfiguration"
-        ]
+        pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
         all_blocked = all(
             [
                 pab.get("BlockPublicAcls", False),
