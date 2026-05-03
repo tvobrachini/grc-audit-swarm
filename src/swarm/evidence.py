@@ -5,6 +5,7 @@ import uuid
 import os
 import datetime
 import base64
+import functools
 from dataclasses import dataclass, field
 from typing import List
 
@@ -21,6 +22,7 @@ _UUID_RE = re.compile(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def _get_fernet():
     """Return a Fernet instance if VAULT_ENCRYPTION_KEY is set, else None."""
     key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")

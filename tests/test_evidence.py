@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
+from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids, _get_fernet
 
 
 # ─── Account ID Redaction ─────────────────────────────────────────────────────
@@ -164,6 +164,8 @@ class TestVerifyExactQuote:
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
+        _get_fernet.cache_clear()
+
         result = EvidenceAssuranceProtocol.register_evidence("secret payload", "op")
         # Vault file should NOT contain plaintext
         import json as _json
@@ -184,8 +186,13 @@ class TestVerifyExactQuote:
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
+        _get_fernet.cache_clear()
+
         result = EvidenceAssuranceProtocol.register_evidence("secret", "op")
+
         monkeypatch.delenv("VAULT_ENCRYPTION_KEY")
+        _get_fernet.cache_clear()
+
         assert not EvidenceAssuranceProtocol.verify_exact_quote(
             result["vault_id"], "secret"
         )
