@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -68,7 +69,8 @@ def list_public_s3_buckets(context: str = "") -> str:
         buckets = buckets_resp.get("Buckets", [])
 
         results = []
-        for bucket in buckets:
+
+        def check_bucket(bucket: dict) -> dict:
             name = bucket["Name"]
             entry: dict = {
                 "Bucket": name,
@@ -119,7 +121,12 @@ def list_public_s3_buckets(context: str = "") -> str:
             except ClientError as e:
                 entry["ACL"] = f"Error: {e}"
 
-            results.append(entry)
+            return entry
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(check_bucket, b) for b in buckets]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
 
         raw_output = json.dumps(results, indent=2, default=str)
     except (ClientError, NoCredentialsError) as e:
