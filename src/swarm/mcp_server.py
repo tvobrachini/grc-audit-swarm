@@ -1,6 +1,6 @@
+import concurrent.futures
 import json
 import logging
-import concurrent.futures
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
