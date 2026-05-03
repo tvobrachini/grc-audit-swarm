@@ -71,10 +71,12 @@ def get_skill_by_id(skill_id: str) -> Optional[Dict[str, Any]]:
     global _SKILLS_CACHE
     if _SKILLS_CACHE is None:
         _SKILLS_CACHE = {
-            skill.get("id"): skill
+            str(skill.get("id")): skill
             for skill in list_available_skills()
             if skill.get("id")
         }
+    if _SKILLS_CACHE is None:
+        return None
     return _SKILLS_CACHE.get(skill_id)
 
 
