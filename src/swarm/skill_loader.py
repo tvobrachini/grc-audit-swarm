@@ -12,9 +12,12 @@ A "Skill" is the GRC Audit Swarm equivalent of a Claude Skill:
 
 import os
 import yaml
+import copy
 from typing import List, Dict, Optional, Any
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../skills")
+
+_SKILLS_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
 def _load_skill_file(path: str) -> Dict[str, Any]:
@@ -24,6 +27,10 @@ def _load_skill_file(path: str) -> Dict[str, Any]:
 
 def list_available_skills() -> List[Dict[str, Any]]:
     """Return all skills found in the skills/ directory."""
+    global _SKILLS_CACHE
+    if _SKILLS_CACHE is not None:
+        return copy.deepcopy(_SKILLS_CACHE)
+
     skills = []
     if not os.path.exists(SKILLS_DIR):
         return skills
@@ -31,7 +38,9 @@ def list_available_skills() -> List[Dict[str, Any]]:
         if fname.endswith(".yaml") or fname.endswith(".yml"):
             skill = _load_skill_file(os.path.join(SKILLS_DIR, fname))
             skills.append(skill)
-    return skills
+
+    _SKILLS_CACHE = skills
+    return copy.deepcopy(_SKILLS_CACHE)
 
 
 def detect_skills_from_scope(scope_text: str) -> List[Dict[str, Any]]:
