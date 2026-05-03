@@ -1,5 +1,6 @@
 import json
 import logging
+import concurrent.futures
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -48,6 +49,41 @@ def list_iam_users_with_mfa() -> str:
         return f"Error listing IAM users: {e}"
 
 
+def _check_bucket_public_access_mcp(s3, name: str) -> dict:
+    entry: dict = {"Bucket": name, "IsPublic": False}
+    try:
+        pab = s3.get_public_access_block(Bucket=name)[
+            "PublicAccessBlockConfiguration"
+        ]
+        all_blocked = all(
+            [
+                pab.get("BlockPublicAcls", False),
+                pab.get("IgnorePublicAcls", False),
+                pab.get("BlockPublicPolicy", False),
+                pab.get("RestrictPublicBuckets", False),
+            ]
+        )
+        if not all_blocked:
+            entry["IsPublic"] = True
+    except ClientError as e:
+        if (
+            e.response["Error"]["Code"]
+            == "NoSuchPublicAccessBlockConfiguration"
+        ):
+            entry["IsPublic"] = True
+    try:
+        acl = s3.get_bucket_acl(Bucket=name)
+        public = any(
+            "AllUsers" in g.get("Grantee", {}).get("URI", "")
+            for g in acl.get("Grants", [])
+        )
+        if public:
+            entry["IsPublic"] = True
+    except ClientError:
+        pass
+    return entry
+
+
 @mcp.tool()
 def list_public_s3_buckets() -> str:
     """
@@ -59,40 +95,17 @@ def list_public_s3_buckets() -> str:
         s3 = boto3.client("s3")
         buckets = s3.list_buckets().get("Buckets", [])
         results = []
-        for bucket in buckets:
-            name = bucket["Name"]
-            entry: dict = {"Bucket": name, "IsPublic": False}
-            try:
-                pab = s3.get_public_access_block(Bucket=name)[
-                    "PublicAccessBlockConfiguration"
-                ]
-                all_blocked = all(
-                    [
-                        pab.get("BlockPublicAcls", False),
-                        pab.get("IgnorePublicAcls", False),
-                        pab.get("BlockPublicPolicy", False),
-                        pab.get("RestrictPublicBuckets", False),
-                    ]
-                )
-                if not all_blocked:
-                    entry["IsPublic"] = True
-            except ClientError as e:
-                if (
-                    e.response["Error"]["Code"]
-                    == "NoSuchPublicAccessBlockConfiguration"
-                ):
-                    entry["IsPublic"] = True
-            try:
-                acl = s3.get_bucket_acl(Bucket=name)
-                public = any(
-                    "AllUsers" in g.get("Grantee", {}).get("URI", "")
-                    for g in acl.get("Grants", [])
-                )
-                if public:
-                    entry["IsPublic"] = True
-            except ClientError:
-                pass
-            results.append(entry)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [
+                executor.submit(_check_bucket_public_access_mcp, s3, bucket["Name"])
+                for bucket in buckets
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+
+        # Sort results to maintain deterministic output
+        results.sort(key=lambda x: x["Bucket"])
+
         return json.dumps(results, indent=2, default=str)
     except (ClientError, NoCredentialsError) as e:
         return f"Error listing S3 buckets: {e}"

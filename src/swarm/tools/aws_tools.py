@@ -1,5 +1,6 @@
 import json
 import boto3
+import concurrent.futures
 from botocore.exceptions import ClientError, NoCredentialsError
 from crewai.tools import tool
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
@@ -56,6 +57,56 @@ def list_iam_users_with_mfa(context: str = "") -> str:
     return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
 
 
+def _check_bucket_public_access(s3, name: str) -> dict:
+    entry: dict = {
+        "Bucket": name,
+        "PublicAccessBlockEnabled": None,
+        "ACL": None,
+        "IsPublic": False,
+    }
+
+    # Check bucket-level Public Access Block settings.
+    try:
+        pab = s3.get_public_access_block(Bucket=name)[
+            "PublicAccessBlockConfiguration"
+        ]
+        all_blocked = all(
+            [
+                pab.get("BlockPublicAcls", False),
+                pab.get("IgnorePublicAcls", False),
+                pab.get("BlockPublicPolicy", False),
+                pab.get("RestrictPublicBuckets", False),
+            ]
+        )
+        entry["PublicAccessBlockEnabled"] = all_blocked
+        if not all_blocked:
+            entry["IsPublic"] = True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchPublicAccessBlockConfiguration":
+            # No block config means public access controls are not restricted at bucket level.
+            entry["PublicAccessBlockEnabled"] = False
+            entry["IsPublic"] = True
+        else:
+            entry["PublicAccessBlockEnabled"] = f"Error: {e}"
+
+    # Check bucket ACL for any public grants.
+    try:
+        acl = s3.get_bucket_acl(Bucket=name)
+        public_grantees = [
+            g["Grantee"].get("URI", "")
+            for g in acl.get("Grants", [])
+            if "URI" in g.get("Grantee", {})
+            and "AllUsers" in g["Grantee"].get("URI", "")
+        ]
+        entry["ACL"] = "Public" if public_grantees else "Private"
+        if public_grantees:
+            entry["IsPublic"] = True
+    except ClientError as e:
+        entry["ACL"] = f"Error: {e}"
+
+    return entry
+
+
 @tool("List Public S3 Buckets")
 def list_public_s3_buckets(context: str = "") -> str:
     """
@@ -68,58 +119,16 @@ def list_public_s3_buckets(context: str = "") -> str:
         buckets = buckets_resp.get("Buckets", [])
 
         results = []
-        for bucket in buckets:
-            name = bucket["Name"]
-            entry: dict = {
-                "Bucket": name,
-                "PublicAccessBlockEnabled": None,
-                "ACL": None,
-                "IsPublic": False,
-            }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [
+                executor.submit(_check_bucket_public_access, s3, bucket["Name"])
+                for bucket in buckets
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
 
-            # Check bucket-level Public Access Block settings.
-            try:
-                pab = s3.get_public_access_block(Bucket=name)[
-                    "PublicAccessBlockConfiguration"
-                ]
-                all_blocked = all(
-                    [
-                        pab.get("BlockPublicAcls", False),
-                        pab.get("IgnorePublicAcls", False),
-                        pab.get("BlockPublicPolicy", False),
-                        pab.get("RestrictPublicBuckets", False),
-                    ]
-                )
-                entry["PublicAccessBlockEnabled"] = all_blocked
-                if not all_blocked:
-                    entry["IsPublic"] = True
-            except ClientError as e:
-                if (
-                    e.response["Error"]["Code"]
-                    == "NoSuchPublicAccessBlockConfiguration"
-                ):
-                    # No block config means public access controls are not restricted at bucket level.
-                    entry["PublicAccessBlockEnabled"] = False
-                    entry["IsPublic"] = True
-                else:
-                    entry["PublicAccessBlockEnabled"] = f"Error: {e}"
-
-            # Check bucket ACL for any public grants.
-            try:
-                acl = s3.get_bucket_acl(Bucket=name)
-                public_grantees = [
-                    g["Grantee"].get("URI", "")
-                    for g in acl.get("Grants", [])
-                    if "URI" in g.get("Grantee", {})
-                    and "AllUsers" in g["Grantee"].get("URI", "")
-                ]
-                entry["ACL"] = "Public" if public_grantees else "Private"
-                if public_grantees:
-                    entry["IsPublic"] = True
-            except ClientError as e:
-                entry["ACL"] = f"Error: {e}"
-
-            results.append(entry)
+        # Sort results to maintain deterministic output
+        results.sort(key=lambda x: x["Bucket"])
 
         raw_output = json.dumps(results, indent=2, default=str)
     except (ClientError, NoCredentialsError) as e:
