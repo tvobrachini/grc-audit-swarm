@@ -1,4 +1,5 @@
 import json
+import concurrent.futures
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 from crewai.tools import tool
@@ -35,16 +36,23 @@ def list_iam_users_with_mfa(context: str = "") -> str:
     try:
         client = _boto_client("iam")
         paginator = client.get_paginator("list_users")
-        report = []
+
+        users = []
         for page in paginator.paginate():
             for user in page.get("Users", []):
-                name = user["UserName"]
-                try:
-                    mfa_resp = client.list_mfa_devices(UserName=name)
-                    has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
-                except ClientError:
-                    has_mfa = "Unknown"
-                report.append({"UserName": name, "MFA_Enabled": has_mfa})
+                users.append(user["UserName"])
+
+        def check_mfa(name):
+            try:
+                mfa_resp = client.list_mfa_devices(UserName=name)
+                has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
+            except ClientError:
+                has_mfa = "Unknown"
+            return {"UserName": name, "MFA_Enabled": has_mfa}
+
+        report = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            report = list(executor.map(check_mfa, users))
 
         raw_output = json.dumps(report, indent=2)
     except (ClientError, NoCredentialsError) as e:
