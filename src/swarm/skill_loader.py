@@ -63,12 +63,19 @@ def detect_skills_from_scope(scope_text: str) -> List[Dict[str, Any]]:
     return matched
 
 
+_SKILLS_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+
+
 def get_skill_by_id(skill_id: str) -> Optional[Dict[str, Any]]:
     """Load a specific skill by its id field."""
-    for skill in list_available_skills():
-        if skill.get("id") == skill_id:
-            return skill
-    return None
+    global _SKILLS_CACHE
+    if _SKILLS_CACHE is None:
+        _SKILLS_CACHE = {
+            skill.get("id"): skill
+            for skill in list_available_skills()
+            if skill.get("id")
+        }
+    return _SKILLS_CACHE.get(skill_id)
 
 
 def get_specialist_prompt(matched_skills: List[Dict[str, Any]]) -> str:
