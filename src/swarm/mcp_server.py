@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import logging
 
@@ -59,7 +60,8 @@ def list_public_s3_buckets() -> str:
         s3 = boto3.client("s3")
         buckets = s3.list_buckets().get("Buckets", [])
         results = []
-        for bucket in buckets:
+
+        def check_bucket(bucket: dict) -> dict:
             name = bucket["Name"]
             entry: dict = {"Bucket": name, "IsPublic": False}
             try:
@@ -92,7 +94,13 @@ def list_public_s3_buckets() -> str:
                     entry["IsPublic"] = True
             except ClientError:
                 pass
-            results.append(entry)
+            return entry
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(check_bucket, b) for b in buckets]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+
         return json.dumps(results, indent=2, default=str)
     except (ClientError, NoCredentialsError) as e:
         return f"Error listing S3 buckets: {e}"
