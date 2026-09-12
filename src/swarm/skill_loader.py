@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Any
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../skills")
 
 _SKILLS_CACHE: Optional[List[Dict[str, Any]]] = None
+_SKILLS_BY_ID_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 def _load_skill_file(path: str) -> Dict[str, Any]:
@@ -27,7 +28,7 @@ def _load_skill_file(path: str) -> Dict[str, Any]:
 
 def list_available_skills() -> List[Dict[str, Any]]:
     """Return all skills found in the skills/ directory."""
-    global _SKILLS_CACHE
+    global _SKILLS_CACHE, _SKILLS_BY_ID_CACHE
     if _SKILLS_CACHE is not None:
         return copy.deepcopy(_SKILLS_CACHE)
 
@@ -40,6 +41,7 @@ def list_available_skills() -> List[Dict[str, Any]]:
             skills.append(skill)
 
     _SKILLS_CACHE = skills
+    _SKILLS_BY_ID_CACHE = {s["id"]: s for s in skills if "id" in s}
     return copy.deepcopy(_SKILLS_CACHE)
 
 
@@ -74,9 +76,12 @@ def detect_skills_from_scope(scope_text: str) -> List[Dict[str, Any]]:
 
 def get_skill_by_id(skill_id: str) -> Optional[Dict[str, Any]]:
     """Load a specific skill by its id field."""
-    for skill in list_available_skills():
-        if skill.get("id") == skill_id:
-            return skill
+    global _SKILLS_BY_ID_CACHE
+    if _SKILLS_BY_ID_CACHE is None:
+        list_available_skills()
+
+    if _SKILLS_BY_ID_CACHE and skill_id in _SKILLS_BY_ID_CACHE:
+        return copy.deepcopy(_SKILLS_BY_ID_CACHE[skill_id])
     return None
 
 
