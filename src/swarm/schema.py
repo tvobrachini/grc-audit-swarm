@@ -116,6 +116,22 @@ class OSCAL_SAR_Metadata(BaseModel):
     oscal_version: str = Field(default="1.1.2", description="OSCAL schema version.")
 
 
+class OSCAL_SAR_ImportAP(BaseModel):
+    """NIST OSCAL's required `import-ap` — links these results back to the
+    assessment plan (and, transitively, the system security plan) they assess."""
+
+    href: str = Field(
+        ...,
+        description=(
+            "Reference (URI or identifier) to the OSCAL assessment plan this "
+            "result set was generated from."
+        ),
+    )
+    remarks: Optional[str] = Field(
+        None, description="Optional remarks about the imported assessment plan."
+    )
+
+
 class OSCAL_SAR_Observation(BaseModel):
     observation_id: str = Field(..., description="Unique identifier for the finding.")
     description: str = Field(..., description="The narrative finding or deficiency.")
@@ -141,4 +157,5 @@ class OSCAL_SAR_Result(BaseModel):
 
 class OSCAL_SAR_Schema(BaseModel):
     metadata: OSCAL_SAR_Metadata
+    import_ap: OSCAL_SAR_ImportAP
     results: List[OSCAL_SAR_Result]
