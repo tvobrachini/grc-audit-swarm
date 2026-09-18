@@ -142,3 +142,22 @@ class TestSkillHelpers:
     def test_empty_skills_returns_empty_hints(self):
         hints = get_researcher_context_hints([])
         assert hints == ""
+
+
+class TestSkillLoaderErrorIsolation:
+    def test_malformed_yaml_is_skipped_valid_ones_still_load(
+        self, tmp_path, monkeypatch
+    ):
+        import swarm.skill_loader as skill_loader
+
+        (tmp_path / "good.yaml").write_text(
+            "id: good_skill\nname: Good Skill\nscope_keywords: [good]\n"
+        )
+        (tmp_path / "bad.yaml").write_text("id: [unterminated\n  - broken: yaml")
+
+        monkeypatch.setattr(skill_loader, "SKILLS_DIR", str(tmp_path))
+        monkeypatch.setattr(skill_loader, "_SKILLS_CACHE", None)
+
+        skills = skill_loader.list_available_skills()
+
+        assert [s["id"] for s in skills] == ["good_skill"]
