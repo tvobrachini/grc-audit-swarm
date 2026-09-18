@@ -118,7 +118,7 @@ def run_phase1(flow) -> bool:
     status = flow.state.status
     print(f"\n  Status after Phase 1: {status}  ({elapsed:.1f}s)")
 
-    if status == "ERROR":
+    if status == "ERROR_PHASE_1":
         print(f"  ❌ ERROR: {flow.state.qa_rejection_reason}")
         return False
     if status == "QA_REJECTED_PHASE_1":
@@ -143,7 +143,6 @@ def run_phase2(flow, skip_aws: bool) -> bool:
             "  [--skip-aws] Injecting mock working papers, skipping real AWS tools.\n"
         )
         from swarm.schema import WorkingPaperSchema, AuditFindingSchema
-        from datetime import datetime as dt
 
         flow.state.working_papers = WorkingPaperSchema(
             theme=flow.state.theme,
@@ -157,20 +156,18 @@ def run_phase2(flow, skip_aws: bool) -> bool:
                 )
             ],
         ).model_dump()
-        flow.state.approval_trail.append(
-            {
-                "gate": "Gate 1 (Planning)",
-                "human": "MONITOR_RUNNER",
-                "timestamp": dt.utcnow().isoformat(),
-            }
-        )
-        flow.state.status = "WAITING_HUMAN_GATE_2"
+        # Drive the real state machine (begin_phase_2 stamps the trail too) so
+        # downstream gate checks (e.g. generate_reporting) see a consistent state.
+        flow.begin_phase_2("MONITOR_RUNNER")
+        flow.machine.complete_phase_2()
+        flow.state.status = flow.machine.status.value
         print("  ✅ Mock working papers injected.")
         return True
 
     t0 = datetime.utcnow()
+    flow.begin_phase_2("MONITOR_RUNNER")
     try:
-        flow.generate_fieldwork(human_id="MONITOR_RUNNER")
+        flow.generate_fieldwork()
     except Exception:
         print("\n  ❌ UNHANDLED EXCEPTION in generate_fieldwork():")
         traceback.print_exc()
@@ -180,7 +177,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
     status = flow.state.status
     print(f"\n  Status after Phase 2: {status}  ({elapsed:.1f}s)")
 
-    if status == "ERROR":
+    if status == "ERROR_PHASE_2":
         print(f"  ❌ ERROR: {flow.state.qa_rejection_reason}")
         return False
     if status == "QA_REJECTED_PHASE_2":
@@ -217,8 +214,9 @@ def run_phase2(flow, skip_aws: bool) -> bool:
 def run_phase3(flow) -> bool:
     section("PHASE 3 — REPORTING CREW")
     t0 = datetime.utcnow()
+    flow.begin_phase_3("MONITOR_RUNNER")
     try:
-        flow.generate_reporting(human_id="MONITOR_RUNNER")
+        flow.generate_reporting()
     except Exception:
         print("\n  ❌ UNHANDLED EXCEPTION in generate_reporting():")
         traceback.print_exc()
@@ -228,12 +226,15 @@ def run_phase3(flow) -> bool:
     status = flow.state.status
     print(f"\n  Status after Phase 3: {status}  ({elapsed:.1f}s)")
 
-    if status == "ERROR":
+    if status == "ERROR_PHASE_3":
         print(f"  ❌ ERROR: {flow.state.qa_rejection_reason}")
         return False
     if status == "QA_REJECTED_PHASE_3":
         print(f"  ❌ QA REJECTED: {flow.state.qa_rejection_reason}")
         return False
+
+    # Gate 3 (IIA 2340): final human sign-off before the audit is COMPLETED.
+    flow.finalize_audit("MONITOR_RUNNER")
 
     rep = flow.state.final_report or {}
     print("\n  ✅ Final Report generated")
