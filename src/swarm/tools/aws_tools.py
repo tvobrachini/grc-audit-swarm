@@ -1,7 +1,11 @@
 import json
 import concurrent.futures
 import boto3
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import (
+    ClientError,
+    NoCredentialsError,
+    OperationNotPageableError,
+)
 from crewai.tools import tool
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 
@@ -46,8 +50,8 @@ def list_iam_users_with_mfa(context: str = "") -> str:
             try:
                 mfa_resp = client.list_mfa_devices(UserName=name)
                 has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
-            except ClientError:
-                has_mfa = "Unknown"
+            except ClientError as e:
+                has_mfa = f"Error: MFA check failed ({e})"
             return {"UserName": name, "MFA_Enabled": has_mfa}
 
         report = []
@@ -72,8 +76,14 @@ def list_public_s3_buckets(context: str = "") -> str:
     """
     try:
         s3 = _boto_client("s3")
-        buckets_resp = s3.list_buckets()
-        buckets = buckets_resp.get("Buckets", [])
+        buckets = []
+        try:
+            paginator = s3.get_paginator("list_buckets")
+            for page in paginator.paginate():
+                buckets.extend(page.get("Buckets", []))
+        except OperationNotPageableError:
+            # Older botocore versions don't support ListBuckets pagination.
+            buckets = s3.list_buckets().get("Buckets", [])
 
         results = []
         for bucket in buckets:

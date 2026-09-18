@@ -20,7 +20,7 @@ Five sequential agents build and validate a Risk and Control Matrix (RACM):
 - **Senior IT Auditor:** Drafts the full RACM — every control must include Test of Design, Test of Effectiveness, and Substantive Testing steps.
 - **QA Reviewer (temp=0):** Independently validates the RACM; rejects if substantive testing is missing or ToE relies only on inquiry. On rejection, the crew auto-retries once with the rejection reason injected as context.
 
-Human approval is required before Phase 2 begins (IIA 2340 stamping).
+Human approval is required before Phase 2 begins (an engagement-supervision step inspired by IIA Standard 2340, which requires engagements to be properly supervised — not a claim of literal 2340 compliance).
 
 ### ⚙️ Phase 2: Fieldwork (The Engine)
 Three agents execute live evidence collection and evaluate controls:
@@ -29,7 +29,7 @@ Three agents execute live evidence collection and evaluate controls:
 - **Field Auditor:** Evaluates each control against the collected evidence and produces a Working Paper with per-control severity ratings.
 - **QA Field Reviewer (temp=0):** Validates finding consistency; rejects if Pass ratings lack supporting evidence. Auto-retries once on rejection.
 
-All evidence is hashed and stored in the **Evidence Vault** (PCAOB AS 1215 / IIA 2330). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
+All evidence is hashed and stored in the **Evidence Vault**, following documentation-integrity principles drawn from PCAOB AS 1215 and IIA Standard 2330 (neither of which mandates a specific technical mechanism such as hashing — this is an engineering choice in their spirit, not a compliance claim; AS 1215 itself governs public-company financial-statement audits, a scope this general-purpose tool doesn't sit within). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
 
 ### 📝 Phase 3: Reporting (The Pen)
 Five sequential tasks across four agents produce the final deliverable:
@@ -56,14 +56,14 @@ graph TD
     Spec --> Aud[IT Auditor]:::phase1
     Aud --> QA1[QA Reviewer]:::phase1
     QA1 -- Rejected → auto-retry --> Aud
-    QA1 -- Approved --> HR1{Human Gate 1\nIIA 2340}:::human
+    QA1 -- Approved --> HR1{Human Gate 1\nSupervision Step}:::human
 
     HR1 -- Revise --> Dir
     HR1 -- Approved --> Col[Evidence Collector\nAWS Tools]:::phase2
     Col --> FA[Field Auditor]:::phase2
     FA --> QA2[QA Field Reviewer]:::phase2
     QA2 -- Rejected → auto-retry --> FA
-    QA2 -- Approved --> HR2{Human Gate 2\nIIA 2340}:::human
+    QA2 -- Approved --> HR2{Human Gate 2\nSupervision Step}:::human
 
     HR2 -- Approved --> Wr[Report Writer]:::phase3
     Wr --> Ex[Executive Concluder]:::phase3
@@ -79,13 +79,13 @@ graph TD
 
 - **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
 - **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
-- **🔐 Immutable Evidence Vault:** SHA-256 hashed evidence files (PCAOB AS 1215). `verify_exact_quote()` confirms agent quotes are verbatim from collected data, preventing hallucinations. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
+- **🔐 Immutable Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, preventing hallucinations. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
 - **☁️ Live AWS Evidence Collection:** boto3-based tools call real AWS APIs directly — no AWS CLI installation required.
 - **🛡️ AWS Account ID Redaction:** 12-digit AWS account IDs are automatically scrubbed from all evidence before storage and before being returned to agents.
 - **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
 - **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Material Weakness counts), expandable per-control drill-downs, and vault verification badges.
 - **📥 Excel Exports:** Download RACM (with ToD/ToE/Substantive steps) and Working Papers directly from the review screens.
-- **🔄 Multi-LLM Support:** Priority order Gemini → OpenAI → Groq. Set whichever key you have — the factory binds automatically.
+- **🔄 Multi-LLM Support:** Priority order Ollama → NVIDIA → Gemini → OpenAI → Groq. Set whichever key you have — the factory binds automatically.
 - **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` in `.env` to bypass all crews with hardcoded schemas for UI development.
 
 ---
