@@ -1,6 +1,5 @@
 """
 Tests for MCP server AWS audit tools.
-Mocks all dependencies to run without installed packages.
 """
 
 import json
@@ -8,51 +7,10 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-# Mock dependencies before importing the server
-mock_botocore = MagicMock()
-mock_boto3 = MagicMock()
-mock_mcp_fastmcp = MagicMock()
+from botocore.exceptions import ClientError
 
-
-class ClientError(Exception):
-    def __init__(self, error_response, operation_name):
-        self.response = error_response
-        self.operation_name = operation_name
-        super().__init__(
-            f"An error occurred ({error_response['Error']['Code']}) when calling the {operation_name} operation: {error_response['Error']['Message']}"
-        )
-
-
-mock_botocore.exceptions.ClientError = ClientError
-mock_botocore.exceptions.NoCredentialsError = type(
-    "NoCredentialsError", (Exception,), {}
-)
-
-sys.modules["botocore"] = mock_botocore
-sys.modules["botocore.exceptions"] = mock_botocore.exceptions
-sys.modules["boto3"] = mock_boto3
-
-
-# We need to make sure FastMCP decorator returns the function itself
-def mock_tool_decorator():
-    def decorator(func):
-        return func
-
-    return decorator
-
-
-mock_fastmcp_instance = MagicMock()
-mock_fastmcp_instance.tool = mock_tool_decorator
-mock_mcp_fastmcp.FastMCP.return_value = mock_fastmcp_instance
-
-sys.modules["mcp"] = MagicMock()
-sys.modules["mcp.server"] = MagicMock()
-sys.modules["mcp.server.fastmcp"] = mock_mcp_fastmcp
-
-# Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-# Now we can import the tools
 from swarm.mcp_server import (  # noqa: E402
     get_iam_password_policy,
     list_iam_users_with_mfa,
