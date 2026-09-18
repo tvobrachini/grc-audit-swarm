@@ -6,11 +6,11 @@ import uuid
 import os
 import datetime
 import base64
+from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import List, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
-from dataclasses import dataclass, field
-from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from cryptography.fernet import InvalidToken
@@ -21,6 +21,7 @@ else:
 
         class InvalidToken(Exception):
             pass
+
 
 # Configurable via env var for Docker volume mounts.
 _DEFAULT_EVIDENCE_DIR = os.path.join(
@@ -166,7 +167,10 @@ class EvidenceAssuranceProtocol:
                     return False
                 payload = fernet.decrypt(payload.encode("ascii")).decode("utf-8")
 
-            if hashlib.sha256(payload.encode("utf-8")).hexdigest() != evidence_record["sha256"]:
+            if (
+                hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                != evidence_record["sha256"]
+            ):
                 return False
 
             return exact_quote_claim in payload
@@ -178,5 +182,7 @@ class EvidenceAssuranceProtocol:
             InvalidToken,
             RuntimeError,
         ) as exc:
-            logger.warning("verify_exact_quote failed for vault_id=%s: %s", vault_id, exc)
+            logger.warning(
+                "verify_exact_quote failed for vault_id=%s: %s", vault_id, exc
+            )
             return False

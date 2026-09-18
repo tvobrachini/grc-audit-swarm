@@ -12,7 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from swarm.schema import (
     OSCAL_SAR_ImportAP,
     OSCAL_SAR_Metadata,
-    OSCAL_SAR_Result,
     OSCAL_SAR_Schema,
 )
 

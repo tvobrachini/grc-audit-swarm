@@ -145,7 +145,9 @@ class TestSkillHelpers:
 
 
 class TestSkillLoaderErrorIsolation:
-    def test_malformed_yaml_is_skipped_valid_ones_still_load(self, tmp_path, monkeypatch):
+    def test_malformed_yaml_is_skipped_valid_ones_still_load(
+        self, tmp_path, monkeypatch
+    ):
         import swarm.skill_loader as skill_loader
 
         (tmp_path / "good.yaml").write_text(
