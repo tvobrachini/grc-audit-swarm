@@ -241,7 +241,7 @@ if st.session_state.phase == 0:
                     st.rerun()
                     st.stop()
 
-            if flow.state.status == "ERROR":
+            if flow.state.status == "ERROR_PHASE_1":
                 _show_error_state("Planning")
             elif flow.state.status == "QA_REJECTED_PHASE_1":
                 st.error(
@@ -325,7 +325,7 @@ elif st.session_state.phase == 1:
                 st.rerun()
                 st.stop()
 
-        if flow.state.status == "ERROR":
+        if flow.state.status == "ERROR_PHASE_2":
             _show_error_state("Fieldwork")
         elif flow.state.status == "QA_REJECTED_PHASE_2":
             st.error(
@@ -451,7 +451,7 @@ elif st.session_state.phase == 2:
                     st.rerun()
                     st.stop()
 
-            if flow.state.status == "ERROR":
+            if flow.state.status == "ERROR_PHASE_3":
                 _show_error_state("Reporting")
             elif flow.state.status == "QA_REJECTED_PHASE_3":
                 st.error(
@@ -460,10 +460,15 @@ elif st.session_state.phase == 2:
                     "Expand the override section below to proceed with justification."
                 )
                 st.rerun()
-            else:
+            elif flow.state.status == "WAITING_HUMAN_GATE_3":
+                # Gate 3 (IIA 2340): same approver who requested the report signs
+                # off to finalize it — mirrors the Gate 1/2 approval pattern.
+                flow.finalize_audit(approver or "DEMO_USER")
                 st.session_state.phase = 3
                 _persist_session()
                 st.rerun()
+            else:
+                st.error(f"🚨 Unexpected status after Reporting: {flow.state.status}")
 
     # QA manual override when Phase 3 tone QA has rejected after auto-retry.
     if flow.state.status == "QA_REJECTED_PHASE_3":
