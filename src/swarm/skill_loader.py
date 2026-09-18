@@ -10,10 +10,13 @@ A "Skill" is the GRC Audit Swarm equivalent of a Claude Skill:
   - Swappable without touching agent code
 """
 
+import logging
 import os
 import yaml
 import copy
 from typing import List, Dict, Optional, Any
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../skills")
 
@@ -36,7 +39,16 @@ def list_available_skills() -> List[Dict[str, Any]]:
         return skills
     for fname in sorted(os.listdir(SKILLS_DIR)):
         if fname.endswith(".yaml") or fname.endswith(".yml"):
-            skill = _load_skill_file(os.path.join(SKILLS_DIR, fname))
+            try:
+                skill = _load_skill_file(os.path.join(SKILLS_DIR, fname))
+            except (yaml.YAMLError, OSError, UnicodeDecodeError):
+                logger.exception("Failed to load skill file %s — skipping it", fname)
+                continue
+            if not isinstance(skill, dict):
+                logger.warning(
+                    "Skill file %s did not parse to a mapping — skipping it", fname
+                )
+                continue
             skills.append(skill)
 
     _SKILLS_CACHE = skills
