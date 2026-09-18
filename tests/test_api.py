@@ -271,7 +271,30 @@ class TestApproveGate:
             )
         assert resp.status_code == 404
 
-    def test_gate_3_returns_400(self, client):
+    def test_gate_3_finalizes_audit(self, client):
+        data = {"name": "Test", "created_at": "2026-01-01T00:00:00"}
+        mock_flow = _make_mock_flow("WAITING_HUMAN_GATE_3")
+
+        def _finalize(human_id):
+            mock_flow.state.status = "COMPLETED"
+
+        mock_flow.finalize_audit.side_effect = _finalize
+        with (
+            patch("api.routers.sessions.get_session", return_value=data),
+            patch("api.routers.sessions._get_or_load_flow", return_value=mock_flow),
+            patch("api.routers.sessions._repo"),
+            patch("api.routers.sessions.set_job"),
+        ):
+            resp = client.patch(
+                "/api/sessions/sess-x/approve",
+                headers=_auth_headers(),
+                json={"gate_number": 3, "human_id": "alice"},
+            )
+        assert resp.status_code == 200
+        mock_flow.finalize_audit.assert_called_once_with("alice")
+        assert resp.json()["status"] == "COMPLETED"
+
+    def test_invalid_gate_number_returns_400(self, client):
         data = {"name": "Test", "created_at": "2026-01-01T00:00:00"}
         with (
             patch("api.routers.sessions.get_session", return_value=data),
@@ -281,7 +304,7 @@ class TestApproveGate:
             resp = client.patch(
                 "/api/sessions/sess-x/approve",
                 headers=_auth_headers(),
-                json={"gate_number": 3, "human_id": "alice"},
+                json={"gate_number": 4, "human_id": "alice"},
             )
         assert resp.status_code == 400
 
