@@ -10,14 +10,17 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, TYPE_CHECKING
 
-try:
+if TYPE_CHECKING:
     from cryptography.fernet import InvalidToken
-except ImportError:  # cryptography is an optional dependency (encryption is opt-in)
+else:
+    try:
+        from cryptography.fernet import InvalidToken
+    except ImportError:  # cryptography is an optional dependency (encryption is opt-in)
 
-    class InvalidToken(Exception):
-        pass
+        class InvalidToken(Exception):
+            pass
 
 # Configurable via env var for Docker volume mounts.
 _DEFAULT_EVIDENCE_DIR = os.path.join(
