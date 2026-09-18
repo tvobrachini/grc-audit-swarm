@@ -41,7 +41,16 @@ class AuditFlow:
         self._commit_status()
 
     def begin_phase_2(self, human_id: str) -> None:
-        """IIA 2340 Gate 1 approval: stamp trail and transition to RUNNING_PHASE_2."""
+        """Gate 1 approval: transition to RUNNING_PHASE_2, then stamp the trail."""
+        if self.machine.status != AuditStatus.WAITING_HUMAN_GATE_1:
+            logger.warning(
+                "begin_phase_2 called outside WAITING_HUMAN_GATE_1 (status=%s) — "
+                "not stamping approval trail or transitioning",
+                self.machine.status,
+            )
+            return
+        self.machine.approve_gate_1()
+        self._commit_status()
         self.state.approval_trail.append(
             {
                 "gate": "Gate 1 (Planning)",
@@ -49,12 +58,18 @@ class AuditFlow:
                 "timestamp": datetime.now(UTC).isoformat(),
             }
         )
-        if self.machine.status == AuditStatus.WAITING_HUMAN_GATE_1:
-            self.machine.approve_gate_1()
-            self._commit_status()
 
     def begin_phase_3(self, human_id: str) -> None:
-        """IIA 2340 Gate 2 approval: stamp trail and transition to RUNNING_PHASE_3."""
+        """Gate 2 approval: transition to RUNNING_PHASE_3, then stamp the trail."""
+        if self.machine.status != AuditStatus.WAITING_HUMAN_GATE_2:
+            logger.warning(
+                "begin_phase_3 called outside WAITING_HUMAN_GATE_2 (status=%s) — "
+                "not stamping approval trail or transitioning",
+                self.machine.status,
+            )
+            return
+        self.machine.approve_gate_2()
+        self._commit_status()
         self.state.approval_trail.append(
             {
                 "gate": "Gate 2 (Fieldwork)",
@@ -62,9 +77,6 @@ class AuditFlow:
                 "timestamp": datetime.now(UTC).isoformat(),
             }
         )
-        if self.machine.status == AuditStatus.WAITING_HUMAN_GATE_2:
-            self.machine.approve_gate_2()
-            self._commit_status()
 
     # ── Phase runners ────────────────────────────────────────────────────────
 
@@ -127,6 +139,11 @@ class AuditFlow:
             racm_output = adapter.get("racm_drafting_task").pydantic
 
         if qa_output and not qa_output.approved:
+            logger.error(
+                "QA rejected RACM again after auto-retry — no further retries; "
+                "phase 1 halted in QA_REJECTED_PHASE_1: %s",
+                qa_output.rejection_reason,
+            )
             self.machine.reject_phase_1()
             self._commit_status()
             self.state.qa_rejection_reason = qa_output.rejection_reason
@@ -145,13 +162,15 @@ class AuditFlow:
     def generate_fieldwork(self, event_callback=None):
         """Phase 2 — Run the Fieldwork Crew to produce Working Papers.
 
-        Call begin_phase_2(human_id) before this to stamp the approval trail and
-        transition the machine. If called directly (e.g. Streamlit), the machine
-        transition is handled here.
+        Requires begin_phase_2(human_id) to have already approved Gate 1 and
+        transitioned the machine to RUNNING_PHASE_2 — this method does not
+        auto-approve the gate itself.
         """
-        if self.machine.status == AuditStatus.WAITING_HUMAN_GATE_1:
-            self.machine.approve_gate_1()
-            self._commit_status()
+        if self.machine.status != AuditStatus.RUNNING_PHASE_2:
+            raise RuntimeError(
+                f"Cannot start Fieldwork: Gate 1 not approved "
+                f"(status={self.machine.status.value})"
+            )
 
         logger.info("Starting Fieldwork Execution Phase...")
         self.state.qa_rejection_reason = None
@@ -201,6 +220,11 @@ class AuditFlow:
             papers_output = adapter.get("execution_evaluation_task").pydantic
 
         if qa_output and not qa_output.approved:
+            logger.error(
+                "QA rejected Working Papers again after auto-retry — no further "
+                "retries; phase 2 halted in QA_REJECTED_PHASE_2: %s",
+                qa_output.rejection_reason,
+            )
             self.machine.reject_phase_2()
             self._commit_status()
             self.state.qa_rejection_reason = qa_output.rejection_reason
@@ -219,13 +243,17 @@ class AuditFlow:
     def generate_reporting(self, event_callback=None):
         """Phase 3 — Run the Reporting Crew to produce the Final Report.
 
-        Call begin_phase_3(human_id) before this to stamp the approval trail and
-        transition the machine. If called directly (e.g. Streamlit), the machine
-        transition is handled here.
+        Requires begin_phase_3(human_id) to have already approved Gate 2 and
+        transitioned the machine to RUNNING_PHASE_3 — this method does not
+        auto-approve the gate itself. On success the machine moves to
+        WAITING_HUMAN_GATE_3; call finalize_audit(human_id) to complete the
+        audit (Gate 3).
         """
-        if self.machine.status == AuditStatus.WAITING_HUMAN_GATE_2:
-            self.machine.approve_gate_2()
-            self._commit_status()
+        if self.machine.status != AuditStatus.RUNNING_PHASE_3:
+            raise RuntimeError(
+                f"Cannot start Reporting: Gate 2 not approved "
+                f"(status={self.machine.status.value})"
+            )
 
         logger.info("Starting Reporting Phase...")
         self.state.qa_rejection_reason = None
@@ -282,6 +310,11 @@ class AuditFlow:
             qa_output = adapter.get("tone_qa_task").pydantic
 
         if qa_output and hasattr(qa_output, "approved") and not qa_output.approved:
+            logger.error(
+                "QA rejected Report tone again after auto-retry — no further "
+                "retries; phase 3 halted in QA_REJECTED_PHASE_3: %s",
+                getattr(qa_output, "rejection_reason", None),
+            )
             self.machine.reject_phase_3()
             self._commit_status()
             self.state.qa_rejection_reason = getattr(
@@ -292,5 +325,24 @@ class AuditFlow:
         if report_output:
             self.state.final_report = report_output
 
-        self.machine.complete_audit()
+        self.machine.complete_phase_3()
         self._commit_status()
+
+    def finalize_audit(self, human_id: str) -> None:
+        """Gate 3 approval: mark the audit COMPLETED, then stamp the trail."""
+        if self.machine.status != AuditStatus.WAITING_HUMAN_GATE_3:
+            logger.warning(
+                "finalize_audit called outside WAITING_HUMAN_GATE_3 (status=%s) "
+                "— not stamping approval trail or transitioning",
+                self.machine.status,
+            )
+            return
+        self.machine.approve_gate_3()
+        self._commit_status()
+        self.state.approval_trail.append(
+            {
+                "gate": "Gate 3 (Reporting)",
+                "human": human_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )

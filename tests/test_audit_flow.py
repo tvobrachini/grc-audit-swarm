@@ -75,9 +75,12 @@ class TestGenerateReportingPhase3Retry:
             MockCrew.return_value.crew.return_value = mock_crew
             flow.generate_reporting()
 
-        assert flow.state.status == "COMPLETED"
+        assert flow.state.status == "WAITING_HUMAN_GATE_3"
         assert flow.state.final_report is not None
         assert mock_crew.kickoff.call_count == 1
+
+        flow.finalize_audit("auditor@co.com")
+        assert flow.state.status == "COMPLETED"
 
     def test_qa_rejection_triggers_single_retry(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
@@ -98,8 +101,11 @@ class TestGenerateReportingPhase3Retry:
             MockCrew.return_value.crew.return_value = mock_crew
             flow.generate_reporting()
 
-        assert flow.state.status == "COMPLETED"
+        assert flow.state.status == "WAITING_HUMAN_GATE_3"
         assert mock_crew.kickoff.call_count == 2
+
+        flow.finalize_audit("auditor@co.com")
+        assert flow.state.status == "COMPLETED"
 
     def test_retry_injects_tone_feedback_into_inputs(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))

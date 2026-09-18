@@ -53,4 +53,9 @@ repos:
     rev: v2.10.0
     hooks:
       - id: pip-audit
+        # pip-audit scans this hook's own isolated venv; virtualenv seeds it
+        # with a bundled pip that can lag behind and carry known CVEs (this
+        # is about the audit tool's own environment, not a project
+        # dependency) — pin a patched pip explicitly instead of ignoring.
+        additional_dependencies: ["pip>=26.2"]
         args: ["--ignore-vuln", "CVE-2026-3219"]  # pip 26.x vuln, no fix available yet

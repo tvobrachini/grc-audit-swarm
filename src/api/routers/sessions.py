@@ -284,14 +284,27 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             flow.begin_phase_3(req.human_id)
         get_executor().submit(session_id, _run_phase_3, session_id, job_id)
         next_status = "RUNNING_PHASE_3"
+    elif req.gate_number == 3:
+        # Gate 3 has no further crew phase to run — approve and persist synchronously.
+        if not flow:
+            raise HTTPException(status_code=404, detail="flow not found")
+        flow.finalize_audit(req.human_id)
+        if flow.state.status != "COMPLETED":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Gate 3 not ready to approve (status={flow.state.status})",
+            )
+        _repo.save(session_id, flow)
+        set_job(job_id, "completed")
+        next_status = flow.state.status
     else:
-        raise HTTPException(status_code=400, detail="gate_number must be 1 or 2")
+        raise HTTPException(status_code=400, detail="gate_number must be 1, 2, or 3")
 
     return SessionSummary(
         session_id=session_id,
         name=data.get("name", session_id),
         status=next_status,
-        phase=req.gate_number + 1,
+        phase=_phase_from_status(next_status),
         needs_input=False,
         created_at=data.get("created_at", ""),
     )

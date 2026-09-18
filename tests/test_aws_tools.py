@@ -141,7 +141,9 @@ class TestListPublicS3Buckets:
         from botocore.exceptions import ClientError
 
         mock_client = MagicMock()
-        mock_client.list_buckets.return_value = {"Buckets": buckets}
+        paginator = MagicMock()
+        paginator.paginate.return_value = [{"Buckets": buckets}]
+        mock_client.get_paginator.return_value = paginator
 
         def get_pab(Bucket):
             cfg = pab_configs.get(Bucket, {})

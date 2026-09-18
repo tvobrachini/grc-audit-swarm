@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -20,9 +21,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="GRC Audit Swarm API", version="0.1.0", lifespan=lifespan)
 
+# The API is credentialed (bearer token), so a wildcard origin is invalid per
+# the CORS spec when allow_credentials=True — browsers reject that combination.
+# CORS_ALLOWED_ORIGINS is a comma-separated allow-list; defaults cover local dev.
+_allowed_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8502"
+    ).split(",")
+    if origin.strip() and origin.strip() != "*"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,13 +1,27 @@
 import hashlib
 import json
+import logging
 import re
 import uuid
 import os
 import datetime
 import base64
-from functools import lru_cache
 from dataclasses import dataclass, field
-from typing import List
+from functools import lru_cache
+from typing import List, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from cryptography.fernet import InvalidToken
+else:
+    try:
+        from cryptography.fernet import InvalidToken
+    except ImportError:  # cryptography is an optional dependency (encryption is opt-in)
+
+        class InvalidToken(Exception):
+            pass
+
 
 # Configurable via env var for Docker volume mounts.
 _DEFAULT_EVIDENCE_DIR = os.path.join(
@@ -22,20 +36,24 @@ _UUID_RE = re.compile(
 )
 
 
-@lru_cache(maxsize=1)
 def _get_fernet():
     """Return a Fernet instance if VAULT_ENCRYPTION_KEY is set, else None."""
     key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
     if not key_b64:
         return None
+    return _build_fernet(key_b64)
+
+
+@lru_cache(maxsize=4)
+def _build_fernet(key_b64: str):
+    """Build (and cache per key value) a Fernet instance for the given base64 key."""
     try:
         from cryptography.fernet import Fernet
 
         key_bytes = base64.urlsafe_b64decode(key_b64.encode())
         if len(key_bytes) != 32:
             raise ValueError("VAULT_ENCRYPTION_KEY must be 32 bytes (base64-encoded).")
-        fernet_key = base64.urlsafe_b64encode(key_bytes)
-        return Fernet(fernet_key)
+        return Fernet(key_b64.encode())
     except ImportError:
         raise RuntimeError(
             "cryptography package is required for vault encryption. "
@@ -73,7 +91,7 @@ def serialize_control_evidence(evidence: ControlEvidence) -> str:
 
 
 class EvidenceAssuranceProtocol:
-    """Implements PCAOB AS 1215 and IIA 2330 compliance by enforcing immutable hashing of payloads."""
+    """SHA-256 integrity check plus exact-quote anti-hallucination check for collected audit evidence."""
 
     @staticmethod
     def _evidence_dir() -> str:
@@ -149,6 +167,22 @@ class EvidenceAssuranceProtocol:
                     return False
                 payload = fernet.decrypt(payload.encode("ascii")).decode("utf-8")
 
+            if (
+                hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                != evidence_record["sha256"]
+            ):
+                return False
+
             return exact_quote_claim in payload
-        except (KeyError, json.JSONDecodeError, OSError, Exception):
+        except (
+            KeyError,
+            json.JSONDecodeError,
+            OSError,
+            ValueError,
+            InvalidToken,
+            RuntimeError,
+        ) as exc:
+            logger.warning(
+                "verify_exact_quote failed for vault_id=%s: %s", vault_id, exc
+            )
             return False
