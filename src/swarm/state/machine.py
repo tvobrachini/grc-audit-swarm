@@ -40,7 +40,6 @@ _TRANSITIONS: dict[AuditStatus, set[AuditStatus]] = {
         AuditStatus.WAITING_HUMAN_GATE_3,
         AuditStatus.QA_REJECTED_PHASE_3,
         AuditStatus.ERROR_PHASE_3,
-        AuditStatus.COMPLETED,
     },
     AuditStatus.WAITING_HUMAN_GATE_3: {AuditStatus.COMPLETED},
     AuditStatus.QA_REJECTED_PHASE_3: {AuditStatus.RUNNING_PHASE_3},
@@ -117,9 +116,6 @@ class AuditStateMachine:
 
     def retry_phase_3(self) -> None:
         self._transition(AuditStatus.RUNNING_PHASE_3)
-
-    def complete_audit(self) -> None:
-        self._transition(AuditStatus.COMPLETED)
 
     def approve_gate_3(self) -> None:
         self._transition(AuditStatus.COMPLETED)
