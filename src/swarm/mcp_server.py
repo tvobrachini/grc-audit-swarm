@@ -44,7 +44,10 @@ def list_iam_users_with_mfa() -> str:
             try:
                 mfa_resp = client.list_mfa_devices(UserName=name)
                 has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
-            except ClientError:
+            except ClientError as e:
+                logger.warning(
+                    "[MCP Server] Error checking MFA for user %s: %s", name, e
+                )
                 has_mfa = "Unknown"
             return {"UserName": name, "MFA_Enabled": has_mfa}
 
@@ -99,8 +102,10 @@ def list_public_s3_buckets() -> str:
                 )
                 if public:
                     entry["IsPublic"] = True
-            except ClientError:
-                pass
+            except ClientError as e:
+                logger.warning(
+                    "[MCP Server] Error fetching ACL for bucket %s: %s", name, e
+                )
             results.append(entry)
         return json.dumps(results, indent=2, default=str)
     except (ClientError, NoCredentialsError) as e:
