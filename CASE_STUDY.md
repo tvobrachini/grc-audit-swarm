@@ -1,6 +1,6 @@
 # Case Study: Scalable Multi-Agent Swarms for Recursive Auditing
 
-**Role:** Senior IT Auditor / Audit Engineer
+**Role:** IT Audit Specialist / Audit Engineer (personal project)
 **Core Technologies:** Python, CrewAI, AWS MCP (Model Context Protocol), Streamlit, DuckDuckGo Search API, Pytest, YAML
 **Frameworks Covered:** Secure Controls Framework (SCF), AWS Cloud Security (Live), PCI-DSS, GDPR, HIPAA
 
@@ -33,7 +33,7 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
 
 2. **The "IIA 2340" Human Gates:**
    - *Decision:* Integrated stateful human-in-the-loop (HITL) gates between every phase.
-   - *Why:* Professional standards (IIA 2340) require supervisor approval of audit programs and working papers. The swarm "pauses" and waits for a human signature before moving from Planning to Fieldwork.
+   - *Why:* IIA Standard 2340 requires engagements to be properly supervised. The swarm mirrors that idea: it "pauses" and waits for a human sign-off before moving from Planning to Fieldwork. This is a design inspiration, not a claim of 2340 compliance.
 
 3. **The "QA Pushback" Loop (Adversarial AI):**
    - *Decision:* Each crew includes a **QA Reviewer** agent with `temperature=0` that must explicitly approve the output.
@@ -41,7 +41,7 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
 
 4. **Immutable Evidence Vault (Security-by-Design):**
    - *Decision:* Built an Evidence Assurance Protocol that hashes all collected data using **SHA-256**.
-   - *Why:* To meet PCAOB AS 1215 standards, audit evidence must be immutable. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim, untampered snippet from the source evidence.
+   - *Why:* PCAOB AS 1215 and IIA Standard 2330 stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim, untampered snippet from the stored evidence.
 
 5. **Live Evidence Bridging (AWS Tools):**
    - *Decision:* Integrated native CrewAI tools to call real **AWS APIs** (IAM, S3, etc.) during the Fieldwork phase.
