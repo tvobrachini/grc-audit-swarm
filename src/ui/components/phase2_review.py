@@ -34,7 +34,9 @@ def render_phase2_review(
     k4.metric("❌ Material Weaknesses", fails)
 
     st.markdown("---")
-    st.markdown("### 📋 Working Papers (Standard 14.6, formerly IIA 2330; PCAOB AS 1215) — Hashed Evidence Vault")
+    st.markdown(
+        "### 📋 Working Papers (Standard 14.6, formerly IIA 2330; PCAOB AS 1215) — Hashed Evidence Vault"
+    )
 
     for f in findings:
         cid = f.get("control_id")

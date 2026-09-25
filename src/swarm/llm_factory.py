@@ -86,4 +86,3 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
         + ", ".join(_PROVIDER_ENV_VARS)
         + " (or run with DEMO_MODE=1 to bypass the crews)."
     )
-
