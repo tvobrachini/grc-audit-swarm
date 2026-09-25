@@ -129,13 +129,9 @@ jobs:
             --ignore-vuln PYSEC-2026-311 \
             --ignore-vuln PYSEC-2026-3813 \
             --ignore-vuln PYSEC-2026-3814 \
-            --ignore-vuln PYSEC-2026-3815 \
-            --ignore-vuln GHSA-xf7x-x43h-rpqh
+            --ignore-vuln PYSEC-2026-3815
           # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, pulled in directly
           #   by crewai; no fixed version published upstream yet.
-          # GHSA-xf7x-x43h-rpqh: json-repair 0.25.2, pinned transitively by
-          #   chromadb 1.1.1; fixed in json-repair 0.60.1 but that requires a
-          #   chromadb/crewai bump — revisit then.
 
   frontend:
     name: frontend
