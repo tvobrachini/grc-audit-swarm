@@ -1,7 +1,7 @@
 # Case Study: A Human-Gated Multi-Agent Audit Workflow
 
 **Role:** Personal project
-**Core Technologies:** Python, CrewAI, AWS APIs (boto3), Streamlit, Pytest, YAML
+**Core Technologies:** Python, CrewAI, AWS APIs (boto3), FastAPI, React, Pytest, YAML
 **Frameworks referenced:** Secure Controls Framework (SCF), AWS IAM and S3 settings (live, read-only)
 
 ---
@@ -73,7 +73,7 @@ Explore the results of the swarm's collaborative intelligence in this repository
 3. **The Execution:** `src/swarm/crews/fieldwork_crew.py` (Live AWS evidence testing).
 4. **The Proof:** `src/swarm/evidence.py` (The SHA-256 Evidence Vault).
 5. **The Guardrails:** `src/swarm/config/planning_agents.yaml`, `fieldwork_agents.yaml` and `reporting_agents.yaml` (agent system prompts; a secondary measure behind the read-only IAM policy and read-only tools).
-6. **The UI:** `app.py` (The Findings Command Center where results are visualized).
+6. **The UI:** `frontend/src/` (React app: approval gates, findings review, retry / QA override, exports), served by the FastAPI backend in `src/api/`.
 
 ---
 *This project proves that "Compliance-as-Code" is no longer about static checks—it's about building systems that support auditors with drafts and evidence, reviewed by a person.*

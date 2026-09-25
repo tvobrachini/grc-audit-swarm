@@ -113,9 +113,9 @@ graph TD
 - **🛡️ AWS Account ID Redaction:** 12-digit AWS account IDs are automatically scrubbed from all evidence before storage and before being returned to agents.
 - **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
 - **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Potential significant issue counts, for the auditor to evaluate), expandable per-control drill-downs, and vault verification badges.
-- **📥 Excel Exports:** Download RACM (with ToD/ToE/Substantive steps) and Working Papers directly from the review screens.
+- **📥 Exports:** Download the RACM (with ToD/ToE/Substantive steps) and Working Papers as Excel, the final report as Markdown and its OSCAL-shaped results as JSON (`/api/sessions/{id}/export/…`). Spreadsheet cells are sanitised against formula injection.
 - **🔄 Multi-LLM Support:** Priority order Ollama → NVIDIA → Gemini → OpenAI → Groq. Set whichever key you have — the factory binds automatically.
-- **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` in `.env` to bypass all crews with hardcoded schemas for UI development.
+- **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` for the API to replace the crews with fixed, clearly labelled demo artifacts (no LLM or AWS calls). Gates, QA bookkeeping and the approval trail still run for real, and the UI shows a DEMO MODE badge. The API refuses to start with it when `ENVIRONMENT` is `production` or `staging`.
 
 ---
 
@@ -138,14 +138,12 @@ uv sync
 docker compose up --build
 # React UI at http://127.0.0.1:3000, API at http://127.0.0.1:8000
 
-# Streamlit is being retired in favor of the React UI. To also start it,
-# opt in with the "streamlit" profile:
-docker compose --profile streamlit up --build
-# Streamlit UI at http://127.0.0.1:8501
+# Alternatively, without Docker (two terminals; pick any token value):
+API_AUTH_TOKEN=dev-token PYTHONPATH=src uv run uvicorn api.main:app --port 8000
+cd frontend && npm ci && VITE_API_AUTH_TOKEN=dev-token npm run dev
+# React UI at http://localhost:5173 (Vite proxies /api to port 8000)
 
-# Alternatively, run just Streamlit locally without Docker:
-uv run streamlit run app.py --server.port 8502
-# App accessible at http://localhost:8502
+# No LLM key? Start the API with DEMO_MODE=1 to walk through the UI with demo data.
 ```
 
 **LLM provider priority** (the factory dynamically binds based on available keys/vars):
@@ -168,8 +166,8 @@ uv run streamlit run app.py --server.port 8502
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
 | `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes. In `docker compose`, nginx injects this into the reverse proxy server-side, so the browser never sees it |
 | `VITE_API_AUTH_TOKEN` | **Dev-only.** Bakes the token into the built JS bundle for `npm run dev` against a local API. Never set this for a production/compose build |
-| `DEMO_MODE` | Set to `1` to bypass LLM crews for UI development |
-| `ENVIRONMENT` | Set to `production` or `staging` to enforce DEMO_MODE guard |
+| `DEMO_MODE` | Set to `1` to make the API use fixed demo artifacts instead of the crews (local demos only) |
+| `ENVIRONMENT` | When `production` or `staging`, the API refuses to start with `DEMO_MODE=1` |
 
 Generate a vault encryption key:
 ```bash
@@ -199,9 +197,9 @@ python run_monitor.py --phase1-only
 python run_monitor.py --skip-aws
 ```
 
-The test suite covers evidence integrity, AWS tool mocking, LLM factory priority, audit flow QA retry loops, skill loading, and Streamlit UI components. CI enforces a 50% coverage minimum across Python 3.11, 3.12, and 3.13.
+The test suite covers evidence integrity, AWS tool mocking, LLM factory priority, audit flow QA retry loops, skill loading, and the FastAPI endpoints (gates, retry/override, exports, scope upload, DEMO_MODE). CI enforces a 50% coverage minimum across Python 3.11, 3.12, and 3.13.
 
-The `run_monitor.py` script validates the full crew execution pipeline — timing, QA gate outcomes, vault file creation, and final status — without the Streamlit UI.
+The `run_monitor.py` script validates the full crew execution pipeline — timing, QA gate outcomes, vault file creation, and final status — without the API or UI.
 
 ---
 
@@ -223,15 +221,13 @@ src/
     session_manager.py  # Persistent audit session serialization
     skill_loader.py     # Dynamic CrewAI skill registration
   api/
-    main.py             # FastAPI backend for headless/React consumption
-  ui/
-    components/         # Streamlit UI components
-frontend/               # React + Vite modern web interface
+    main.py             # FastAPI backend used by the React UI
+    routers/            # sessions, gates/retry/override, exports, stream, evidence
+frontend/               # React + Vite web interface (the only UI)
 skills/                 # YAML definitions for domain-specific audit skills (GDPR, HIPAA, etc.)
-app.py                  # Streamlit entry point
 aws_safety_heartbeat.py # Standalone boto3 script to verify $0 AWS resource usage
 run_monitor.py          # Headless E2E test runner
-docker-compose.yml      # Orchestrates API, Frontend, and Streamlit services
+docker-compose.yml      # Orchestrates the API and the React frontend
 ```
 
 ---
