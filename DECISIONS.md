@@ -2,7 +2,7 @@
 
 This file records design decisions as they are implemented in the code today. Each record states what the code does and what that does and does not give you. Where the repository history or a code comment explains a choice, the record cites it. Where it does not, the record says nothing about motive.
 
-Standards such as IIA 2340, IIA 2330 and PCAOB AS 1215 are cited as design inspiration only. This project makes no compliance claim against any of them.
+Standards such as IIA Standards 12.3 (formerly 2340) and 14.6 (formerly 2330) and PCAOB AS 1215 are cited as design inspiration only. This project makes no compliance claim against any of them.
 
 ---
 
@@ -33,7 +33,7 @@ Standards such as IIA 2340, IIA 2330 and PCAOB AS 1215 are cited as design inspi
 - A verbatim quote shows the words exist in the evidence. It does not show that the conclusion drawn from them is correct.
 - Matching is an exact substring match. Paraphrases are marked unverified.
 
-**Inspiration.** Documentation-integrity principles from PCAOB AS 1215 and IIA Standard 2330. Neither standard requires hashing.
+**Inspiration.** Documentation-integrity principles from PCAOB AS 1215 and IIA Standard 14.6 (formerly 2330). Neither standard requires hashing.
 
 ---
 
@@ -60,7 +60,7 @@ Standards such as IIA 2340, IIA 2330 and PCAOB AS 1215 are cited as design inspi
 - Fieldwork, and therefore the AWS calls, does not run until a person approves the plan.
 - The workflow waits at each gate until someone acts.
 
-**Inspiration.** IIA Standard 2340 (supervision of engagements). This is design inspiration, not a compliance claim.
+**Inspiration.** IIA Standard 12.3, formerly 2340 (supervision of engagements). This is design inspiration, not a compliance claim.
 
 ---
 
