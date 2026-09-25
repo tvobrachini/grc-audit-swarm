@@ -8,7 +8,6 @@ Phase 3: AI Reporting Phase (Tone QA)
 Set DEMO_MODE=1 in .env to skip LLM crew execution and use hardcoded schemas.
 """
 
-import datetime
 import threading
 import time
 import streamlit as st
@@ -355,18 +354,16 @@ elif st.session_state.phase == 1:
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append(
-                        {
-                            "gate": "Gate 2 (Fieldwork — QA Override)",
-                            "human": approver,
-                            "justification": override_justification.strip(),
-                            "timestamp": datetime.datetime.utcnow().isoformat(),
-                        }
-                    )
-                    flow.state.status = "WAITING_HUMAN_GATE_2"
-                    st.session_state.phase = 2
-                    _persist_session()
-                    st.rerun()
+                    try:
+                        flow.override_qa_rejection(
+                            2, approver, override_justification.strip()
+                        )
+                    except Exception as exc:
+                        st.error(f"🚨 Override not possible: {exc}")
+                    else:
+                        st.session_state.phase = 2
+                        _persist_session()
+                        st.rerun()
 
     # Show feedback acknowledgement if submitted
     if st.session_state.get("p1_feedback_submitted"):
@@ -485,18 +482,19 @@ elif st.session_state.phase == 2:
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append(
-                        {
-                            "gate": "Gate 3 (Reporting — QA Override)",
-                            "human": approver,
-                            "justification": override_justification.strip(),
-                            "timestamp": datetime.datetime.utcnow().isoformat(),
-                        }
-                    )
-                    flow.state.status = "COMPLETED"
-                    st.session_state.phase = 3
-                    _persist_session()
-                    st.rerun()
+                    try:
+                        # Override the QA rejection, then sign Gate 3 — both
+                        # stamped in the approval trail via the state machine.
+                        flow.override_qa_rejection(
+                            3, approver, override_justification.strip()
+                        )
+                        flow.finalize_audit(approver)
+                    except Exception as exc:
+                        st.error(f"🚨 Override not possible: {exc}")
+                    else:
+                        st.session_state.phase = 3
+                        _persist_session()
+                        st.rerun()
 
     render_phase2_review(flow.state.working_papers, on_phase2_finalize)
 
