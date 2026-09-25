@@ -5,8 +5,13 @@
 
 version: 2
 updates:
-  - package-ecosystem: "pip" # Python dependencies
+  - package-ecosystem: "uv" # Python dependencies (uv.lock)
     directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm" # Frontend (React) dependencies
+    directory: "/frontend"
     schedule:
       interval: "weekly"
 
@@ -15,7 +20,12 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "docker" # Dockerfile base images
+  - package-ecosystem: "docker" # Root Dockerfile base image
     directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker" # Frontend Dockerfile base image
+    directory: "/frontend"
     schedule:
       interval: "weekly"
