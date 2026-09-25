@@ -1,92 +1,141 @@
-# 🎯 GRC Audit Swarm
+# GRC Audit Swarm
 
-> **AI Multi-Agent GRC Audit Platform powered by CrewAI**
+[![CI](https://github.com/tvobrachini/grc-audit-swarm/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/tvobrachini/grc-audit-swarm/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 
-GRC Audit Swarm is a stateful, three-phase audit automation platform that turns a plain-language scope into a draft audit report for human review. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by a hashed evidence vault.
+An IT audit engagement has a shape: plan the risks and controls, test them against evidence, report the results, and have a supervisor review each step before the next one starts. GRC Audit Swarm is a personal project that drafts that work with language-model agents while keeping the audit structure in place. It takes a plain-language scope and produces a Risk and Control Matrix (RACM), working papers built from read-only AWS evidence, and a draft report. A person must approve each phase before the next one runs, and every approval, retry and override is written to an approval trail. The output is a draft for a qualified auditor to review, not an audit opinion.
 
 > [!IMPORTANT]
 > **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by or endorsed by any current or past employer.
 
-> [!NOTE]
-> **Architecture & Design Records:** See **[DECISIONS.md](DECISIONS.md)** for Architecture Decision Records (ADRs) and **[CASE_STUDY.md](CASE_STUDY.md)** for in-depth design rationale.
+Design notes: [CASE_STUDY.md](CASE_STUDY.md) (the audit reasoning behind the design) and [DECISIONS.md](DECISIONS.md) (architecture decision records).
 
 ---
 
-## 🛠️ The Three-Phase Audit Workflow
+## Try it in 2 minutes (no API keys)
 
-### 🧠 Phase 1: Planning (The Brain)
-Five sequential agents build and validate a Risk and Control Matrix (RACM):
+`DEMO_MODE=1` makes the API replace the agent crews with fixed, clearly labelled demo artifacts. No language model or AWS account is called. The state machine, QA bookkeeping, human gates, approval trail and exports all run for real, and the UI shows a DEMO MODE badge.
 
-- **Audit Director:** Consumes scope and business context; produces a 2-paragraph Audit Scope & Objective memo.
-- **Regulatory & Threat Analyst:** Crosswalks the theme against selected frameworks (CIS, NIST, PCI-DSS, etc.) and identifies key threat vectors.
-- **Risk & Threat Specialist:** Ranks and weights the top 3 risks from the threat analysis.
-- **Senior IT Auditor:** Drafts the full RACM — every control must include Test of Design, Test of Effectiveness, and Substantive Testing steps.
-- **QA Reviewer (temp=0):** Independently validates the RACM; rejects if substantive testing is missing or ToE relies only on inquiry. On rejection, the crew auto-retries once with the rejection reason injected as context.
+**With Docker Compose**
 
-Human approval is required before Phase 2 begins (a step inspired by engagement supervision in the IIA Global Internal Audit Standards, Standard 12.3 (formerly 2340) — not a claim of compliance).
-
-### ⚙️ Phase 2: Fieldwork (The Engine)
-Three agents execute live evidence collection and evaluate controls:
-
-- **Evidence Collector:** Calls native AWS tools via **boto3** (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) — no AWS CLI required.
-- **Field Auditor:** Evaluates each control against the collected evidence and produces a Working Paper with per-control severity ratings.
-- **QA Field Reviewer (temp=0):** Validates finding consistency; rejects if Pass ratings lack supporting evidence. Auto-retries once on rejection.
-
-All evidence is hashed and stored in the **Evidence Vault**, following documentation-integrity principles drawn from PCAOB AS 1215 and IIA Standard 14.6 (formerly 2330) (neither of which mandates a specific technical mechanism such as hashing — this is an engineering choice in their spirit, not a compliance claim; AS 1215 itself governs public-company financial-statement audits, a scope this general-purpose tool doesn't sit within). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
-
-### 📝 Phase 3: Reporting (The Pen)
-Five sequential tasks across four agents produce the final deliverable:
-
-- **Lead Report Writer:** Synthesizes Phase 1 scope and Phase 2 working papers into a structured audit report body.
-- **Executive Concluder:** Drafts a concise executive summary from the report.
-- **Tone & QA Reviewer (temp=0):** Rejects the report if language is subjective, inflammatory, or confusing.
-- **Compliance Documentation Engineer:** Translates the narrative findings and evidence into an OSCAL-inspired JSON structure (`OSCAL_SAR_Schema`; not validated against the official OSCAL schema).
-- **Assembly (Lead Writer):** Packages all sections (narrative, executive, and OSCAL) into the `FinalReportSchema` for download.
-
-### 🔄 Architecture Flow
-
-```mermaid
-graph TD
-    classDef init fill:#4f46e5,color:#fff,stroke:#fff
-    classDef human fill:#ea580c,color:#fff,stroke:#fff
-    classDef phase1 fill:#0ea5e9,color:#fff,stroke:#fff
-    classDef phase2 fill:#10b981,color:#fff,stroke:#fff
-    classDef phase3 fill:#8b5cf6,color:#fff,stroke:#fff
-
-    Start((Audit Scope)):::init --> Dir[Audit Director]:::phase1
-    Dir --> Ana[Threat Analyst]:::phase1
-    Ana --> Spec[Risk Specialist]:::phase1
-    Spec --> Aud[IT Auditor]:::phase1
-    Aud --> QA1[QA Reviewer]:::phase1
-    QA1 -- Rejected → auto-retry --> Aud
-    QA1 -- Approved --> HR1{Human Gate 1\nSupervision Step}:::human
-
-    HR1 -- Revise --> Dir
-    HR1 -- Approved --> Col[Evidence Collector\nAWS Tools]:::phase2
-    Col --> FA[Field Auditor]:::phase2
-    FA --> QA2[QA Field Reviewer]:::phase2
-    QA2 -- Rejected → auto-retry --> FA
-    QA2 -- Approved --> HR2{Human Gate 2\nSupervision Step}:::human
-
-    HR2 -- Approved --> Wr[Report Writer]:::phase3
-    Wr --> Ex[Executive Concluder]:::phase3
-    Ex --> QA3[Tone QA Reviewer]:::phase3
-    QA3 --> Osc[OSCAL Engineer]:::phase3
-    Osc --> Asm[Final Assembly]:::phase3
-    Asm --> End((Final Report + OSCAL\n+ Evidence Vault)):::init
+```bash
+git clone https://github.com/tvobrachini/grc-audit-swarm
+cd grc-audit-swarm
+cp .env.example .env
+# In .env, set:
+#   API_AUTH_TOKEN=<any long random string>
+#   DEMO_MODE=1
+docker compose up --build
 ```
 
+Open http://localhost:3000. Compose binds both ports to `127.0.0.1` only. nginx adds the API token to `/api` requests on the server side, so the browser never holds it.
+
+**Without Docker (local development only)**
+
+```bash
+uv sync
+# Terminal 1: the API
+API_AUTH_TOKEN=dev-token DEMO_MODE=1 PYTHONPATH=src uv run uvicorn api.main:app --port 8000
+
+# Terminal 2: the React dev server (proxies /api to port 8000)
+cd frontend && npm ci && VITE_API_AUTH_TOKEN=dev-token npm run dev
+```
+
+Open http://localhost:5173. `VITE_API_AUTH_TOKEN` is built into the JavaScript bundle, so use it only for a throwaway local dev server. In this mode the live agent-activity feed returns 401, because the browser's `EventSource` cannot send an `Authorization` header. The audit status, gates and artifacts still refresh through polling. Use Compose for the full experience.
+
+Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer reject that phase until a person retries it, so the retry and override paths can be tried. `DEMO_STEP_DELAY` sets the pause between demo steps in seconds (default 0.4, capped at 5). Demo evidence is synthetic and is not written to the evidence vault, so demo findings show "Quote not verified".
+
+To run a real audit, set one LLM provider (see [Configuration](#configuration)) and, for live evidence, AWS credentials with the read-only policy below. Leave `DEMO_MODE` unset.
+
 ---
 
-## 🚀 Key Features
+## How it works
 
-- **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
-- **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
-- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, flagging quotes that are not found in the collected evidence. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`; encrypted records store an HMAC-SHA256 keyed from that key instead of a bare SHA-256, so a guessable payload can't be confirmed from the file without the key.
-- **☁️ Live AWS Evidence Collection:** boto3-based tools call real AWS APIs directly (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) — no AWS CLI installation required. Requires only minimal read-only IAM permissions.
+The workflow runs three CrewAI crews in sequence. Each crew ends with a QA reviewer agent, and each phase ends at a human gate.
+
+| Phase | Agents | Output |
+|---|---|---|
+| 1. Planning | Audit Director, Regulatory & Threat Analyst, Risk & Threat Specialist, Senior IT Auditor, Quality & Pushback Reviewer | RACM: risks, controls, and for every control test-of-design, test-of-effectiveness and substantive steps |
+| 2. Fieldwork | Field Evidence Collector (AWS tools), IT Field Auditor, Execution QA & Pushback Reviewer | Working papers: one finding per control, with severity, test conclusion, an exact evidence quote and a vault ID |
+| 3. Reporting | Lead Report Writer, Chief Audit Executive (executive summary), Reporting Tone & QA Reviewer, Compliance Documentation Engineer; 5 tasks, the writer also assembles the final report | Report narrative, executive summary and an OSCAL-inspired results structure |
+
+**What each phase receives.** The RACM drafter works from the Risk Specialist's ranked risk list. Fieldwork receives the approved RACM. Reporting receives the scope, a summary of the RACM (risks and controls) and the approved working papers. The OSCAL task receives a `control_id | severity | vault_id` index so it copies IDs instead of inventing them. `tests/test_prompt_inputs.py` checks that every placeholder in the crews' YAML prompts is filled by the inputs the flow passes.
+
+**QA gates (automatic).** QA reviewers run at temperature 0. The other agents run at 0.1. If QA rejects the output, or its answer cannot be parsed, the phase counts as rejected: QA fails closed. The flow then re-runs the crew once with the rejection reason added to the drafting prompt. This happens in all three phases. A second rejection stops the phase in `QA_REJECTED_PHASE_n` and keeps the rejected draft for review. A crew error stops it in `ERROR_PHASE_n`.
+
+**Human gates.** An explicit state machine (`src/swarm/state/machine.py`) decides which moves are allowed. Any other move raises `InvalidTransitionError`, which the API returns as HTTP 409 (for example, approving the same gate twice). At each gate a reviewer can:
+
+- **Approve.** Gates 1 and 2 start the next phase. Gate 3 marks the audit `COMPLETED`.
+- **Retry** a QA-rejected or failed phase. After a QA rejection, the stored rejection reason is passed back to the crew.
+- **Approve despite the QA rejection** (supervisor override). This requires a written reason and does not skip anything: the phase moves to its normal human gate, which still has to be approved.
+
+Each action is recorded in the approval trail with the gate, the reviewer's name as entered, a UTC timestamp, the action (`gate_approval`, `retry` or `qa_override`) and, where relevant, the override reason and the QA rejection it overrode.
+
+```mermaid
+flowchart TD
+    scope(["Audit scope and optional scope document"]) --> p1
+
+    p1["Phase 1 Planning crew drafts the RACM"] --> qa1{"QA reviewer"}
+    qa1 -- "rejected: one automatic retry with the reason" --> p1
+    qa1 -- "rejected again" --> r1["QA rejected phase 1"]
+    qa1 -- "approved" --> g1{{"Human gate 1"}}
+    r1 -- "human retry with stored QA reason" --> p1
+    r1 -- "supervisor override with written reason" --> g1
+
+    g1 -- "approve" --> p2["Phase 2 Fieldwork crew collects AWS evidence and writes working papers"]
+    p2 --> qa2{"QA field reviewer"}
+    qa2 -- "rejected: one automatic retry with the reason" --> p2
+    qa2 -- "rejected again" --> r2["QA rejected phase 2"]
+    qa2 -- "approved" --> g2{{"Human gate 2"}}
+    r2 -- "human retry with stored QA reason" --> p2
+    r2 -- "supervisor override with written reason" --> g2
+
+    g2 -- "approve" --> p3["Phase 3 Reporting crew writes the report and OSCAL-inspired results"]
+    p3 --> qa3{"Tone and QA reviewer"}
+    qa3 -- "rejected: one automatic retry with the reason" --> p3
+    qa3 -- "rejected again" --> r3["QA rejected phase 3"]
+    qa3 -- "approved" --> g3{{"Human gate 3"}}
+    r3 -- "human retry with stored QA reason" --> p3
+    r3 -- "supervisor override with written reason" --> g3
+
+    g3 -- "approve" --> done(["Completed: report, exports and approval trail"])
+```
+
+**Evidence.** The Field Evidence Collector calls three boto3-based tools: IAM password policy, IAM users with MFA status, and S3 buckets with public-access settings. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
+
+**Outputs.** The UI shows the RACM, a findings board with per-finding vault checks, the report and the approval trail. Four downloads are available once the artifact exists (`GET /api/sessions/{id}/export/...`): `racm.xlsx`, `working-papers.xlsx`, `report.md` and `oscal.json`. Spreadsheet cells are sanitised against formula injection.
+
+**Scope documents.** A new audit can include a PDF or text scope document (up to 5 MB, 30 PDF pages and 20,000 extracted characters). The extracted text is wrapped in delimiters that label it as untrusted user-supplied content. This reduces prompt-injection risk but does not remove it. The human gates are the control that matters.
+
+---
+
+## What I built vs what CrewAI provides
+
+| CrewAI provides | This project adds |
+|---|---|
+| Agent, task and crew abstractions; sequential execution; LLM calls; parsing task output into Pydantic models | The audit state machine, three human gates, retry and supervisor-override actions, and the approval trail |
+| | Fail-closed QA gates and the automatic retry that feeds the rejection reason back, in every phase |
+| | The evidence vault: account-ID redaction, SHA-256 or keyed HMAC digests, optional encryption, exact-quote verification, and a digest migration command |
+| | Read-only AWS evidence tools (boto3) and the matching minimal IAM policy |
+| | Audit schemas: RACM with design/effectiveness/substantive steps, working papers, and an OSCAL-inspired results model |
+| | Prompt wiring between phases (ranked risks, RACM, working papers, findings index) and the tests that check it |
+| | FastAPI backend, React UI, exports, scope-document handling and DEMO_MODE |
+| | The test suite, CI, container setup and security tooling |
+
+---
+
+## Security and data handling
+
+- **Read-only AWS access.** The tools call only read APIs, and the policy below is all they need. The agents' prompts also say not to change anything, but the IAM policy and the tool code are what enforce read-only access.
+- **Redaction.** 12-digit numbers in AWS account-ID form (`123456789012` or `1234-5678-9012`) are replaced with `[REDACTED]` before evidence is stored and before tool output is returned to the agents. Any other standalone 12-digit number is redacted as well.
+- **Evidence vault.** One JSON file per evidence record, with a SHA-256 digest. With `VAULT_ENCRYPTION_KEY` set, records are Fernet-encrypted and carry an HMAC-SHA256 digest keyed from that key. See [Limitations](#limitations-and-accuracy) for what this does not detect.
+- **API token.** Every `/api/*` route requires `API_AUTH_TOKEN` (the API returns 503 if it is not set, and 401 for a wrong or missing token). `/health` is open. In Compose, nginx injects the token server-side.
+- **Deployment defaults.** Compose publishes ports on `127.0.0.1` only. The API container runs as a non-root user. nginx sets a Content-Security-Policy and other hardening headers. The API refuses to start with `DEMO_MODE=1` when `ENVIRONMENT` is `production` or `staging`.
+- **Untrusted input.** Scope documents are size-limited and wrapped as untrusted content (see above).
 
 <details>
-<summary>📋 View Minimal Read-Only AWS IAM Policy</summary>
+<summary>Minimal read-only AWS IAM policy</summary>
 
 ```json
 {
@@ -108,144 +157,144 @@ graph TD
   ]
 }
 ```
+
+These map to the boto3 calls in `src/swarm/tools/aws_tools.py`: `get_account_password_policy`, `list_users`, `list_mfa_devices`, `list_buckets`, `get_public_access_block` and `get_bucket_acl`. The separate `aws_safety_heartbeat.py` script (a cost check for a lab account) also uses `sts:GetCallerIdentity`, `ec2:DescribeInstances` and `rds:DescribeDBInstances`, which the audit itself does not need.
 </details>
 
-- **🛡️ AWS Account ID Redaction:** 12-digit AWS account IDs are automatically scrubbed from all evidence before storage and before being returned to agents.
-- **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
-- **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Potential significant issue counts, for the auditor to evaluate), expandable per-control drill-downs, and vault verification badges.
-- **📥 Exports:** Download the RACM (with ToD/ToE/Substantive steps) and Working Papers as Excel, the final report as Markdown and its OSCAL-shaped results as JSON (`/api/sessions/{id}/export/…`). Spreadsheet cells are sanitised against formula injection.
-- **🔄 Multi-LLM Support:** Priority order Ollama → NVIDIA → Gemini → OpenAI → Groq. Set whichever key you have — the factory binds automatically.
-- **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` for the API to replace the crews with fixed, clearly labelled demo artifacts (no LLM or AWS calls). Gates, QA bookkeeping and the approval trail still run for real, and the UI shows a DEMO MODE badge. The API refuses to start with it when `ENVIRONMENT` is `production` or `staging`.
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ---
 
-## 🏃 Quickstart
+## Configuration
 
-```bash
-# 1. Clone
-git clone https://github.com/tvobrachini/grc-audit-swarm
-cd grc-audit-swarm
+Set these in `.env` or in the environment. Compose and `run_monitor.py` read `.env`; a bare `uvicorn` run does not, so export the variables there.
 
-# 2. Environment setup
-cp .env.example .env
-# Add at least one LLM key: GEMINI_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY
-# Optionally add AWS credentials for live evidence collection
+**LLM provider.** The factory (`src/swarm/llm_factory.py`) uses the first provider that is configured, in this order. If none is set, starting a crew raises a configuration error that lists these variables (DEMO_MODE does not need any).
 
-# 3. Install dependencies
-uv sync
+| Order | Variable | Model used |
+|---|---|---|
+| 1 | `OLLAMA_MODEL` (plus optional `OLLAMA_BASE_URL`, default `http://localhost:11434`) | the local Ollama model you name |
+| 2 | `NVIDIA_API_KEY` (plus optional `NVIDIA_BASE_URL`) | `meta/llama-3.3-70b-instruct` |
+| 3 | `GEMINI_API_KEY` | `gemini-2.5-flash`, or `GEMINI_MODEL` if set |
+| 4 | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| 5 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
 
-# 4. Launch (default: FastAPI backend + React frontend)
-docker compose up --build
-# React UI at http://127.0.0.1:3000, API at http://127.0.0.1:8000
+Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stops working.
 
-# Alternatively, without Docker (two terminals; pick any token value):
-API_AUTH_TOKEN=dev-token PYTHONPATH=src uv run uvicorn api.main:app --port 8000
-cd frontend && npm ci && VITE_API_AUTH_TOKEN=dev-token npm run dev
-# React UI at http://localhost:5173 (Vite proxies /api to port 8000)
-
-# No LLM key? Start the API with DEMO_MODE=1 to walk through the UI with demo data.
-```
-
-**LLM provider priority** (the factory dynamically binds based on available keys/vars):
-
-| Priority | Key | Model | Notes |
-|----------|-----|-------|-------|
-| 1 | `OLLAMA_MODEL` | (Local) e.g., `llama3` | Fully private, zero-cost local inference |
-| 2 | `NVIDIA_API_KEY` | `llama-3.3-70b-instruct`| NVIDIA NIM infrastructure |
-| 3 | `GEMINI_API_KEY` | `gemini-2.5-flash` (override with `GEMINI_MODEL`) | Cloud tier; check Google's deprecation page, as Gemini model names are retired regularly |
-| 4 | `OPENAI_API_KEY` | `gpt-4o-mini` | Standard cloud fallback |
-| 5 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fast inference, strict rate limits |
-
-**Optional environment variables:**
+**Other settings**
 
 | Variable | Purpose |
-|----------|---------|
-| `GEMINI_MODEL` | Override the Gemini model name (default `gemini-2.5-flash`) |
-| `EVIDENCE_VAULT_PATH` | Override vault storage directory (useful for Docker volume mounts) |
-| `SESSIONS_PATH` | Override session file path |
-| `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
-| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes. In `docker compose`, nginx injects this into the reverse proxy server-side, so the browser never sees it |
-| `VITE_API_AUTH_TOKEN` | **Dev-only.** Bakes the token into the built JS bundle for `npm run dev` against a local API. Never set this for a production/compose build |
-| `DEMO_MODE` | Set to `1` to make the API use fixed demo artifacts instead of the crews (local demos only) |
-| `ENVIRONMENT` | When `production` or `staging`, the API refuses to start with `DEMO_MODE=1` |
+|---|---|
+| `API_AUTH_TOKEN` | Shared bearer token for all `/api/*` routes. Required. |
+| `VITE_API_AUTH_TOKEN` | Dev only: lets `npm run dev` send the token. It is built into the JS bundle, so never set it for a Compose or production build. |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated origin allow-list (default `http://localhost:5173`; `*` is ignored). |
+| `DEMO_MODE` | `1` (or `true`, `yes`, `on`) replaces the crews with fixed demo artifacts. |
+| `DEMO_QA_REJECT_PHASE` | `1`, `2` or `3`: in demo mode, QA rejects that phase until a person retries it. |
+| `DEMO_STEP_DELAY` | Seconds between demo steps (default 0.4, range 0 to 5). |
+| `ENVIRONMENT` | `production`/`prod`/`staging`/`stage` make the API refuse to start with `DEMO_MODE` on. |
+| `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key. Turns on Fernet encryption and keyed digests in the vault. |
+| `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `data/evidence_vault`). |
+| `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
+| `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. |
 
-Generate a vault encryption key:
+Generate a vault key:
+
 ```bash
 python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
-If you enabled encryption before the keyed digest was introduced, re-seal the older encrypted records (the command exits non-zero if any record fails its integrity check):
+If you enabled encryption before keyed digests were introduced, re-seal older encrypted records. The command exits non-zero if any record fails its integrity check, and it never re-seals a record whose payload no longer matches its stored hash.
+
 ```bash
 PYTHONPATH=src uv run python -m swarm.evidence migrate-digests
 ```
 
 ---
 
-## 🔬 Testing
+## Testing and CI
 
 ```bash
-# Full test suite with coverage
-uv run pytest tests/ -v --cov=src --cov-report=term-missing
+uv sync
+PYTHONPATH=. uv run pytest tests/ -q --cov=src   # unit and API tests with coverage
+uv run pre-commit run --all-files                  # ruff, bandit, detect-secrets, pip-audit, hygiene
+uv run pyright src/                                # type check
+cd frontend && npm ci && npm run lint && npm run build
 
-# Headless end-to-end monitor (all 3 phases)
-python run_monitor.py
-
-# Phase 1 only
-python run_monitor.py --phase1-only
-
-# Skip live AWS calls
-python run_monitor.py --skip-aws
+# Headless run of the real crews, without the API or UI (needs an LLM provider)
+uv run python run_monitor.py                 # all three phases
+uv run python run_monitor.py --phase1-only   # Planning only
+uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The test suite covers evidence integrity, AWS tool mocking, LLM factory priority, audit flow QA retry loops, skill loading, and the FastAPI endpoints (gates, retry/override, exports, scope upload, DEMO_MODE). CI enforces a 50% coverage minimum across Python 3.11, 3.12, and 3.13.
+The tests use mocked crews, LLMs and AWS clients. They cover the state machine and gates, QA fail-closed behaviour and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 322 tests, 89% line coverage of `src/`.
 
-The `run_monitor.py` script validates the full crew execution pipeline — timing, QA gate outcomes, vault file creation, and final status — without the API or UI.
+CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
+
+- pre-commit hooks (ruff lint and format, bandit, detect-secrets, pip-audit, file hygiene);
+- pyright on `src/`;
+- pytest on Python 3.11, 3.12 and 3.13, failing below 50% coverage;
+- bandit, and pip-audit against the exported `uv.lock` requirements (the ignored advisories are listed and explained in the workflow);
+- frontend lint, build and `npm audit --audit-level=high`;
+- Docker builds for both images and `docker compose config`.
+
+All GitHub Actions are pinned to commit SHAs. A dependency-review workflow runs on pull requests, and Dependabot tracks uv, npm, GitHub Actions and both Dockerfiles.
 
 ---
 
-## 🧱 Project Structure
+## Project structure
 
 ```
 src/
   swarm/
-    crews/              # PlanningCrew, FieldworkCrew, ReportingCrew
-    config/             # YAML agent + task definitions per crew
-    state/              # AuditState Pydantic schema
-    tools/
-      aws_tools.py      # boto3-based AWS evidence collection tools
-    evidence.py         # EvidenceAssuranceProtocol — SHA-256 vault + optional encryption
-    audit_flow.py       # AuditFlow orchestrator (plain class, 3 methods)
-    llm_factory.py      # Multi-provider LLM binding (Ollama → NVIDIA → Gemini → OpenAI → Groq)
-    mcp_server.py       # FastMCP server exposing AWS tools for MCP clients
-    schema.py           # RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
-    session_manager.py  # Persistent audit session serialization
-    skill_loader.py     # Dynamic CrewAI skill registration
+    audit_flow.py        # AuditFlow: runs the phases, QA retry, gates, approval trail
+    state/
+      machine.py         # AuditStateMachine: allowed transitions, InvalidTransitionError
+      schema.py          # AuditState
+      repository.py      # Save / load a flow with its artifacts
+    crews/               # PlanningCrew, FieldworkCrew, ReportingCrew, result adapter
+    config/              # YAML agent and task prompts per crew; MCP server config
+    tools/aws_tools.py   # Read-only boto3 evidence tools
+    evidence.py          # Evidence vault, redaction, quote check, migrate-digests
+    schema.py            # RACM, working paper, final report and OSCAL-inspired models
+    demo.py              # DEMO_MODE stand-in crews and labelled demo artifacts
+    llm_factory.py       # LLM provider selection
+    mcp_server.py        # Standalone MCP server exposing the AWS reads (no redaction or vault)
+    session_manager.py   # Session file persistence
+    skill_loader.py      # Loads domain skill prompts from skills/
   api/
-    main.py             # FastAPI backend used by the React UI
-    routers/            # sessions, gates/retry/override, exports, stream, evidence
-frontend/               # React + Vite web interface (the only UI)
-skills/                 # YAML definitions for domain-specific audit skills (GDPR, HIPAA, etc.)
-aws_safety_heartbeat.py # Standalone boto3 script to verify $0 AWS resource usage
-run_monitor.py          # Headless E2E test runner
-docker-compose.yml      # Orchestrates the API and the React frontend
+    main.py              # FastAPI app, auth, CORS, upload size limit
+    auth.py              # Bearer-token check
+    routers/             # sessions (gates, retry, override), exports, phases (jobs, stream), evidence, config
+    exports.py           # xlsx / Markdown / OSCAL JSON builders with formula-injection sanitising
+    scope_document.py    # PDF and text scope-document extraction and wrapping
+frontend/                # React + Vite UI, served by nginx in Compose (nginx.conf.template)
+skills/                  # Domain skill prompts (AWS, ITGC, PCI DSS, HIPAA, GDPR)
+tests/                   # pytest suite
+run_monitor.py           # Headless run of all three crews
+aws_safety_heartbeat.py  # Checks a lab AWS account for running EC2 / RDS resources
+Dockerfile, docker-compose.yml
 ```
 
 ---
 
-## ⚠️ Limitations & Accuracy
+## Limitations and accuracy
 
-- **Decision support only:** the tool assists audit professionals. It is not a replacement for a qualified auditor or for engagement supervision.
-- **Evidence vault:** each evidence payload is stored with its SHA-256 hash (HMAC-SHA256 when encryption is on) in the same local JSON file, and the UI checks that quotes cited by the field auditor appear verbatim in it. Without encryption the hash detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering, and a verbatim quote does not prove the conclusion drawn from it.
-- **AWS coverage:** live collection covers the IAM account password policy, IAM user MFA, S3 public access block settings and bucket ACLs. Other domains use simulated data or document ingestion.
-- **Standalone MCP server:** `src/swarm/mcp_server.py` returns raw results. It does not redact account IDs or register evidence in the vault. Those apply on the CrewAI tool path.
-- **QA agents:** QA reviewers run at `temperature=0`. That lowers variance on hosted models but does not remove it. A failed review triggers one automatic retry.
-- **OSCAL export:** an OSCAL-inspired data model. It is not validated against the official OSCAL schema.
-- **No measured accuracy:** this project has not been benchmarked. There are no measured precision, time or cost figures yet.
+- **Decision support only.** The output is a draft for a qualified auditor. It is not an audit opinion and does not replace engagement supervision.
+- **Not benchmarked.** There are no measured accuracy, precision, time-saving or cost figures.
+- **QA is another LLM.** Temperature 0 lowers variance on hosted models but does not remove it. A QA approval does not show the output is correct.
+- **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity.
+- **Evidence vault.** Each record's digest is stored in the same writable JSON file as the payload. Without encryption the digest detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering. A verified quote shows the words are in the evidence; it does not show the conclusion drawn from them is right. Matching is exact, so paraphrases show as not verified.
+- **AWS coverage.** Live collection covers the IAM account password policy, IAM user MFA, and S3 buckets. The S3 check looks only at each bucket's Public Access Block settings and ACL. It does not read bucket policies or account-level Block Public Access, so it can both miss a bucket made public by its policy and flag a bucket that account-level settings already protect. The Fieldwork crew has no other evidence tools, so controls outside these three reads have no collected evidence behind them.
+- **Standalone MCP server.** `src/swarm/mcp_server.py` returns raw results. It does not redact account IDs or register evidence in the vault.
+- **OSCAL.** The results model is OSCAL-inspired, uses Python-style field names and is not validated against the official NIST OSCAL schema.
+- **Demo data.** DEMO_MODE output is fixed sample content, labelled as demo data in every artifact. It is not evidence and not a finding about any system.
+- **Standards.** References to IIA Global Internal Audit Standards 12.3 (formerly 2340) and 14.6 (formerly 2330), PCAOB AS 1215 and NIST OSCAL are design inspiration. The project makes no compliance claim against any of them.
 
 ---
 
-## 📄 License & Attribution
+## License and attribution
 
-Developed by **Tiago Brachini**. The code in this repository is released under the **[MIT License](LICENSE)**.
+Developed by **Tiago Brachini**. The code in this repository is released under the [MIT License](LICENSE).
 
 Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. This repository maps to SCF control IDs only. It does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.
