@@ -1,5 +1,14 @@
 drafting_task:
-  description: "Consume original Phase 1 Scope '{scope_string}' and Phase 2 Working Papers. Write the full comprehensive Draft Audit Report. Highlight severe findings distinctly.{tone_qa_feedback}"
+  description: |-
+    Audit scope (Phase 1): {scope_string}
+
+    Risk and Control Matrix approved at Gate 1 (risk → controls):
+    {racm_summary}
+
+    Working Papers approved at Gate 2 (JSON; one finding per tested control, with severity, test conclusion, exact evidence quote and vault_id_reference):
+    {working_papers_string}
+
+    Using ONLY the scope, RACM and working papers above, write the full comprehensive Draft Audit Report. Cover every finding, cite its control_id and vault_id_reference, map it back to its risk and regulatory framework, and highlight severe findings (Significant Deficiency / Material Weakness) distinctly. Do not invent findings, controls or evidence that are not listed above.{tone_qa_feedback}
   expected_output: "A detailed drafting of the technical report."
 
 executive_summary_task:
@@ -15,5 +24,11 @@ final_report_assembly_task:
   expected_output: "The strict Pydantic FinalReportSchema output."
 
 generate_oscal_sar_task:
-  description: "Translate the narrative audit findings and working papers into a standardized machine-readable format using the OSCAL_SAR_Schema. Map every finding to its corresponding control_id and vault_id evidence. Include the required import_ap field referencing the assessment plan this audit was conducted against (use the audit theme/scope as the href if no formal OSCAL assessment plan document exists)."
+  description: |-
+    Translate the narrative audit findings into a standardized machine-readable format using the OSCAL_SAR_Schema. Audit theme: '{theme}'.
+
+    Authoritative findings index from the Phase 2 working papers (control_id | severity | vault_id):
+    {findings_index}
+
+    Create one observation per finding in the index: put its control_id in subjects and its vault_id in relevant_evidence exactly as listed (never invent IDs), and use the draft report for the narrative description. Include the required import_ap field referencing the assessment plan this audit was conducted against (use the audit theme as the href if no formal OSCAL assessment plan document exists).
   expected_output: "A complete OSCAL_SAR_Schema object, including import_ap."

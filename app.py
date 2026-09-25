@@ -8,7 +8,6 @@ Phase 3: AI Reporting Phase (Tone QA)
 Set DEMO_MODE=1 in .env to skip LLM crew execution and use hardcoded schemas.
 """
 
-import datetime
 import threading
 import time
 import streamlit as st
@@ -25,6 +24,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.audit_flow import AuditFlow  # noqa: E402
 from swarm.session_manager import save_session, get_session, update_session  # noqa: E402
+from swarm.state.repository import FlowRepository  # noqa: E402
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
 from ui.components.phase1_review import render_phase1_review  # noqa: E402
@@ -70,21 +70,16 @@ if "load_session_id" in st.session_state:
     tid = st.session_state.pop("load_session_id")
     meta = get_session(tid)
     if meta:
-        restored = AuditFlow()
-        snapshot = meta.get("state_snapshot") or {}
-        if snapshot:
-            skipped_fields = []
-            for k, v in snapshot.items():
-                try:
-                    setattr(restored.state, k, v)
-                except Exception:
-                    skipped_fields.append(k)
-            if skipped_fields:
-                st.warning(
-                    f"Session restored with schema mismatches — the following fields "
-                    f"were skipped (schema may have changed): {', '.join(skipped_fields)}. "
-                    "Start a new audit if behaviour is unexpected."
-                )
+        # FlowRepository.load keeps the state machine in sync with the saved
+        # status and restores the domain skill context.
+        loaded = FlowRepository().load(tid)
+        restored = loaded.flow if loaded else AuditFlow()
+        if loaded and not loaded.is_clean:
+            st.warning(
+                f"Session restored with schema mismatches — the following fields "
+                f"were skipped (schema may have changed): {', '.join(loaded.skipped_fields)}. "
+                "Start a new audit if behaviour is unexpected."
+            )
         st.session_state.flow = restored
         st.session_state.phase = meta.get("ui_phase", 0)
         st.session_state.audit_session_id = tid
@@ -257,9 +252,9 @@ if st.session_state.phase == 0:
 # PHASE 1 — Planning Phase Gate (RACM)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 1:
-    # IIA 2340: capture approver identity before the gate fires.
+    # Standard 12.3 (formerly IIA 2340): capture approver identity before the gate fires.
     gate1_approver = st.text_input(
-        "Approver Name / Email (IIA 2340 Gate 1)",
+        "Approver Name / Email (Gate 1)",
         value=st.session_state.get("gate1_approver", ""),
         placeholder="e.g. jane.doe@company.com",
         key="gate1_approver_input",
@@ -359,18 +354,16 @@ elif st.session_state.phase == 1:
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append(
-                        {
-                            "gate": "Gate 2 (Fieldwork — QA Override)",
-                            "human": approver,
-                            "justification": override_justification.strip(),
-                            "timestamp": datetime.datetime.utcnow().isoformat(),
-                        }
-                    )
-                    flow.state.status = "WAITING_HUMAN_GATE_2"
-                    st.session_state.phase = 2
-                    _persist_session()
-                    st.rerun()
+                    try:
+                        flow.override_qa_rejection(
+                            2, approver, override_justification.strip()
+                        )
+                    except Exception as exc:
+                        st.error(f"🚨 Override not possible: {exc}")
+                    else:
+                        st.session_state.phase = 2
+                        _persist_session()
+                        st.rerun()
 
     # Show feedback acknowledgement if submitted
     if st.session_state.get("p1_feedback_submitted"):
@@ -388,9 +381,9 @@ elif st.session_state.phase == 1:
 # PHASE 2 — Execution Phase Gate (Working Papers)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 2:
-    # IIA 2340: capture approver identity before the gate fires.
+    # Standard 12.3 (formerly IIA 2340): capture approver identity before the gate fires.
     gate2_approver = st.text_input(
-        "Approver Name / Email (IIA 2340 Gate 2)",
+        "Approver Name / Email (Gate 2)",
         value=st.session_state.get(
             "gate2_approver", st.session_state.get("gate1_approver", "")
         ),
@@ -417,7 +410,7 @@ elif st.session_state.phase == 2:
                             "and S3 buckets were scanned."
                         ),
                         detailed_report=(
-                            "Technical findings indicate compliance with CIS AWS Foundations. "
+                            "Technical findings map to CIS AWS Foundations control objectives. "
                             "Vault hashes have been verified against raw evidence."
                         ),
                         compliance_tone_approved=True,
@@ -461,7 +454,7 @@ elif st.session_state.phase == 2:
                 )
                 st.rerun()
             elif flow.state.status == "WAITING_HUMAN_GATE_3":
-                # Gate 3 (IIA 2340): same approver who requested the report signs
+                # Gate 3 (Standard 12.3, formerly IIA 2340): same approver who requested the report signs
                 # off to finalize it — mirrors the Gate 1/2 approval pattern.
                 flow.finalize_audit(approver or "DEMO_USER")
                 st.session_state.phase = 3
@@ -489,23 +482,24 @@ elif st.session_state.phase == 2:
                 if not override_justification.strip():
                     st.warning("Justification is required to override.")
                 else:
-                    flow.state.approval_trail.append(
-                        {
-                            "gate": "Gate 3 (Reporting — QA Override)",
-                            "human": approver,
-                            "justification": override_justification.strip(),
-                            "timestamp": datetime.datetime.utcnow().isoformat(),
-                        }
-                    )
-                    flow.state.status = "COMPLETED"
-                    st.session_state.phase = 3
-                    _persist_session()
-                    st.rerun()
+                    try:
+                        # Override the QA rejection, then sign Gate 3 — both
+                        # stamped in the approval trail via the state machine.
+                        flow.override_qa_rejection(
+                            3, approver, override_justification.strip()
+                        )
+                        flow.finalize_audit(approver)
+                    except Exception as exc:
+                        st.error(f"🚨 Override not possible: {exc}")
+                    else:
+                        st.session_state.phase = 3
+                        _persist_session()
+                        st.rerun()
 
     render_phase2_review(flow.state.working_papers, on_phase2_finalize)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PHASE 3 — Final Report and Immutable Audit Trail
+# PHASE 3 — Final Report and Audit Trail
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 3:
     st.success("🎉 Swarm Run Finished. Phase 3 (Reporting) Output Received!")
@@ -558,7 +552,9 @@ elif st.session_state.phase == 3:
     )
 
     st.markdown("---")
-    st.markdown("### 📝 Engagement Supervision Audit Trail (IIA 2340 Stamping)")
+    st.markdown(
+        "### 📝 Engagement Supervision Audit Trail (Standard 12.3, formerly IIA 2340)"
+    )
     trail = flow.state.approval_trail
     if trail:
         for entry in trail:

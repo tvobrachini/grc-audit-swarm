@@ -25,11 +25,12 @@ Standards such as IIA Standards 12.3 (formerly 2340) and 14.6 (formerly 2330) an
 
 **Status:** Accepted
 
-**Decision.** `EvidenceAssuranceProtocol.register_evidence` (`src/swarm/evidence.py`) redacts 12-digit AWS account IDs, assigns a UUID, computes a SHA-256 hash of the redacted payload and writes the record as one JSON file. Optional Fernet encryption at rest is available through `VAULT_ENCRYPTION_KEY`. `verify_exact_quote()` checks that a quote cited by the field auditor appears verbatim in the stored payload, and the UI shows a verified or unverified badge for it.
+**Decision.** `EvidenceAssuranceProtocol.register_evidence` (`src/swarm/evidence.py`) redacts 12-digit AWS account IDs, assigns a UUID, computes a SHA-256 hash of the redacted payload and writes the record as one JSON file. Optional Fernet encryption at rest is available through `VAULT_ENCRYPTION_KEY`; when it is on, the record stores an HMAC-SHA256 keyed from that key (via a labelled derivation, so the Fernet key is not reused directly) instead of the bare SHA-256. `verify_exact_quote()` checks that a quote cited by the field auditor appears verbatim in the stored payload, and the UI shows a verified or unverified badge for it.
 
 **Consequences.**
 - A quote that does not appear in the collected evidence is flagged.
-- The hash is stored in the same JSON file as the payload, and the file is an ordinary writable file. The hash detects accidental corruption. It does not prevent or prove the absence of tampering.
+- The hash is stored in the same JSON file as the payload, and the file is an ordinary writable file. Without encryption the hash detects accidental corruption only. It does not prevent or prove the absence of tampering.
+- With encryption, a bare SHA-256 next to the ciphertext would let anyone holding the file confirm a guessed payload (evidence is small and guessable, e.g. a password policy or one user's MFA flag), which is why the digest is keyed. Fernet tokens are themselves authenticated, so edits to an encrypted record are detected without the key; deleting a record, or replacing it with an unencrypted one, is not. Records written before the keyed digest keep verifying against their stored SHA-256, and `python -m swarm.evidence migrate-digests` (with `PYTHONPATH=src` and the key set) rewrites them with the keyed digest. It only migrates a record whose payload still matches its stored hash, so corrupted evidence is never re-sealed.
 - A verbatim quote shows the words exist in the evidence. It does not show that the conclusion drawn from them is correct.
 - Matching is an exact substring match. Paraphrases are marked unverified.
 

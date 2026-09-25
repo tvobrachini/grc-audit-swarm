@@ -82,7 +82,7 @@ graph TD
 
 - **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
 - **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
-- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, flagging quotes that are not found in the collected evidence. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
+- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, flagging quotes that are not found in the collected evidence. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`; encrypted records store an HMAC-SHA256 keyed from that key instead of a bare SHA-256, so a guessable payload can't be confirmed from the file without the key.
 - **☁️ Live AWS Evidence Collection:** boto3-based tools call real AWS APIs directly (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) — no AWS CLI installation required. Requires only minimal read-only IAM permissions.
 
 <details>
@@ -134,11 +134,16 @@ cp .env.example .env
 # 3. Install dependencies
 uv sync
 
-# 4. Launch (Full Stack)
-# Starts FastAPI backend, React frontend, and Streamlit app
+# 4. Launch (default: FastAPI backend + React frontend)
 docker compose up --build
+# React UI at http://127.0.0.1:3000, API at http://127.0.0.1:8000
 
-# Alternatively, launch just the Streamlit interface:
+# Streamlit is being retired in favor of the React UI. To also start it,
+# opt in with the "streamlit" profile:
+docker compose --profile streamlit up --build
+# Streamlit UI at http://127.0.0.1:8501
+
+# Alternatively, run just Streamlit locally without Docker:
 uv run streamlit run app.py --server.port 8502
 # App accessible at http://localhost:8502
 ```
@@ -161,14 +166,19 @@ uv run streamlit run app.py --server.port 8502
 | `EVIDENCE_VAULT_PATH` | Override vault storage directory (useful for Docker volume mounts) |
 | `SESSIONS_PATH` | Override session file path |
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
-| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes |
-| `VITE_API_AUTH_TOKEN` | Frontend build-time token used to call the protected API in single-user deployments |
+| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes. In `docker compose`, nginx injects this into the reverse proxy server-side, so the browser never sees it |
+| `VITE_API_AUTH_TOKEN` | **Dev-only.** Bakes the token into the built JS bundle for `npm run dev` against a local API. Never set this for a production/compose build |
 | `DEMO_MODE` | Set to `1` to bypass LLM crews for UI development |
 | `ENVIRONMENT` | Set to `production` or `staging` to enforce DEMO_MODE guard |
 
 Generate a vault encryption key:
 ```bash
 python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
+
+If you enabled encryption before the keyed digest was introduced, re-seal the older encrypted records (the command exits non-zero if any record fails its integrity check):
+```bash
+PYTHONPATH=src uv run python -m swarm.evidence migrate-digests
 ```
 
 ---
@@ -229,7 +239,7 @@ docker-compose.yml      # Orchestrates API, Frontend, and Streamlit services
 ## ⚠️ Limitations & Accuracy
 
 - **Decision support only:** the tool assists audit professionals. It is not a replacement for a qualified auditor or for engagement supervision.
-- **Evidence vault:** each evidence payload is stored with its SHA-256 hash in the same local JSON file, and the UI checks that quotes cited by the field auditor appear verbatim in it. The hash detects accidental corruption. It does not prevent tampering with the files, and a verbatim quote does not prove the conclusion drawn from it.
+- **Evidence vault:** each evidence payload is stored with its SHA-256 hash (HMAC-SHA256 when encryption is on) in the same local JSON file, and the UI checks that quotes cited by the field auditor appear verbatim in it. Without encryption the hash detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering, and a verbatim quote does not prove the conclusion drawn from it.
 - **AWS coverage:** live collection covers the IAM account password policy, IAM user MFA, S3 public access block settings and bucket ACLs. Other domains use simulated data or document ingestion.
 - **Standalone MCP server:** `src/swarm/mcp_server.py` returns raw results. It does not redact account IDs or register evidence in the vault. Those apply on the CrewAI tool path.
 - **QA agents:** QA reviewers run at `temperature=0`. That lowers variance on hosted models but does not remove it. A failed review triggers one automatic retry.

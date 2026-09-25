@@ -7,17 +7,27 @@ on:
 
 jobs:
   pr_agent_job:
-    if: ${{ github.event.sender.type != 'Bot' }}
+    # Only run for trusted senders, and never for a pull_request event whose
+    # head repo is a fork (forks would otherwise get our OPENAI_API_KEY and
+    # write access to issues/PRs on the base repo).
+    if: |
+      github.event.sender.type != 'Bot' &&
+      (
+        (github.event_name == 'issue_comment' &&
+         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository)
+      )
     runs-on: ubuntu-latest
     permissions:
-      issues: write
+      contents: read
       pull-requests: write
-      contents: write
+      issues: write
     name: Run PR Agent on every pull request
     steps:
       - name: PR Agent action step
         id: pragent
-        uses: Codium-ai/pr-agent@v0.34
+        uses: Codium-ai/pr-agent@d82f7d3e696cd00822694aaa3096265d3889f3f1 # v0.34
         env:
           OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
           github_action_config.auto_review: "true"

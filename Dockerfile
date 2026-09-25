@@ -1,37 +1,47 @@
-# Use an official lightweight Python image
-FROM python:3.14-slim
+# ─── Builder stage: resolve and install dependencies with uv ─────────────────
+FROM python:3.12-slim AS builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV DATA_DIR=/app/data
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
 
-# Set the working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
+# Install uv.
+RUN pip install --no-cache-dir uv
 
-# Install uv
-RUN pip install uv
-
-# Copy project definition files
+# Copy project definition files first for better layer caching.
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies using uv
+# Every dependency in uv.lock ships a manylinux wheel for cp312, so no C
+# toolchain (build-essential) or sqlite3 CLI is required to build the venv.
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy the rest of the application and install it into the venv.
+COPY . .
 RUN uv sync --frozen --no-dev
 
-# Copy the rest of the application
-COPY . .
+# ─── Runtime stage: slim image, non-root user ─────────────────────────────────
+FROM python:3.12-slim AS runtime
 
-# Add the virtual environment to the PATH
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DATA_DIR=/app/data \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
 
-# Expose the Streamlit port
-EXPOSE 8501
+WORKDIR /app
 
-# Run the Streamlit app
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+
+COPY --from=builder /app /app
+
+RUN mkdir -p /app/data && chown -R app:app /app
+
+USER app
+
+EXPOSE 8000
+
+# Default CMD runs the FastAPI backend. The Streamlit UI (being retired) is
+# started separately via docker-compose's `streamlit` profile/command.
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
