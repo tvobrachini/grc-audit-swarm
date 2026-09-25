@@ -87,6 +87,3 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
         + " (or run with DEMO_MODE=1 to bypass the crews)."
     )
 
-
-# Alias for runtime_adapters compatibility
-get_llm = get_crew_llm
