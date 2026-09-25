@@ -29,7 +29,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open http://localhost:3000. Compose binds both ports to `127.0.0.1` only. nginx adds the API token to `/api` requests on the server side, so the browser never holds it.
+Open http://localhost:3000. Compose binds both ports to `127.0.0.1` only. Sessions and evidence persist in the `app-data` Docker volume; `docker compose down -v` deletes them. nginx adds the API token to `/api` requests on the server side, so the browser never holds it.
 
 **Without Docker (local development only)**
 
@@ -193,7 +193,7 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `DEMO_STEP_DELAY` | Seconds between demo steps (default 0.4, range 0 to 5). |
 | `ENVIRONMENT` | `production`/`prod`/`staging`/`stage` make the API refuse to start with `DEMO_MODE` on. |
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key. Turns on Fernet encryption and keyed digests in the vault. |
-| `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `data/evidence_vault`). |
+| `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `/app/data/evidence_vault` in the `app-data` volume). |
 | `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
 | `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. |
