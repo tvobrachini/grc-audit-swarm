@@ -23,7 +23,7 @@ Five sequential agents build and validate a Risk and Control Matrix (RACM):
 - **Senior IT Auditor:** Drafts the full RACM — every control must include Test of Design, Test of Effectiveness, and Substantive Testing steps.
 - **QA Reviewer (temp=0):** Independently validates the RACM; rejects if substantive testing is missing or ToE relies only on inquiry. On rejection, the crew auto-retries once with the rejection reason injected as context.
 
-Human approval is required before Phase 2 begins (an engagement-supervision step inspired by engagement supervision in the IIA Global Internal Audit Standards, Standard 12.3 (formerly 2340) — not a claim of compliance).
+Human approval is required before Phase 2 begins (a step inspired by engagement supervision in the IIA Global Internal Audit Standards, Standard 12.3 (formerly 2340) — not a claim of compliance).
 
 ### ⚙️ Phase 2: Fieldwork (The Engine)
 Three agents execute live evidence collection and evaluate controls:
