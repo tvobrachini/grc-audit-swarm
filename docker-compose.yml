@@ -33,19 +33,3 @@ services:
     depends_on:
       - api
     restart: unless-stopped
-
-  streamlit:
-    build: .
-    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
-    profiles: ["streamlit"]
-    ports:
-      - "127.0.0.1:8501:8501"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
-      - SESSIONS_PATH=/app/data/audit_sessions.json
-    env_file:
-      - path: .env
-        required: false
-    restart: unless-stopped
