@@ -2,10 +2,10 @@
 
 > **AI Multi-Agent GRC Audit Platform powered by CrewAI**
 
-GRC Audit Swarm is a stateful, three-phase audit automation platform that converts a plain-language scope into a fully documented audit report. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by an immutable evidence vault.
+GRC Audit Swarm is a stateful, three-phase audit automation platform that converts a plain-language scope into a fully documented audit report. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by an hashed evidence vault.
 
 > [!IMPORTANT]
-> **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by, endorsed by, or used in production by any current or past employers.
+> **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by or endorsed by any current or past employer.
 
 > [!NOTE]
 > **Architecture & Design Records:** See **[DECISIONS.md](DECISIONS.md)** for Architecture Decision Records (ADRs) and **[CASE_STUDY.md](CASE_STUDY.md)** for in-depth design rationale.
@@ -82,8 +82,9 @@ graph TD
 
 - **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
 - **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
-- **🔐 Immutable Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, preventing hallucinations. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
+- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, preventing hallucinations. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
 - **☁️ Live AWS Evidence Collection:** boto3-based tools call real AWS APIs directly (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) — no AWS CLI installation required. Requires only minimal read-only IAM permissions.
+
 <details>
 <summary>📋 View Minimal Read-Only AWS IAM Policy</summary>
 
@@ -100,7 +101,7 @@ graph TD
         "iam:ListMFADevices",
         "s3:ListAllMyBuckets",
         "s3:GetBucketPublicAccessBlock",
-        "s3:GetBucketPolicyStatus"
+        "s3:GetBucketAcl"
       ],
       "Resource": "*"
     }
@@ -108,6 +109,7 @@ graph TD
 }
 ```
 </details>
+
 - **🛡️ AWS Account ID Redaction:** 12-digit AWS account IDs are automatically scrubbed from all evidence before storage and before being returned to agents.
 - **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
 - **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Material Weakness counts), expandable per-control drill-downs, and vault verification badges.
@@ -225,16 +227,18 @@ docker-compose.yml      # Orchestrates API, Frontend, and Streamlit services
 
 ## ⚠️ Limitations & Accuracy
 
-- **Auditor Decision Support:** GRC Audit Swarm is an engineering tool designed to assist audit professionals, not an autonomous replacement for certified human auditors or formal Audit Committee oversight.
-- **Evidence Quote Verification:** The evidence vault verifies quote authenticity using deterministic SHA-256 substring matching. If an LLM paraphrases evidence rather than citing verbatim text, the badge marks it as unverified.
-- **API Coverage:** Live automated evidence collection currently targets core AWS configurations (IAM, S3, Organizations). Other technical domains use simulated data or document ingestion.
-- **Deterministic QA:** QA reviewer agents run at `temperature=0` with strict schema validation to mitigate hallucinations; failed reviews trigger a bounded 1-retry feedback loop.
+- **Decision support only:** the tool assists audit professionals. It is not a replacement for a qualified auditor or for engagement supervision.
+- **Evidence vault:** each evidence payload is stored with its SHA-256 hash in the same local JSON file, and the UI checks that quotes cited by the field auditor appear verbatim in it. The hash detects accidental corruption. It does not prevent tampering with the files, and a verbatim quote does not prove the conclusion drawn from it.
+- **AWS coverage:** live collection covers the IAM account password policy, IAM user MFA, S3 public access block settings and bucket ACLs. Other domains use simulated data or document ingestion.
+- **Standalone MCP server:** `src/swarm/mcp_server.py` returns raw results. It does not redact account IDs or register evidence in the vault. Those apply on the CrewAI tool path.
+- **QA agents:** QA reviewers run at `temperature=0`. That lowers variance on hosted models but does not remove it. A failed review triggers one automatic retry.
+- **OSCAL export:** an OSCAL-inspired data model. It is not validated against the official OSCAL schema.
+- **No measured accuracy:** this project has not been benchmarked. There are no measured precision, time or cost figures yet.
 
 ---
 
 ## 📄 License & Attribution
 
-Developed by **Tiago Brachini**. Released under the **[MIT License](LICENSE)**.
+Developed by **Tiago Brachini**. The code in this repository is released under the **[MIT License](LICENSE)**.
 
-Security frameworks and benchmarks (e.g., Secure Controls Framework - SCF, CIS Benchmarks, NIST SP 800-53, PCI-DSS) referenced within this project remain the intellectual property of their respective creators and organizations, cited under educational and fair-use guidelines.
-
+Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. This repository maps to SCF control IDs only. It does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.

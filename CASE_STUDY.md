@@ -39,7 +39,7 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
    - *Decision:* Each crew includes a **QA Reviewer** agent with `temperature=0` that must explicitly approve the output.
    - *Why:* This agent is programmed to be "pedantic." It analyzes the proposed RACM or Working Paper and rejects it if procedures are vague or evidence is missing. This triggers an autonomous **auto-retry loop** where the rejection reason is injected as context for refinement.
 
-4. **Immutable Evidence Vault (Security-by-Design):**
+4. **Hashed Evidence Vault (Security-by-Design):**
    - *Decision:* Built an Evidence Assurance Protocol that hashes all collected data using **SHA-256**.
    - *Why:* PCAOB AS 1215 and IIA Standard 2330 stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim, untampered snippet from the stored evidence.
 

@@ -1,100 +1,87 @@
-# Architecture Decision Records (ADR) — GRC Audit Swarm
+# Architecture Decision Records: GRC Audit Swarm
 
-This document records the key architectural decisions, rationale, and tradeoffs made in designing and building **GRC Audit Swarm**.
+This file records design decisions as they are implemented in the code today. Each record states what the code does and what that does and does not give you. Where the repository history or a code comment explains a choice, the record cites it. Where it does not, the record says nothing about motive.
 
----
-
-## ADR-001: Sequential Multi-Agent Crews with Deterministic QA Retries
-
-### Status
-Accepted
-
-### Context
-Audits follow distinct professional phases: Planning (scoping & RACM), Fieldwork (testing & working papers), and Reporting (executive synthesis & compliance artifact generation). A single prompt or monolithic LLM agent commonly suffers from context saturation, hallucinations over complex controls, and inability to enforce professional rigor.
-
-### Decision
-Split the workflow into three isolated, sequential **CrewAI** crews:
-1. `PlanningCrew` (5 agents)
-2. `FieldworkCrew` (3 agents)
-3. `ReportingCrew` (4 agents)
-
-Each crew contains a dedicated **QA Reviewer agent** running with temperature $0.0$ and explicit rejection criteria (e.g., rejecting RACMs where substantive testing is omitted, or rejecting working papers where a control passes without supporting evidence). Rejections inject structured feedback into the crew state and trigger an automated retry loop.
-
-### Tradeoffs & Consequences
-- **Positive:** High fidelity outputs; domain-specific prompts remain small and focused; deterministic QA catches hallucinated conclusions.
-- **Negative:** Increased latency and token consumption compared to linear single-agent execution.
+Standards such as IIA 2340, IIA 2330 and PCAOB AS 1215 are cited as design inspiration only. This project makes no compliance claim against any of them.
 
 ---
 
-## ADR-002: Immutable SHA-256 Evidence Vault & Verbatim Quote Verification
+## ADR-001: Sequential crews with a QA reviewer in each
 
-### Status
-Accepted
+**Status:** Accepted
 
-### Context
-In financial and IT audits (inspired by PCAOB AS 1215 and IIA Standard 2330 principles), documentation integrity is paramount. In AI-assisted auditing, a major risk is the LLM fabricating evidence or misattributing quotes from raw logs.
+**Decision.** The workflow runs as three sequential CrewAI crews: Planning (5 agents), Fieldwork (3 agents) and Reporting (4 agents). Each crew ends with a QA reviewer agent built with `get_crew_llm(temperature=0.0)` (`src/swarm/crews/*_crew.py`), while the working agents use `temperature=0.1`. If QA rejects the RACM (Planning) or the working papers (Fieldwork), `audit_flow.py` re-runs that crew once with the rejection reason as feedback, then stops retrying.
 
-### Decision
-Implement the `EvidenceAssuranceProtocol`:
-1. Every piece of raw evidence collected (API responses, configurations, logs) is assigned a UUID, hashed via **SHA-256**, and stored in the local evidence vault.
-2. The UI and verification layer run `verify_exact_quote()`, which validates that quotes cited by the field auditor match verbatim snippets in the hashed evidence file.
-3. Citations display a visual verification badge (✅ Verified / ❌ Unverified).
+**Consequences.**
+- More LLM calls, latency and tokens than a single-agent run.
+- Temperature 0 lowers variance on hosted models but does not make QA deterministic.
+- The QA reviewer is another LLM. It does not prove that an output is correct.
 
-### Tradeoffs & Consequences
-- **Positive:** Zero tolerance for fabricated evidence; transparent provenance for every finding.
-- **Negative:** Requires strict exact-match quoting by agents; minor variations in whitespace can flag as unverified unless normalized.
+**History.** The first versions used LangGraph. The engine was moved to CrewAI in commit `7312aab` (2026-04-02). The commit message does not give a reason, so none is recorded here.
 
 ---
 
-## ADR-003: Native Read-Only AWS API Calls (boto3) vs. Shell / CLI Execution
+## ADR-002: Evidence vault with SHA-256 hashes and verbatim-quote checks
 
-### Status
-Accepted
+**Status:** Accepted
 
-### Context
-Automating cloud audits requires querying cloud configurations. Running arbitrary shell scripts or CLI commands exposes the host system to command injection and potential unauthorized modifications.
+**Decision.** `EvidenceAssuranceProtocol.register_evidence` (`src/swarm/evidence.py`) redacts 12-digit AWS account IDs, assigns a UUID, computes a SHA-256 hash of the redacted payload and writes the record as one JSON file. Optional Fernet encryption at rest is available through `VAULT_ENCRYPTION_KEY`. `verify_exact_quote()` checks that a quote cited by the field auditor appears verbatim in the stored payload, and the UI shows a verified or unverified badge for it.
 
-### Decision
-Build native Python tools using `boto3` for specific, granular read-only API calls (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`). 
-- Enforce strict read-only tool definitions with no mutation or deletion capabilities.
-- Automatically scrub 12-digit AWS account IDs before saving evidence or presenting data to agents.
+**Consequences.**
+- A quote that does not appear in the collected evidence is flagged.
+- The hash is stored in the same JSON file as the payload, and the file is an ordinary writable file. The hash detects accidental corruption. It does not prevent or prove the absence of tampering.
+- A verbatim quote shows the words exist in the evidence. It does not show that the conclusion drawn from them is correct.
+- Matching is an exact substring match. Paraphrases are marked unverified.
 
-### Tradeoffs & Consequences
-- **Positive:** Safe execution; no shell execution vulnerabilities; predictable structured data schema.
-- **Negative:** Supporting new cloud services requires implementing dedicated Python tool functions rather than running arbitrary CLI scripts.
+**Inspiration.** Documentation-integrity principles from PCAOB AS 1215 and IIA Standard 2330. Neither standard requires hashing.
 
 ---
 
-## ADR-004: Human-in-the-Loop (HITL) Supervision Gates
+## ADR-003: Native, read-only boto3 calls for evidence collection
 
-### Status
-Accepted
+**Status:** Accepted
 
-### Context
-IIA Standard 2340 states that internal audit engagements must be properly supervised. Completely autonomous end-to-end execution without human checkpoints creates liability and prevents domain experts from course-correcting audit scope.
+**Decision.** Live evidence comes from a small set of boto3 calls (`src/swarm/tools/aws_tools.py`): `iam:GetAccountPasswordPolicy`, `iam:ListUsers`, `iam:ListMFADevices`, `s3:ListBuckets`, `s3:GetPublicAccessBlock` and `s3:GetBucketAcl`. Every call is a read. The tools do not shell out to the AWS CLI.
 
-### Decision
-Introduce stateful Human Approval Gates between phases:
-- **Gate 1:** After Planning QA passes, the human auditor reviews, edits, or approves the RACM before Fieldwork starts.
-- **Gate 2:** After Fieldwork QA passes, the human auditor reviews working papers and severity ratings before final Report synthesis.
-
-### Tradeoffs & Consequences
-- **Positive:** Professional oversight; prevents unintended cloud API calls; allows human adjustment of risk ratings.
-- **Negative:** Workflow pauses until human input is received (mitigated by asynchronous session persistence).
+**Consequences.**
+- The required IAM permissions are short and listed in the README.
+- Supporting another AWS service means writing another tool function.
+- Account-ID redaction and the evidence vault apply on the CrewAI tool path. The standalone MCP server (`src/swarm/mcp_server.py`) makes the same reads but does not redact or register evidence, so do not use it where that matters.
 
 ---
 
-## ADR-005: NIST OSCAL Machine-Readable Export Schema
+## ADR-004: Human approval gates between phases
 
-### Status
-Accepted
+**Status:** Accepted
 
-### Context
-Traditional audit deliverables are static PDF/Word documents that require manual re-entry into enterprise GRC systems (e.g., ServiceNow, Archer, OneTrust).
+**Decision.** `AuditStateMachine` in `src/swarm/audit_flow.py` refuses to start Phase 2 (Fieldwork) until Gate 1 is approved and refuses to start Phase 3 (Reporting) until Gate 2 is approved. Each approval is recorded with the approver's identifier in an audit trail.
 
-### Decision
-Integrate a dedicated Compliance Documentation Engineer agent in Phase 3 that translates narrative findings into machine-readable **NIST OSCAL** (Open Security Controls Assessment Language) Security Assessment Results (`OSCAL_SAR_Schema`).
+**Consequences.**
+- Fieldwork, and therefore the AWS calls, does not run until a person approves the plan.
+- The workflow waits at each gate until someone acts.
 
-### Tradeoffs & Consequences
-- **Positive:** Directly consumable by modern compliance-as-code platforms; establishes interoperability with enterprise GRC architectures.
-- **Negative:** Adds schema transformation overhead at the end of Phase 3.
+**Inspiration.** IIA Standard 2340 (supervision of engagements). This is design inspiration, not a compliance claim.
+
+---
+
+## ADR-005: OSCAL-inspired report structure
+
+**Status:** Accepted
+
+**Decision.** In Phase 3 an agent turns the narrative findings into a Pydantic model modelled on NIST OSCAL Security Assessment Results (`src/swarm/schema.py`, including an `import-ap` link and an OSCAL version field).
+
+**Consequences.**
+- Findings exist as structured data next to the narrative report.
+- The model is OSCAL-inspired. It uses Python-style field names and is not validated against the official OSCAL schema in this repository, so it should not be assumed to load into an OSCAL tool without conversion.
+
+---
+
+## ADR-006: LLM provider selection
+
+**Status:** Accepted
+
+**Decision.** `src/swarm/llm_factory.py` picks the first provider whose configuration is present, in this order: Ollama (local), NVIDIA NIM, Gemini, OpenAI, Groq. The comments in that file describe each entry: Ollama as "no limits, zero cost", Gemini as "most generous free-tier TPM", and Groq as "fastest, but harsh TPM limits".
+
+**Consequences.**
+- With several keys set, Groq is used last, not first.
+- Each provider's models behave differently, so results vary with the provider selected.
