@@ -26,7 +26,6 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DATA_DIR=/app/data \
     PYTHONPATH=/app/src \
     PATH="/app/.venv/bin:$PATH"
 
