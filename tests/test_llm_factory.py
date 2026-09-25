@@ -14,7 +14,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 @pytest.fixture(autouse=True)
 def clear_api_keys(monkeypatch):
-    for key in ("NVIDIA_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "GROQ_API_KEY"):
+    for key in (
+        "OLLAMA_MODEL",
+        "NVIDIA_API_KEY",
+        "NVIDIA_NIM_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "GROQ_API_KEY",
+    ):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -74,9 +81,32 @@ class TestLlmFactoryPriority:
         result = _call_factory({})
         assert result["model"].startswith("groq/")
 
-    def test_no_keys_returns_a_model(self):
+    def test_no_keys_raises_configuration_error(self):
+        import swarm.llm_factory as factory
+
+        with pytest.raises(factory.LLMConfigurationError, match="No LLM provider"):
+            _call_factory({})
+
+    def test_nvidia_does_not_mutate_process_env(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
         result = _call_factory({})
-        assert "model" in result
+        # The key goes to the LLM object, never into other providers' env vars.
+        assert result["api_key"] == "nvapi-key"
+        assert result["base_url"].startswith("https://")
+        assert "OPENAI_API_KEY" not in os.environ
+        assert "NVIDIA_NIM_API_KEY" not in os.environ
+
+    def test_nvidia_does_not_clobber_existing_openai_key(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+        _call_factory({})
+        assert os.environ["OPENAI_API_KEY"] == "openai-key"
+
+    def test_ollama_preferred_over_all(self, monkeypatch):
+        monkeypatch.setenv("OLLAMA_MODEL", "llama3")
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
+        result = _call_factory({})
+        assert result["model"] == "ollama/llama3"
 
     def test_temperature_passed_through(self, monkeypatch):
         monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
