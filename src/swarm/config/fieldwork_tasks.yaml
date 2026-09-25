@@ -7,5 +7,5 @@ execution_evaluation_task:
   expected_output: "A structured list of findings mapped to the WorkingPaperSchema."
 
 eval_qa_gate_task:
-  description: "Review the generated Working Papers. Ensure the severity matches PCAOB standards for the given quoted evidence. Do not minimize material weaknesses."
+  description: "Review the generated Working Papers. Ensure each severity rating is supported by the quoted evidence and consistent with the deficiency severity scale used in the working papers. Do not minimize material weaknesses."
   expected_output: "A QA_PushbackSchema object validating the Working Papers."
