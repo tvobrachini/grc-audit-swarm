@@ -40,6 +40,25 @@ _GATE_LABELS = {
 }
 _ARTIFACT_FIELDS = {1: "racm_plan", 2: "working_papers", 3: "final_report"}
 
+# Per phase: the crew input that carries QA feedback into the drafting prompt,
+# and the text used to fill it (auto-retry and human-initiated retry alike).
+_QA_FEEDBACK = {
+    1: (
+        "qa_feedback",
+        " IMPORTANT: A previous draft was rejected for the following "
+        "reason — fix all issues before re-drafting: {reason}",
+    ),
+    2: (
+        "qa_feedback",
+        " IMPORTANT: A previous evaluation was rejected — fix all "
+        "severity and evidence issues: {reason}",
+    ),
+    3: (
+        "tone_qa_feedback",
+        " IMPORTANT: A previous draft was rejected for tone — fix all issues: {reason}",
+    ),
+}
+
 
 class PhaseArtifactMissingError(RuntimeError):
     """Raised when an action needs a phase artifact that does not exist."""
@@ -280,6 +299,32 @@ class AuditFlow:
 
     # ── Shared phase runner ──────────────────────────────────────────────────
 
+    def _retry_feedback(self, phase: int) -> Optional[str]:
+        """QA rejection reason to carry into a human-initiated retry, if any.
+
+        Returns the reason only when the most recent trail entry is a retry of
+        *this* phase out of QA_REJECTED_PHASE_n (a retry after a crew error
+        carries an error message, not QA feedback). The trail is persisted, so
+        this also survives an API restart between the retry and the run.
+        """
+        if not self.state.approval_trail:
+            return None
+        last = self.state.approval_trail[-1]
+        if (
+            last.get("action") != "retry"
+            or last.get("gate") != f"Retry ({_PHASE_LABELS[phase]})"
+            or last.get("previous_status") != f"QA_REJECTED_PHASE_{phase}"
+        ):
+            return None
+        reason = (last.get("previous_reason") or "").strip()
+        return reason or None
+
+    def _seed_feedback(self, phase: int, inputs: dict[str, Any]) -> None:
+        reason = self._retry_feedback(phase)
+        if reason:
+            key, template = _QA_FEEDBACK[phase]
+            inputs[key] = template.format(reason=reason)
+
     def _fail_phase(self, phase: int, reason: str) -> None:
         self.machine.error_phase(phase)
         self._commit_status()
@@ -293,8 +338,6 @@ class AuditFlow:
         *,
         qa_task: str,
         artifact_task: str,
-        feedback_key: str,
-        feedback_template: str,
     ) -> bool:
         """Run a phase crew with one automatic QA-driven retry.
 
@@ -305,6 +348,7 @@ class AuditFlow:
         """
         label = _PHASE_LABELS[phase]
         field = _ARTIFACT_FIELDS[phase]
+        feedback_key, feedback_template = _QA_FEEDBACK[phase]
         rejection: Optional[str] = None
         artifact: Any = None
 
@@ -418,7 +462,7 @@ class AuditFlow:
 
     def generate_planning(self, event_callback=None):
         """Phase 1 — Run the Planning Crew to produce a RACM."""
-        # Handle direct call (e.g. Streamlit) where begin_phase_1 wasn't called first
+        # Handle a direct call where begin_phase_1 wasn't called first
         if self.machine.status == AuditStatus.WAITING_FOR_SCOPE:
             self.machine.start_phase_1()
             self._commit_status()
@@ -432,6 +476,9 @@ class AuditFlow:
         self.state.qa_rejection_reason = None
 
         inputs = self._planning_inputs()
+        # A human retry of a QA-rejected run starts with that rejection as
+        # feedback, so the crew does not repeat the same mistake.
+        self._seed_feedback(1, inputs)
 
         ok = self._run_crew_with_qa(
             1,
@@ -441,11 +488,6 @@ class AuditFlow:
             inputs,
             qa_task="qa_gate_task",
             artifact_task="racm_drafting_task",
-            feedback_key="qa_feedback",
-            feedback_template=(
-                " IMPORTANT: A previous draft was rejected for the following "
-                "reason — fix all issues before re-drafting: {reason}"
-            ),
         )
         if not ok:
             return
@@ -478,6 +520,9 @@ class AuditFlow:
             self._fail_phase(2, "Cannot run Fieldwork: no Phase 1 RACM in state.")
             return
         inputs = self._fieldwork_inputs()
+        # A human retry of a QA-rejected run starts with that rejection as
+        # feedback, so the crew does not repeat the same mistake.
+        self._seed_feedback(2, inputs)
 
         ok = self._run_crew_with_qa(
             2,
@@ -487,11 +532,6 @@ class AuditFlow:
             inputs,
             qa_task="eval_qa_gate_task",
             artifact_task="execution_evaluation_task",
-            feedback_key="qa_feedback",
-            feedback_template=(
-                " IMPORTANT: A previous evaluation was rejected — fix all "
-                "severity and evidence issues: {reason}"
-            ),
         )
         if not ok:
             return
@@ -528,6 +568,9 @@ class AuditFlow:
             )
             return
         inputs = self._reporting_inputs()
+        # A human retry of a QA-rejected run starts with that rejection as
+        # feedback, so the crew does not repeat the same mistake.
+        self._seed_feedback(3, inputs)
 
         ok = self._run_crew_with_qa(
             3,
@@ -537,11 +580,6 @@ class AuditFlow:
             inputs,
             qa_task="tone_qa_task",
             artifact_task="final_report_assembly_task",
-            feedback_key="tone_qa_feedback",
-            feedback_template=(
-                " IMPORTANT: A previous draft was rejected for tone — fix all "
-                "issues: {reason}"
-            ),
         )
         if not ok:
             return
