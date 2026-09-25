@@ -16,7 +16,8 @@ from api.exports import (
     report_markdown,
     working_papers_xlsx,
 )
-from api.routers.sessions import _get_or_load_flow, _require_session
+from api.job_store import get_flow
+from api.routers.sessions import _repo, _require_session
 from swarm.audit_flow import AuditFlow
 
 router = APIRouter()
@@ -24,7 +25,12 @@ router = APIRouter()
 
 def _load(session_id: str) -> tuple[AuditFlow, ExportContext]:
     data = _require_session(session_id)
-    flow = _get_or_load_flow(session_id)
+    # Read-only: use the live flow if cached, else load from disk *without*
+    # caching it (a download must not re-cache a session being deleted).
+    flow = get_flow(session_id)
+    if flow is None:
+        loaded = _repo.load(session_id)
+        flow = loaded.flow if loaded else None
     if flow is None:
         raise HTTPException(status_code=404, detail="No artifacts for this session")
     ctx = ExportContext(
