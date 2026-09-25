@@ -28,7 +28,7 @@ def render_sidebar():
         if os.environ.get("GROQ_API_KEY"):
             st.success("✅ Groq llama-3.3-70b-versatile")
         elif os.environ.get("GEMINI_API_KEY"):
-            st.success("✅ Gemini 2.0 Flash")
+            st.success(f"✅ Gemini {os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')}")
         elif os.environ.get("OPENAI_API_KEY"):
             st.success("✅ OpenAI GPT-4o-mini")
         else:
