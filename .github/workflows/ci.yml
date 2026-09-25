@@ -15,21 +15,22 @@ concurrency:
 
 env:
   UV_VERSION: "0.11.6"
+  NODE_VERSION: "20"
 
 jobs:
   pre-commit:
     name: pre-commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12.3"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -44,15 +45,15 @@ jobs:
     name: typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12.3"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -71,15 +72,15 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12.3", "3.13"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -96,15 +97,15 @@ jobs:
     name: security
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12.3"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -115,14 +116,70 @@ jobs:
       - name: Security SAST with Bandit
         run: uv run bandit -c pyproject.toml -r .
 
+      - name: Export locked project dependencies
+        # `uvx pip-audit` with no args only scans pip-audit's own throwaway
+        # tool environment, not this project's dependencies. Export the
+        # locked requirements (excluding the project itself, since it isn't
+        # published to PyPI) and audit those instead.
+        run: uv export --frozen --no-hashes --no-emit-project --format requirements-txt -o /tmp/requirements.txt
+
       - name: Dependency Vulnerability Scan (pip-audit)
-        run: uvx pip-audit --ignore-vuln CVE-2026-3219  # pip 26.x vuln, no fix available yet
+        run: |
+          uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps \
+            --ignore-vuln PYSEC-2026-311 \
+            --ignore-vuln PYSEC-2026-3813 \
+            --ignore-vuln PYSEC-2026-3814 \
+            --ignore-vuln PYSEC-2026-3815 \
+            --ignore-vuln GHSA-xf7x-x43h-rpqh \
+            --ignore-vuln PYSEC-2026-3819
+          # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, no fixed version
+          #   published upstream yet.
+          # GHSA-xf7x-x43h-rpqh: json-repair 0.25.2, pinned transitively by
+          #   crewai-tools 0.76.0; fixed in json-repair 0.60.1 but that
+          #   requires a major crewai-tools bump (crews are owned by another
+          #   in-flight change) — revisit once crewai-tools is upgraded.
+          # PYSEC-2026-3819: crewai-tools 0.76.0 itself; fixed in 1.15.1,
+          #   same major-upgrade constraint as above.
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit dependencies (high+ severity)
+        run: npm audit --audit-level=high
 
   build:
     name: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Verify Docker Container Build
+      - name: Verify API Container Build
         run: docker build -t swarm-app-test .
+
+      - name: Verify Frontend Container Build
+        run: docker build -t swarm-frontend-test ./frontend
+
+      - name: Compose Smoke Test
+        run: docker compose config
