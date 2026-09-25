@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.auth import require_api_auth
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
-from api.routers import config, evidence, phases, sessions
+from api.routers import config, evidence, exports, phases, sessions
 from swarm.demo import demo_mode_enabled
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,12 @@ app.include_router(
     sessions.router,
     prefix="/api/sessions",
     tags=["sessions"],
+    dependencies=_api_auth,
+)
+app.include_router(
+    exports.router,
+    prefix="/api/sessions",
+    tags=["exports"],
     dependencies=_api_auth,
 )
 app.include_router(
