@@ -21,7 +21,7 @@ However, a real-world audit is not linear. It is a **recursive conversation**. A
 
 ## 🏗️ The Solution: The "Recursive Swarm" Architecture
 
-I built **GRC Audit Swarm** to move beyond static mapping and into **Autonomous Audit Execution**.
+I built **GRC Audit Swarm** to move beyond static mapping and into **agent-assisted audit execution**.
 
 Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent crews that collaborate, research, and challenge each other to produce a verified, high-fidelity audit report.
 
@@ -37,19 +37,19 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
 
 3. **The "QA Pushback" Loop (Adversarial AI):**
    - *Decision:* Each crew includes a **QA Reviewer** agent with `temperature=0` that must explicitly approve the output.
-   - *Why:* This agent is programmed to be "pedantic." It analyzes the proposed RACM or Working Paper and rejects it if procedures are vague or evidence is missing. This triggers an autonomous **auto-retry loop** where the rejection reason is injected as context for refinement.
+   - *Why:* This agent is programmed to be "pedantic." It analyzes the proposed RACM or Working Paper and rejects it if procedures are vague or evidence is missing. This triggers an **auto-retry loop** where the rejection reason is injected as context for refinement.
 
 4. **Hashed Evidence Vault (Security-by-Design):**
    - *Decision:* Built an Evidence Assurance Protocol that hashes all collected data using **SHA-256**.
-   - *Why:* PCAOB AS 1215 and IIA Standard 2330 stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim, untampered snippet from the stored evidence.
+   - *Why:* PCAOB AS 1215 and IIA Standard 2330 stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim snippet found in the stored evidence.
 
 5. **Live Evidence Bridging (AWS Tools):**
    - *Decision:* Integrated native CrewAI tools to call real **AWS APIs** (IAM, S3, etc.) during the Fieldwork phase.
    - *Why:* Real audits need real data. By providing the swarm with live read-only access to cloud environments, we move from static checklists to live technical verification of MFA, password policies, and bucket ACLs.
 
-6. **Ironclad Safeguards (Privacy & Cost):**
+6. **Safeguards (Privacy & Cost):**
    - *Decision:* Implemented a recursive **Account ID Redaction** engine and forced a "Read-Only Audit Context."
-   - *Why:* Auditing live environments with LLMs introduces privacy risk. My "Ironclad" layer scrubs 12-digit AWS Account IDs before they leave the environment and strictly forbids "Create/Modify" actions through hardened system prompts.
+   - *Why:* Auditing live environments with LLMs introduces privacy risk. A redaction layer scrubs 12-digit AWS Account IDs before they leave the environment. Read-only access comes from a read-only IAM policy and from tool functions that only call read APIs; system prompt instructions against "Create/Modify" actions are a secondary measure, not an enforcement mechanism.
 
 ---
 
@@ -60,8 +60,7 @@ By shifting from a single-agent "Crosswalker" to a multi-phase "Swarm," the dept
 - **Context-Aware Auditing:** The report doesn't just say "Fix AC-01." It provides a **1-Pager Risk Context** citing specific threat vectors, grounding the "Fix" in business reality.
 - **Evidence-to-Finding Automation:** By connecting to **AWS**, the swarm identifies real misconfigurations and automatically generates Working Papers with per-control severity ratings.
 - **Human-in-the-Loop Efficiency:** The human auditor acts as a **Supervisor**, reviewing high-quality drafts and evidence instead of performing manual data entry.
-- **Scalable Specialization:** One GRC Engineer can now oversee multiple complex technical audits simultaneously, as the swarm handles the heavy lifting of research, mapping, and preliminary testing.
-- **True Compliance-as-Code:** The swarm moves beyond narrative Word documents. Phase 3 includes a dedicated **Compliance Documentation Engineer** that translates all findings and evidence mappings into strict **NIST OSCAL JSON** formats (`OSCAL_SAR_Schema`) for automated GRC ingestion.
+- **True Compliance-as-Code:** The swarm moves beyond narrative Word documents. Phase 3 includes a dedicated **Compliance Documentation Engineer** that translates all findings and evidence mappings into an OSCAL-inspired structure (`OSCAL_SAR_Schema`, not validated against the official OSCAL schema).
 
 ---
 
@@ -73,8 +72,8 @@ Explore the results of the swarm's collaborative intelligence in this repository
 2. **The Intelligence:** `src/swarm/crews/planning_crew.py` (How the RACM is built).
 3. **The Execution:** `src/swarm/crews/fieldwork_crew.py` (Live AWS evidence testing).
 4. **The Proof:** `src/swarm/evidence.py` (The SHA-256 Evidence Vault).
-5. **The Guardrails:** `src/swarm/crews/config/agents.yaml` (Hardened system prompts).
+5. **The Guardrails:** `src/swarm/config/planning_agents.yaml`, `fieldwork_agents.yaml` and `reporting_agents.yaml` (agent system prompts; a secondary measure behind the read-only IAM policy and read-only tools).
 6. **The UI:** `app.py` (The Findings Command Center where results are visualized).
 
 ---
-*This project proves that "Compliance-as-Code" is no longer about static checks—it's about building autonomous systems that think like an Auditor.*
+*This project proves that "Compliance-as-Code" is no longer about static checks—it's about building systems that support auditors with drafts and evidence, reviewed by a person.*
