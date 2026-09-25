@@ -149,7 +149,7 @@ uv run streamlit run app.py --server.port 8502
 |----------|-----|-------|-------|
 | 1 | `OLLAMA_MODEL` | (Local) e.g., `llama3` | Fully private, zero-cost local inference |
 | 2 | `NVIDIA_API_KEY` | `llama-3.3-70b-instruct`| NVIDIA NIM infrastructure |
-| 3 | `GEMINI_API_KEY` | `gemini-2.0-flash` | Recommended cloud tier — highly capable |
+| 3 | `GEMINI_API_KEY` | `gemini-2.5-flash` (override with `GEMINI_MODEL`) | Cloud tier; check Google's deprecation page, as Gemini model names are retired regularly |
 | 4 | `OPENAI_API_KEY` | `gpt-4o-mini` | Standard cloud fallback |
 | 5 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Fast inference, strict rate limits |
 
@@ -157,6 +157,7 @@ uv run streamlit run app.py --server.port 8502
 
 | Variable | Purpose |
 |----------|---------|
+| `GEMINI_MODEL` | Override the Gemini model name (default `gemini-2.5-flash`) |
 | `EVIDENCE_VAULT_PATH` | Override vault storage directory (useful for Docker volume mounts) |
 | `SESSIONS_PATH` | Override session file path |
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
