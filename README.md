@@ -134,11 +134,16 @@ cp .env.example .env
 # 3. Install dependencies
 uv sync
 
-# 4. Launch (Full Stack)
-# Starts FastAPI backend, React frontend, and Streamlit app
+# 4. Launch (default: FastAPI backend + React frontend)
 docker compose up --build
+# React UI at http://127.0.0.1:3000, API at http://127.0.0.1:8000
 
-# Alternatively, launch just the Streamlit interface:
+# Streamlit is being retired in favor of the React UI. To also start it,
+# opt in with the "streamlit" profile:
+docker compose --profile streamlit up --build
+# Streamlit UI at http://127.0.0.1:8501
+
+# Alternatively, run just Streamlit locally without Docker:
 uv run streamlit run app.py --server.port 8502
 # App accessible at http://localhost:8502
 ```
@@ -161,8 +166,8 @@ uv run streamlit run app.py --server.port 8502
 | `EVIDENCE_VAULT_PATH` | Override vault storage directory (useful for Docker volume mounts) |
 | `SESSIONS_PATH` | Override session file path |
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key for Fernet at-rest vault encryption |
-| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes |
-| `VITE_API_AUTH_TOKEN` | Frontend build-time token used to call the protected API in single-user deployments |
+| `API_AUTH_TOKEN` | Shared bearer token required by the FastAPI `/api/*` routes. In `docker compose`, nginx injects this into the reverse proxy server-side, so the browser never sees it |
+| `VITE_API_AUTH_TOKEN` | **Dev-only.** Bakes the token into the built JS bundle for `npm run dev` against a local API. Never set this for a production/compose build |
 | `DEMO_MODE` | Set to `1` to bypass LLM crews for UI development |
 | `ENVIRONMENT` | Set to `production` or `staging` to enforce DEMO_MODE guard |
 

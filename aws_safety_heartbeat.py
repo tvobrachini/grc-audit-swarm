@@ -1,5 +1,23 @@
+import os
+import sys
+
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
+
+# Reuse the same account-ID redaction the evidence vault uses, so this script
+# never prints a bare/hyphenated 12-digit account ID to stdout/logs. Falls
+# back to a local copy of the regex if src/swarm isn't importable (e.g. run
+# outside the project venv).
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+    from swarm.evidence import _redact_account_ids
+except ImportError:  # pragma: no cover
+    import re
+
+    _ACCOUNT_ID_RE = re.compile(r"(?<!\d)\d{12}(?!\d)|(?<!\d)\d{4}-\d{4}-\d{4}(?!\d)")
+
+    def _redact_account_ids(text: str) -> str:
+        return _ACCOUNT_ID_RE.sub("[REDACTED]", text)
 
 
 def check_budget_safety():
@@ -12,7 +30,7 @@ def check_budget_safety():
     try:
         sts = boto3.client("sts")
         id_data = sts.get_caller_identity()
-        print(f"Identity Verified: {id_data.get('Arn')}")
+        print(f"Identity Verified: {_redact_account_ids(str(id_data.get('Arn')))}")
 
         print(
             "\n[Resource Scan] Checking for potentially expensive active resources..."
