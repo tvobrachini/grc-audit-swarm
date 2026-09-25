@@ -203,3 +203,63 @@ class TestVerifyExactQuote:
         assert EvidenceAssuranceProtocol.verify_exact_quote(
             result["vault_id"], '"UserName": "alice"'
         )
+
+
+# ─── Wave 0 hardening: hyphenated account IDs + weak-quote rejection ─────────
+# Appended in a self-contained block.
+
+
+class TestHyphenatedAccountIdRedaction:
+    def test_hyphenated_account_id_is_redacted(self):
+        text = "Account: 1234-5678-9012"
+        result = _redact_account_ids(text)
+        assert "1234-5678-9012" not in result
+        assert "[REDACTED]" in result
+
+    def test_hyphenated_account_id_in_sentence_is_redacted(self):
+        text = "The AWS account 1234-5678-9012 owns this resource."
+        result = _redact_account_ids(text)
+        assert "1234-5678-9012" not in result
+
+    def test_bare_and_hyphenated_ids_both_redacted(self):
+        text = "old: 123456789012 new: 1234-5678-9012"
+        result = _redact_account_ids(text)
+        assert result.count("[REDACTED]") == 2
+
+
+class TestVerifyExactQuoteWeakInput:
+    def test_empty_quote_returns_false(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "some evidence payload here", "op"
+        )
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(result["vault_id"], "")
+
+    def test_whitespace_only_quote_returns_false(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "some evidence payload here", "op"
+        )
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "    "
+        )
+
+    def test_too_short_quote_returns_false(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "some evidence payload here", "op"
+        )
+        # "evidence" is 8 chars (the minimum); anything shorter is rejected
+        # even though it is technically a substring of the payload.
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "eviden"
+        )
+
+    def test_minimum_length_quote_still_works(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "some evidence payload here", "op"
+        )
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "evidence"
+        )

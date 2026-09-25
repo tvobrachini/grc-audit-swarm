@@ -21,14 +21,18 @@ def get_iam_password_policy(context: str = "") -> str:
     """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance."""
     try:
         client = _boto_client("iam")
-        response = client.get_account_password_policy()
-        raw_output = json.dumps(
-            response.get("PasswordPolicy", {}), indent=2, default=str
-        )
-    except client.exceptions.NoSuchEntityException:
-        raw_output = "Finding: No IAM password policy is defined for this account."
     except (ClientError, NoCredentialsError) as e:
         raw_output = f"Error fetching password policy: {e}"
+    else:
+        try:
+            response = client.get_account_password_policy()
+            raw_output = json.dumps(
+                response.get("PasswordPolicy", {}), indent=2, default=str
+            )
+        except client.exceptions.NoSuchEntityException:
+            raw_output = "Finding: No IAM password policy is defined for this account."
+        except (ClientError, NoCredentialsError) as e:
+            raw_output = f"Error fetching password policy: {e}"
 
     vault_record = EvidenceAssuranceProtocol.register_evidence(
         raw_output, "aws.iam.get_account_password_policy"
