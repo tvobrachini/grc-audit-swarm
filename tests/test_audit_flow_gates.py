@@ -1,0 +1,468 @@
+"""
+Regression tests for AuditFlow QA gates, state-machine discipline, retry /
+supervisor-override actions and skill-context persistence.
+All crews are mocked — no LLM keys required.
+"""
+
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from swarm import session_manager
+from swarm.audit_flow import (
+    QA_UNPARSEABLE_REASON,
+    AuditFlow,
+    PhaseArtifactMissingError,
+)
+from swarm.schema import (
+    AuditFindingSchema,
+    Control,
+    ControlTestStep,
+    ControlTesting,
+    FinalReportSchema,
+    QA_PushbackSchema,
+    Risk,
+    RiskControlMatrixSchema,
+    WorkingPaperSchema,
+)
+from swarm.state.machine import (
+    AuditStateMachine,
+    AuditStatus,
+    InvalidTransitionError,
+)
+from swarm.state.repository import FlowRepository
+
+
+# ── Fixtures / builders ──────────────────────────────────────────────────────
+
+
+def make_racm() -> RiskControlMatrixSchema:
+    step = ControlTestStep(step_description="Inspect policy", expected_result="OK")
+    return RiskControlMatrixSchema(
+        theme="AWS S3",
+        risks=[
+            Risk(
+                risk_id="RISK-01",
+                description="Public buckets expose customer data",
+                regulatory_mapping=["CIS AWS 2.1.5"],
+                controls=[
+                    Control(
+                        control_id="CTRL-01",
+                        description="Block public access enabled account-wide",
+                        testing_procedures=ControlTesting(
+                            test_of_design=[step],
+                            test_of_effectiveness=[step],
+                            substantive_testing=[step],
+                        ),
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def make_papers() -> WorkingPaperSchema:
+    return WorkingPaperSchema(
+        theme="AWS S3",
+        findings=[
+            AuditFindingSchema(
+                control_id="CTRL-01",
+                vault_id_reference="vault-abc123",
+                exact_quote_from_evidence="BlockPublicAcls: true",
+                test_conclusion="Control operating effectively.",
+                severity="Pass",
+            )
+        ],
+    )
+
+
+def make_report() -> FinalReportSchema:
+    return FinalReportSchema(
+        executive_summary="No exceptions.",
+        detailed_report="CTRL-01 passed.",
+        compliance_tone_approved=True,
+    )
+
+
+PHASES = {
+    1: {
+        "crew": "PlanningCrew",
+        "tasks": [
+            "context_task",
+            "crosswalk_task",
+            "weighting_task",
+            "racm_drafting_task",
+            "qa_gate_task",
+        ],
+        "qa": "qa_gate_task",
+        "artifact": "racm_drafting_task",
+        "field": "racm_plan",
+        "make": make_racm,
+        "start": "WAITING_FOR_SCOPE",
+        "run": "generate_planning",
+    },
+    2: {
+        "crew": "FieldworkCrew",
+        "tasks": [
+            "evidence_collection_task",
+            "execution_evaluation_task",
+            "eval_qa_gate_task",
+        ],
+        "qa": "eval_qa_gate_task",
+        "artifact": "execution_evaluation_task",
+        "field": "working_papers",
+        "make": make_papers,
+        "start": "RUNNING_PHASE_2",
+        "run": "generate_fieldwork",
+    },
+    3: {
+        "crew": "ReportingCrew",
+        "tasks": [
+            "drafting_task",
+            "executive_summary_task",
+            "tone_qa_task",
+            "generate_oscal_sar_task",
+            "final_report_assembly_task",
+        ],
+        "qa": "tone_qa_task",
+        "artifact": "final_report_assembly_task",
+        "field": "final_report",
+        "make": make_report,
+        "start": "RUNNING_PHASE_3",
+        "run": "generate_reporting",
+    },
+}
+
+
+def crew_result(phase: int, qa, artifact):
+    spec = PHASES[phase]
+    outputs = []
+    for name in spec["tasks"]:
+        t = MagicMock()
+        t.name = name
+        t.pydantic = None
+        if name == spec["qa"]:
+            t.pydantic = qa
+        elif name == spec["artifact"]:
+            t.pydantic = artifact
+        outputs.append(t)
+    result = MagicMock()
+    result.tasks_output = outputs
+    return result
+
+
+def make_flow(phase: int) -> AuditFlow:
+    flow = AuditFlow(initial_status=PHASES[phase]["start"])
+    flow.state.theme = "AWS S3"
+    flow.state.business_context = "Fintech storing customer data in S3"
+    flow.state.frameworks = ["CIS AWS"]
+    if phase >= 2:
+        flow.state.racm_plan = make_racm()
+    if phase >= 3:
+        flow.state.working_papers = make_papers()
+    return flow
+
+
+def run_phase(flow: AuditFlow, phase: int, results):
+    mock_crew = MagicMock()
+    mock_crew.kickoff.side_effect = list(results)
+    with patch(f"swarm.audit_flow.{PHASES[phase]['crew']}") as MockCrew:
+        MockCrew.return_value.crew.return_value = mock_crew
+        getattr(flow, PHASES[phase]["run"])()
+    return mock_crew, MockCrew
+
+
+APPROVED = QA_PushbackSchema(approved=True)
+
+
+# ── Fix 3: QA gates fail closed / missing artifact is an error ───────────────
+
+
+@pytest.mark.parametrize("phase", [1, 2, 3])
+class TestQaGatesFailClosed:
+    def test_unparseable_qa_retries_then_rejects(self, phase):
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        crew, _ = run_phase(
+            flow,
+            phase,
+            [crew_result(phase, None, artifact), crew_result(phase, None, artifact)],
+        )
+
+        assert crew.kickoff.call_count == 2
+        assert flow.state.status == f"QA_REJECTED_PHASE_{phase}"
+        assert flow.machine.status.value == flow.state.status
+        assert flow.state.qa_rejection_reason == QA_UNPARSEABLE_REASON
+        # Rejected draft is kept so a supervisor can review / override it.
+        assert getattr(flow.state, PHASES[phase]["field"]) == artifact
+
+    def test_unparseable_qa_then_approval_advances(self, phase):
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        crew, _ = run_phase(
+            flow,
+            phase,
+            [
+                crew_result(phase, None, artifact),
+                crew_result(phase, APPROVED, artifact),
+            ],
+        )
+        assert crew.kickoff.call_count == 2
+        assert flow.state.status == f"WAITING_HUMAN_GATE_{phase}"
+        # The retry carried the fail-closed reason as feedback.
+        retry_inputs = crew.kickoff.call_args_list[1].kwargs["inputs"]
+        assert any(
+            isinstance(v, str) and QA_UNPARSEABLE_REASON in v
+            for v in retry_inputs.values()
+        )
+
+    def test_qa_without_bool_approved_is_rejection(self, phase):
+        flow = make_flow(phase)
+        weird_qa = MagicMock(spec=[])  # no .approved attribute at all
+        artifact = PHASES[phase]["make"]()
+        run_phase(
+            flow,
+            phase,
+            [
+                crew_result(phase, weird_qa, artifact),
+                crew_result(phase, weird_qa, artifact),
+            ],
+        )
+        assert flow.state.status == f"QA_REJECTED_PHASE_{phase}"
+
+    def test_missing_artifact_is_phase_error(self, phase):
+        flow = make_flow(phase)
+        field = PHASES[phase]["field"]
+        before = getattr(flow.state, field)
+        crew, _ = run_phase(flow, phase, [crew_result(phase, APPROVED, None)])
+
+        assert crew.kickoff.call_count == 1
+        assert flow.state.status == f"ERROR_PHASE_{phase}"
+        assert flow.machine.status.value == f"ERROR_PHASE_{phase}"
+        assert "could not be parsed" in flow.state.qa_rejection_reason
+        assert getattr(flow.state, field) == before
+
+    def test_missing_task_output_is_phase_error(self, phase):
+        flow = make_flow(phase)
+        result = MagicMock()
+        result.tasks_output = []  # crew returned nothing we can map
+        run_phase(flow, phase, [result])
+        assert flow.state.status == f"ERROR_PHASE_{phase}"
+
+    def test_approved_first_time_stores_artifact(self, phase):
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        crew, _ = run_phase(flow, phase, [crew_result(phase, APPROVED, artifact)])
+        assert crew.kickoff.call_count == 1
+        assert flow.state.status == f"WAITING_HUMAN_GATE_{phase}"
+        assert getattr(flow.state, PHASES[phase]["field"]) == artifact
+        assert flow.state.qa_rejection_reason is None
+
+
+# ── Fix 4: all status changes go through the machine ─────────────────────────
+
+
+class TestMachineSourceStates:
+    def test_gate_approval_cannot_restart_rejected_phase(self):
+        m = AuditStateMachine(AuditStatus.QA_REJECTED_PHASE_2)
+        with pytest.raises(InvalidTransitionError):
+            m.approve_gate_1()
+        assert m.status == AuditStatus.QA_REJECTED_PHASE_2
+
+    def test_retry_cannot_skip_human_gate(self):
+        m = AuditStateMachine(AuditStatus.WAITING_HUMAN_GATE_1)
+        with pytest.raises(InvalidTransitionError):
+            m.retry_phase_2()
+        assert m.status == AuditStatus.WAITING_HUMAN_GATE_1
+
+    @pytest.mark.parametrize("phase", [1, 2, 3])
+    def test_retry_from_rejected_and_error(self, phase):
+        for source in (f"QA_REJECTED_PHASE_{phase}", f"ERROR_PHASE_{phase}"):
+            m = AuditStateMachine(AuditStatus(source))
+            m.retry_phase(phase)
+            assert m.status == AuditStatus(f"RUNNING_PHASE_{phase}")
+
+    def test_override_only_from_qa_rejected(self):
+        m = AuditStateMachine(AuditStatus.ERROR_PHASE_1)
+        with pytest.raises(InvalidTransitionError):
+            m.override_qa(1)
+        m = AuditStateMachine(AuditStatus.QA_REJECTED_PHASE_1)
+        m.override_qa(1)
+        assert m.status == AuditStatus.WAITING_HUMAN_GATE_1
+
+
+class TestGateMethodsRaiseOnWrongState:
+    @pytest.mark.parametrize(
+        "method,status",
+        [
+            ("begin_phase_2", "RUNNING_PHASE_1"),
+            ("begin_phase_2", "RUNNING_PHASE_2"),  # double approval
+            ("begin_phase_3", "WAITING_HUMAN_GATE_1"),
+            ("begin_phase_3", "RUNNING_PHASE_3"),
+            ("finalize_audit", "RUNNING_PHASE_3"),
+            ("finalize_audit", "COMPLETED"),
+        ],
+    )
+    def test_invalid_gate_raises_and_leaves_state_untouched(self, method, status):
+        flow = AuditFlow(initial_status=status)
+        with pytest.raises(InvalidTransitionError):
+            getattr(flow, method)("alice")
+        assert flow.state.status == status
+        assert flow.machine.status.value == status
+        assert flow.state.approval_trail == []
+
+    def test_blank_approver_rejected(self):
+        flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
+        with pytest.raises(ValueError):
+            flow.begin_phase_2("  ")
+        assert flow.state.status == "WAITING_HUMAN_GATE_1"
+
+    def test_gate_approval_stamps_action(self):
+        flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
+        flow.begin_phase_2("alice")
+        entry = flow.state.approval_trail[-1]
+        assert entry["gate"] == "Gate 1 (Planning)"
+        assert entry["human"] == "alice"
+        assert entry["action"] == "gate_approval"
+
+    def test_generate_planning_refuses_wrong_state(self):
+        flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
+        with pytest.raises(RuntimeError):
+            flow.generate_planning()
+
+
+class TestRetryPhase:
+    @pytest.mark.parametrize("phase", [1, 2, 3])
+    def test_retry_after_rejection_reruns_phase(self, phase):
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        run_phase(
+            flow,
+            phase,
+            [crew_result(phase, None, artifact), crew_result(phase, None, artifact)],
+        )
+        assert flow.state.status == f"QA_REJECTED_PHASE_{phase}"
+
+        flow.retry_phase(phase, "supervisor@co.com")
+        assert flow.state.status == f"RUNNING_PHASE_{phase}"
+        entry = flow.state.approval_trail[-1]
+        assert entry["action"] == "retry"
+        assert entry["human"] == "supervisor@co.com"
+        assert entry["previous_status"] == f"QA_REJECTED_PHASE_{phase}"
+
+        run_phase(flow, phase, [crew_result(phase, APPROVED, artifact)])
+        assert flow.state.status == f"WAITING_HUMAN_GATE_{phase}"
+
+    def test_retry_after_error(self):
+        flow = make_flow(2)
+        run_phase(flow, 2, [crew_result(2, APPROVED, None)])
+        assert flow.state.status == "ERROR_PHASE_2"
+        flow.retry_phase(2, "bob")
+        assert flow.state.status == "RUNNING_PHASE_2"
+
+    def test_retry_from_gate_raises(self):
+        flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
+        with pytest.raises(InvalidTransitionError):
+            flow.retry_phase(2, "bob")
+        assert flow.state.status == "WAITING_HUMAN_GATE_1"
+
+
+class TestSupervisorOverride:
+    def _rejected_flow(self, phase: int = 1) -> AuditFlow:
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        rejected = QA_PushbackSchema(approved=False, rejection_reason="ToE weak")
+        run_phase(
+            flow,
+            phase,
+            [
+                crew_result(phase, rejected, artifact),
+                crew_result(phase, rejected, artifact),
+            ],
+        )
+        assert flow.state.status == f"QA_REJECTED_PHASE_{phase}"
+        return flow
+
+    @pytest.mark.parametrize("phase", [1, 2, 3])
+    def test_override_moves_to_gate_and_records_trail(self, phase):
+        flow = self._rejected_flow(phase)
+        flow.override_qa_rejection(
+            phase, "cae@co.com", "Accepted: compensating control"
+        )
+
+        assert flow.state.status == f"WAITING_HUMAN_GATE_{phase}"
+        entry = flow.state.approval_trail[-1]
+        assert entry["action"] == "qa_override"
+        assert entry["human"] == "cae@co.com"
+        assert entry["reason"] == "Accepted: compensating control"
+        assert entry["qa_rejection_reason"] == "ToE weak"
+        assert flow.state.qa_rejection_reason is None
+
+    def test_override_then_gate_approval_proceeds(self):
+        flow = self._rejected_flow(1)
+        flow.override_qa_rejection(1, "cae@co.com", "Accepted")
+        flow.begin_phase_2("cae@co.com")
+        assert flow.state.status == "RUNNING_PHASE_2"
+
+    def test_override_requires_reason(self):
+        flow = self._rejected_flow(1)
+        with pytest.raises(ValueError):
+            flow.override_qa_rejection(1, "cae@co.com", " ")
+        assert flow.state.status == "QA_REJECTED_PHASE_1"
+
+    def test_override_requires_artifact(self):
+        flow = AuditFlow(initial_status="QA_REJECTED_PHASE_1")
+        with pytest.raises(PhaseArtifactMissingError):
+            flow.override_qa_rejection(1, "cae@co.com", "Accepted")
+        assert flow.state.status == "QA_REJECTED_PHASE_1"
+
+    def test_override_wrong_state_raises(self):
+        flow = AuditFlow(initial_status="ERROR_PHASE_1")
+        flow.state.racm_plan = make_racm()
+        with pytest.raises(InvalidTransitionError):
+            flow.override_qa_rejection(1, "cae@co.com", "Accepted")
+
+
+# ── Fix 7: skill context survives save / load ────────────────────────────────
+
+
+class TestSkillContextPersistence:
+    def test_skill_ids_persisted_and_restored(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            session_manager, "SESSIONS_PATH", str(tmp_path / "sessions.json")
+        )
+        flow = make_flow(1)
+        run_phase(flow, 1, [crew_result(1, APPROVED, make_racm())])
+        assert "aws_cloud_security" in flow.state.active_skill_ids
+
+        session_manager.save_session("sess-1", "Audit", "scope")
+        FlowRepository().save("sess-1", flow)
+        loaded = FlowRepository().load("sess-1")
+        assert loaded is not None
+        restored = loaded.flow
+        assert restored.state.active_skill_ids == flow.state.active_skill_ids
+        assert [s["id"] for s in restored._skill_context] == (
+            flow.state.active_skill_ids
+        )
+
+        restored.begin_phase_2("alice")
+        _, MockCrew = run_phase(restored, 2, [crew_result(2, APPROVED, make_papers())])
+        skill_context = MockCrew.call_args.kwargs["skill_context"]
+        assert [s["id"] for s in skill_context] == flow.state.active_skill_ids
+
+    def test_legacy_snapshot_without_ids_rederives_from_scope(self):
+        flow = make_flow(2)
+        assert flow.state.active_skill_ids == []
+        _, MockCrew = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        skill_context = MockCrew.call_args.kwargs["skill_context"]
+        assert "aws_cloud_security" in [s["id"] for s in skill_context]
+
+    def test_unknown_persisted_skill_id_is_skipped(self):
+        flow = AuditFlow()
+        flow.state.active_skill_ids = ["does_not_exist", "pci_dss"]
+        flow.restore_skill_context()
+        assert [s["id"] for s in flow._skill_context] == ["pci_dss"]

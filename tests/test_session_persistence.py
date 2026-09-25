@@ -109,9 +109,7 @@ class TestFlowRepositorySave:
         flow.state.business_context = "Fintech IAM review"
         return flow
 
-    def test_save_writes_snapshot_and_status_preserving_metadata(
-        self, sessions_path
-    ):
+    def test_save_writes_snapshot_and_status_preserving_metadata(self, sessions_path):
         session_manager.save_session(
             "sess-1", "My audit", "old scope", created_at="2026-01-01T00:00:00"
         )
