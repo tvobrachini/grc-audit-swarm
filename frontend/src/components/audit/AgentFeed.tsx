@@ -8,9 +8,21 @@ interface Props {
 }
 
 const PHASE_AGENTS: Record<number, string[]> = {
-  1: ["Audit Director", "Regulatory Analyst", "Risk Specialist", "Auditor", "QA Reviewer"],
-  2: ["Evidence Collector", "Field Auditor", "QA Field Reviewer"],
-  3: ["Lead Writer", "Concluder", "QA Tone Reviewer", "OSCAL Engineer"],
+  // Agent roles as defined in src/swarm/config/*_agents.yaml.
+  1: [
+    "Audit Director",
+    "Regulatory & Threat Analyst",
+    "Risk & Threat Specialist",
+    "Senior IT Auditor",
+    "Quality & Pushback Reviewer",
+  ],
+  2: ["Field Evidence Collector", "IT Field Auditor", "Execution QA & Pushback Reviewer"],
+  3: [
+    "Lead Report Writer",
+    "Chief Audit Executive (CAE)",
+    "Reporting Tone & QA Reviewer",
+    "Compliance Documentation Engineer",
+  ],
 };
 
 export function AgentFeed({ events, phase }: Props) {
