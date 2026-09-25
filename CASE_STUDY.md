@@ -1,8 +1,8 @@
-# Case Study: Scalable Multi-Agent Swarms for Recursive Auditing
+# Case Study: A Human-Gated Multi-Agent Audit Workflow
 
-**Role:** IT Audit Specialist / Audit Engineer (personal project)
-**Core Technologies:** Python, CrewAI, AWS MCP (Model Context Protocol), Streamlit, DuckDuckGo Search API, Pytest, YAML
-**Frameworks Covered:** Secure Controls Framework (SCF), AWS Cloud Security (Live), PCI-DSS, GDPR, HIPAA
+**Role:** Personal project
+**Core Technologies:** Python, CrewAI, AWS APIs (boto3), Streamlit, Pytest, YAML
+**Frameworks referenced:** Secure Controls Framework (SCF), AWS IAM and S3 settings (live, read-only)
 
 ---
 
@@ -19,11 +19,11 @@ However, a real-world audit is not linear. It is a **recursive conversation**. A
 
 ---
 
-## 🏗️ The Solution: The "Recursive Swarm" Architecture
+## 🏗️ The Solution: A Multi-Crew Architecture
 
 I built **GRC Audit Swarm** to move beyond static mapping and into **agent-assisted audit execution**.
 
-Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent crews that collaborate, research, and challenge each other to produce a verified, high-fidelity audit report.
+Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent crews that collaborate and challenge each other to produce a draft audit report with cited evidence.
 
 ### Key Architectural Decisions:
 
@@ -31,9 +31,9 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
    - *Decision:* Implemented three distinct sequential crews: **Planning**, **Fieldwork**, and **Reporting**.
    - *Why:* Audits are naturally phase-based. By isolating the Planning (RACM creation) from Execution (evidence testing), we ensure specialized agents focus on their specific domain of expertise.
 
-2. **The "IIA 2340" Human Gates:**
+2. **Human approval gates (IIA 12.3, formerly 2340):**
    - *Decision:* Integrated stateful human-in-the-loop (HITL) gates between every phase.
-   - *Why:* IIA Standard 2340 requires engagements to be properly supervised. The swarm mirrors that idea: it "pauses" and waits for a human sign-off before moving from Planning to Fieldwork. This is a design inspiration, not a claim of 2340 compliance.
+   - *Why:* IIA Standard 12.3 (formerly 2340) requires engagements to be properly supervised. The swarm mirrors that idea: it "pauses" and waits for a human sign-off before moving from Planning to Fieldwork. This is a design inspiration, not a claim of compliance.
 
 3. **The "QA Pushback" Loop (Adversarial AI):**
    - *Decision:* Each crew includes a **QA Reviewer** agent with `temperature=0` that must explicitly approve the output.
@@ -41,7 +41,7 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
 
 4. **Hashed Evidence Vault (Security-by-Design):**
    - *Decision:* Built an Evidence Assurance Protocol that hashes all collected data using **SHA-256**.
-   - *Why:* PCAOB AS 1215 and IIA Standard 2330 stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim snippet found in the stored evidence.
+   - *Why:* PCAOB AS 1215 and IIA Standard 14.6 (formerly 2330) stress the integrity of audit documentation. Neither mandates hashing — this is an engineering choice in their spirit, not a compliance claim. Every finding in the UI features a "Vault Verification Badge" that confirms the agent's quote is a verbatim snippet found in the stored evidence.
 
 5. **Live Evidence Bridging (AWS Tools):**
    - *Decision:* Integrated native CrewAI tools to call real **AWS APIs** (IAM, S3, etc.) during the Fieldwork phase.
@@ -55,12 +55,12 @@ Using **CrewAI**, I architected a multi-phase "Swarm" of specialized AI agent cr
 
 ## 📈 The Impact: From Mapping to Insight
 
-By shifting from a single-agent "Crosswalker" to a multi-phase "Swarm," the depth of the audit output increases significantly:
+By shifting from a single-agent "Crosswalker" to a multi-phase "Swarm," the output gains:
 
 - **Context-Aware Auditing:** The report doesn't just say "Fix AC-01." It provides a **1-Pager Risk Context** citing specific threat vectors, grounding the "Fix" in business reality.
 - **Evidence-to-Finding Automation:** By connecting to **AWS**, the swarm identifies real misconfigurations and automatically generates Working Papers with per-control severity ratings.
 - **Human-in-the-Loop Efficiency:** The human auditor acts as a **Supervisor**, reviewing high-quality drafts and evidence instead of performing manual data entry.
-- **True Compliance-as-Code:** The swarm moves beyond narrative Word documents. Phase 3 includes a dedicated **Compliance Documentation Engineer** that translates all findings and evidence mappings into an OSCAL-inspired structure (`OSCAL_SAR_Schema`, not validated against the official OSCAL schema).
+- **Structured export:** The swarm moves beyond narrative Word documents. Phase 3 includes a dedicated **Compliance Documentation Engineer** that translates all findings and evidence mappings into an OSCAL-inspired structure (`OSCAL_SAR_Schema`, not validated against the official OSCAL schema).
 
 ---
 
