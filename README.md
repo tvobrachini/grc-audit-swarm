@@ -2,7 +2,7 @@
 
 > **AI Multi-Agent GRC Audit Platform powered by CrewAI**
 
-GRC Audit Swarm is a stateful, three-phase audit automation platform that converts a plain-language scope into a fully documented audit report. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by an hashed evidence vault.
+GRC Audit Swarm is a stateful, three-phase audit automation platform that turns a plain-language scope into a draft audit report for human review. It orchestrates specialized **CrewAI** agent crews across Planning, Fieldwork, and Reporting — each gated by a human approval step and backed by a hashed evidence vault.
 
 > [!IMPORTANT]
 > **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by or endorsed by any current or past employer.
@@ -23,7 +23,7 @@ Five sequential agents build and validate a Risk and Control Matrix (RACM):
 - **Senior IT Auditor:** Drafts the full RACM — every control must include Test of Design, Test of Effectiveness, and Substantive Testing steps.
 - **QA Reviewer (temp=0):** Independently validates the RACM; rejects if substantive testing is missing or ToE relies only on inquiry. On rejection, the crew auto-retries once with the rejection reason injected as context.
 
-Human approval is required before Phase 2 begins (an engagement-supervision step inspired by IIA Standard 2340, which requires engagements to be properly supervised — not a claim of literal 2340 compliance).
+Human approval is required before Phase 2 begins (an engagement-supervision step inspired by engagement supervision in the IIA Global Internal Audit Standards, Standard 12.3 (formerly 2340) — not a claim of compliance).
 
 ### ⚙️ Phase 2: Fieldwork (The Engine)
 Three agents execute live evidence collection and evaluate controls:
@@ -32,15 +32,15 @@ Three agents execute live evidence collection and evaluate controls:
 - **Field Auditor:** Evaluates each control against the collected evidence and produces a Working Paper with per-control severity ratings.
 - **QA Field Reviewer (temp=0):** Validates finding consistency; rejects if Pass ratings lack supporting evidence. Auto-retries once on rejection.
 
-All evidence is hashed and stored in the **Evidence Vault**, following documentation-integrity principles drawn from PCAOB AS 1215 and IIA Standard 2330 (neither of which mandates a specific technical mechanism such as hashing — this is an engineering choice in their spirit, not a compliance claim; AS 1215 itself governs public-company financial-statement audits, a scope this general-purpose tool doesn't sit within). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
+All evidence is hashed and stored in the **Evidence Vault**, following documentation-integrity principles drawn from PCAOB AS 1215 and IIA Standard 14.6 (formerly 2330) (neither of which mandates a specific technical mechanism such as hashing — this is an engineering choice in their spirit, not a compliance claim; AS 1215 itself governs public-company financial-statement audits, a scope this general-purpose tool doesn't sit within). The Phase 2 UI shows ✅/❌ vault quote verification badges per finding.
 
 ### 📝 Phase 3: Reporting (The Pen)
 Five sequential tasks across four agents produce the final deliverable:
 
-- **Lead Report Writer:** Synthesises Phase 1 scope and Phase 2 working papers into a structured audit report body.
+- **Lead Report Writer:** Synthesizes Phase 1 scope and Phase 2 working papers into a structured audit report body.
 - **Executive Concluder:** Drafts a concise executive summary from the report.
 - **Tone & QA Reviewer (temp=0):** Rejects the report if language is subjective, inflammatory, or confusing.
-- **Compliance Documentation Engineer:** Translates the narrative findings and evidence into a machine-readable NIST OSCAL format (`OSCAL_SAR_Schema`) for automated GRC platform ingestion.
+- **Compliance Documentation Engineer:** Translates the narrative findings and evidence into an OSCAL-inspired JSON structure (`OSCAL_SAR_Schema`; not validated against the official OSCAL schema).
 - **Assembly (Lead Writer):** Packages all sections (narrative, executive, and OSCAL) into the `FinalReportSchema` for download.
 
 ### 🔄 Architecture Flow
@@ -112,7 +112,7 @@ graph TD
 
 - **🛡️ AWS Account ID Redaction:** 12-digit AWS account IDs are automatically scrubbed from all evidence before storage and before being returned to agents.
 - **💾 Persistent Sessions:** Full audit state serialized to `data/audit_sessions.json`. Sidebar shows session history with phase badges; any session is restorable.
-- **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Material Weakness counts), expandable per-control drill-downs, and vault verification badges.
+- **📊 Phase 2 Findings Command Center:** KPI metrics (Pass / Deficiency / Potential significant issue counts, for the auditor to evaluate), expandable per-control drill-downs, and vault verification badges.
 - **📥 Excel Exports:** Download RACM (with ToD/ToE/Substantive steps) and Working Papers directly from the review screens.
 - **🔄 Multi-LLM Support:** Priority order Ollama → NVIDIA → Gemini → OpenAI → Groq. Set whichever key you have — the factory binds automatically.
 - **🛡️ DEMO_MODE:** Set `DEMO_MODE=1` in `.env` to bypass all crews with hardcoded schemas for UI development.
@@ -136,7 +136,7 @@ uv sync
 
 # 4. Launch (Full Stack)
 # Starts FastAPI backend, React frontend, and Streamlit app
-docker-compose up --build
+docker compose up --build
 
 # Alternatively, launch just the Streamlit interface:
 uv run streamlit run app.py --server.port 8502
@@ -188,7 +188,7 @@ python run_monitor.py --phase1-only
 python run_monitor.py --skip-aws
 ```
 
-The test suite covers evidence integrity, AWS tool mocking, LLM factory priority, audit flow QA retry loops, skill loading, and Streamlit UI components. CI enforces a 55% coverage minimum across Python 3.11, 3.12, and 3.13.
+The test suite covers evidence integrity, AWS tool mocking, LLM factory priority, audit flow QA retry loops, skill loading, and Streamlit UI components. CI enforces a 50% coverage minimum across Python 3.11, 3.12, and 3.13.
 
 The `run_monitor.py` script validates the full crew execution pipeline — timing, QA gate outcomes, vault file creation, and final status — without the Streamlit UI.
 
