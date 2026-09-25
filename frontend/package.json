@@ -12,7 +12,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.100.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.11.0",
+    "lucide-react": "^1.47.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
