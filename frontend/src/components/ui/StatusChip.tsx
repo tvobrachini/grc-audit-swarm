@@ -9,10 +9,12 @@ const STATUS_LABELS: Record<string, string> = {
   RUNNING_PHASE_3: "Reporting",
   WAITING_HUMAN_GATE_3: "Review P3",
   COMPLETED: "Complete",
-  ERROR: "Error",
-  QA_REJECTED_PHASE_1: "QA Fail",
-  QA_REJECTED_PHASE_2: "QA Fail",
-  QA_REJECTED_PHASE_3: "QA Fail",
+  ERROR_PHASE_1: "Error P1",
+  ERROR_PHASE_2: "Error P2",
+  ERROR_PHASE_3: "Error P3",
+  QA_REJECTED_PHASE_1: "QA Fail P1",
+  QA_REJECTED_PHASE_2: "QA Fail P2",
+  QA_REJECTED_PHASE_3: "QA Fail P3",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -24,7 +26,9 @@ const STATUS_COLORS: Record<string, string> = {
   WAITING_HUMAN_GATE_2: "bg-amber-900/40 text-amber-300",
   WAITING_HUMAN_GATE_3: "bg-amber-900/40 text-amber-300",
   COMPLETED: "bg-green-900/40 text-green-300",
-  ERROR: "bg-red-900/40 text-red-400",
+  ERROR_PHASE_1: "bg-red-900/40 text-red-400",
+  ERROR_PHASE_2: "bg-red-900/40 text-red-400",
+  ERROR_PHASE_3: "bg-red-900/40 text-red-400",
   QA_REJECTED_PHASE_1: "bg-red-900/40 text-red-400",
   QA_REJECTED_PHASE_2: "bg-red-900/40 text-red-400",
   QA_REJECTED_PHASE_3: "bg-red-900/40 text-red-400",

@@ -5,8 +5,6 @@ description = "CrewAI audit workflow with human approval gates, read-only AWS ev
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.31.0",
-    "pandas>=2.2.0",
     "pdfplumber>=0.10.3",
     "pydantic>=2.7.0",
     "python-dotenv>=1.2.2",

@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Quote } from "lucide-react";
 import { clsx } from "clsx";
-import type { SessionDetail } from "@/api/client";
+import { api, type SessionDetail } from "@/api/client";
 import { ApprovalGate } from "./ApprovalGate";
 
 interface AuditFinding {
@@ -55,6 +56,32 @@ function severityConfig(s: string) {
       border: "border-[var(--color-border)]",
       dot: "bg-[var(--color-text-muted)]",
     }
+  );
+}
+
+/** Deterministic vault check: the quote must appear verbatim in the stored,
+ * digest-verified evidence record (POST /api/evidence/verify). */
+function VaultBadge({ finding }: { finding: AuditFinding }) {
+  const { vault_id_reference: vaultId, exact_quote_from_evidence: quote } = finding;
+  const { data, isError } = useQuery({
+    queryKey: ["verify", vaultId, quote],
+    queryFn: () => api.evidence.verify(vaultId, quote),
+    enabled: !!vaultId && !!quote,
+    staleTime: Infinity,
+  });
+  if (!vaultId || !quote) return null;
+  if (isError) {
+    return <span className="text-[10px] text-[var(--color-text-muted)]">verification unavailable</span>;
+  }
+  if (!data) return null;
+  return data.verified ? (
+    <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-[10px] text-green-400">
+      Quote verified in vault
+    </span>
+  ) : (
+    <span className="rounded bg-red-900/30 px-1.5 py-0.5 text-[10px] text-red-400">
+      Quote not verified
+    </span>
   );
 }
 
@@ -119,6 +146,7 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
               <span className="font-mono text-[10px] text-violet-400/70">
                 {finding.vault_id_reference}
               </span>
+              <VaultBadge finding={finding} />
             </div>
           )}
         </div>

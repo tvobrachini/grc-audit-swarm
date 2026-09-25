@@ -1,17 +1,45 @@
-import type { SessionDetail, AuditEvent } from "@/api/client";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
+import { api, describeError, type SessionDetail, type AuditEvent } from "@/api/client";
+import { phaseProblem } from "@/api/status";
 import { PhaseBar } from "@/components/ui/PhaseBar";
 import { AgentFeed } from "@/components/audit/AgentFeed";
 import { RACMTree } from "@/components/audit/RACMTree";
 import { FindingsBoard } from "@/components/audit/FindingsBoard";
 import { ReportView } from "@/components/audit/ReportView";
+import { PhaseRecovery } from "@/components/audit/PhaseRecovery";
+import { ExportBar } from "@/components/audit/ExportBar";
 
 interface Props {
   session: SessionDetail;
   events: AuditEvent[];
+  onDeleted: () => void;
 }
 
-export function MiddlePanel({ session, events }: Props) {
+const DRAFT_FIELD = { 1: "racm_plan", 2: "working_papers", 3: "final_report" } as const;
+
+function ArtifactView({ session, phase }: { session: SessionDetail; phase: number }) {
+  if (phase === 1) return <RACMTree session={session} />;
+  if (phase === 2) return <FindingsBoard session={session} />;
+  return <ReportView session={session} />;
+}
+
+export function MiddlePanel({ session, events, onDeleted }: Props) {
   const { status, phase } = session;
+  const problem = phaseProblem(status);
+  const qc = useQueryClient();
+
+  const del = useMutation({
+    mutationFn: () => api.sessions.delete(session.session_id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      onDeleted();
+    },
+  });
+
+  const hasRejectedDraft =
+    problem?.kind === "qa_rejected" &&
+    session[DRAFT_FIELD[problem.phase as 1 | 2 | 3]] !== null;
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -20,7 +48,26 @@ export function MiddlePanel({ session, events }: Props) {
           {session.name}
         </h2>
         <PhaseBar phase={phase} status={status} />
+        <button
+          title="Delete this audit"
+          onClick={() => {
+            if (window.confirm(`Delete "${session.name}"? This cannot be undone.`)) {
+              del.mutate();
+            }
+          }}
+          disabled={del.isPending || status.startsWith("RUNNING_PHASE")}
+          className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-red-400 disabled:opacity-30"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
+      {del.isError && (
+        <p role="alert" className="px-6 py-1 text-xs text-red-400">
+          {describeError(del.error)}
+        </p>
+      )}
+
+      <ExportBar session={session} />
 
       <div className="flex-1 overflow-y-auto p-6">
         {status.startsWith("RUNNING_PHASE") && (
@@ -35,13 +82,17 @@ export function MiddlePanel({ session, events }: Props) {
           <ReportView session={session} />
         )}
 
-        {(status === "ERROR" ||
-          status.startsWith("QA_REJECTED")) && (
-          <div className="rounded-xl border border-red-700/40 bg-red-900/10 p-5">
-            <p className="text-sm font-medium text-red-300">Audit Error</p>
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              {session.qa_rejection_reason ?? "An unexpected error occurred."}
-            </p>
+        {problem && (
+          <div className="flex flex-col gap-4">
+            <PhaseRecovery session={session} problem={problem} />
+            {hasRejectedDraft && (
+              <div className="rounded-xl border border-dashed border-red-700/60 p-4">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-red-400">
+                  Rejected draft — not approved (kept for review)
+                </p>
+                <ArtifactView session={session} phase={problem.phase} />
+              </div>
+            )}
           </div>
         )}
 
