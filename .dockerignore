@@ -35,3 +35,14 @@ htmlcov/
 data/
 lab_data/
 checkpoints.sqlite
+
+# Wave 0 hardening additions — none of these are needed at image runtime
+# (src/, skills/, app.py, pyproject.toml and uv.lock are NOT excluded).
+.git
+.github
+evidence_vault/
+frontend/
+tests/
+node_modules
+*.md
+!README.md
