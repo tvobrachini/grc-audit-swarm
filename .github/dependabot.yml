@@ -35,3 +35,9 @@ updates:
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    ignore:
+      # The build stage tracks the Node.js LTS line (NODE_VERSION in ci.yml
+      # must match). Take major versions by hand when they become LTS, not
+      # when they are released as "Current".
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
