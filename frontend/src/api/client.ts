@@ -1,4 +1,10 @@
 export const API_URL = "";
+// VITE_API_AUTH_TOKEN is a DEV-ONLY convenience for `npm run dev` against a
+// local API (it gets baked into the JS bundle at build time, which is fine
+// for a throwaway local build but must never be set for a production build).
+// In the production/compose build, nginx injects the Authorization header
+// server-side (see frontend/nginx.conf.template) so this is left unset and
+// requests simply omit the header, letting the proxy add it.
 const API_AUTH_TOKEN = import.meta.env.VITE_API_AUTH_TOKEN as string | undefined;
 
 export interface SessionSummary {

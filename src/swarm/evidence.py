@@ -29,11 +29,17 @@ _DEFAULT_EVIDENCE_DIR = os.path.join(
 )
 EVIDENCE_DIR = os.environ.get("EVIDENCE_VAULT_PATH", _DEFAULT_EVIDENCE_DIR)
 
-# Matches 12-digit AWS account IDs (standalone — not part of longer numbers).
-_ACCOUNT_ID_RE = re.compile(r"(?<!\d)\d{12}(?!\d)")
+# Matches 12-digit AWS account IDs (standalone — not part of longer numbers),
+# in either bare form (123456789012) or the hyphenated 4-4-4 form some AWS
+# consoles/CLIs display (1234-5678-9012).
+_ACCOUNT_ID_RE = re.compile(r"(?<!\d)\d{12}(?!\d)|(?<!\d)\d{4}-\d{4}-\d{4}(?!\d)")
 _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+
+# A quote shorter than this is too weak an anti-hallucination check — it would
+# match almost any payload by chance (e.g. a lone word or punctuation).
+_MIN_QUOTE_LENGTH = 8
 
 
 def _get_fernet():
@@ -143,6 +149,11 @@ class EvidenceAssuranceProtocol:
         Returns True ONLY if the exact_quote mathematically exists within the hashed raw payload.
         """
         if not _UUID_RE.fullmatch(vault_id):
+            return False
+
+        if not exact_quote_claim or not exact_quote_claim.strip():
+            return False
+        if len(exact_quote_claim) < _MIN_QUOTE_LENGTH:
             return False
 
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
