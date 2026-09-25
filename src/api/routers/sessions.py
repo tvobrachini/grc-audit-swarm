@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from api.executor import get_executor
 from api.job_store import (
@@ -14,6 +14,7 @@ from api.job_store import (
     set_job,
 )
 from api.models import (
+    DEFAULT_FRAMEWORKS,
     ApproveGateRequest,
     CreateSessionRequest,
     QAOverrideRequest,
@@ -22,6 +23,12 @@ from api.models import (
     SessionSummary,
     _needs_input,
     _phase_from_status,
+)
+from api.scope_document import (
+    MAX_UPLOAD_BYTES,
+    ScopeDocumentError,
+    extract_scope_document,
+    merge_business_context,
 )
 from swarm.audit_flow import (
     AuditFlow,
@@ -223,14 +230,46 @@ def _run_phase_3(session_id: str, job_id: str) -> None:
 
 @router.post("", response_model=SessionSummary, status_code=201)
 def create_session(req: CreateSessionRequest) -> SessionSummary:
+    return _create_and_launch(req.theme, req.business_context, req.frameworks, req.name)
+
+
+@router.post("/with-document", response_model=SessionSummary, status_code=201)
+def create_session_with_document(
+    theme: str = Form(..., min_length=1),
+    business_context: str = Form(""),
+    frameworks: list[str] = Form(default_factory=lambda: list(DEFAULT_FRAMEWORKS)),
+    name: Optional[str] = Form(None),
+    document: UploadFile = File(...),
+) -> SessionSummary:
+    """Create an audit with a scope document (PDF, .txt or .md, ≤ 5 MB).
+
+    The extracted text is appended to the business context inside delimiters
+    that label it as untrusted, user-supplied document content.
+    """
+    data = document.file.read(MAX_UPLOAD_BYTES + 1)
+    try:
+        doc = extract_scope_document(document.filename, data)
+    except ScopeDocumentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return _create_and_launch(
+        theme,
+        merge_business_context(business_context, doc),
+        [f for f in frameworks if f.strip()],
+        name or None,
+    )
+
+
+def _create_and_launch(
+    theme: str, business_context: str, frameworks: list[str], name: Optional[str]
+) -> SessionSummary:
     session_id = str(uuid.uuid4())
-    name = req.name or f"{req.theme[:40]} audit"
+    name = name or f"{theme[:40]} audit"
     created_at = datetime.utcnow().isoformat(timespec="seconds")
 
     flow = AuditFlow()
-    flow.state.theme = req.theme
-    flow.state.business_context = req.business_context
-    flow.state.frameworks = req.frameworks
+    flow.state.theme = theme
+    flow.state.business_context = business_context
+    flow.state.frameworks = frameworks
 
     # Stamp RUNNING_PHASE_1 synchronously so polls see correct state immediately
     flow.begin_phase_1()
@@ -239,7 +278,7 @@ def create_session(req: CreateSessionRequest) -> SessionSummary:
     save_session(
         thread_id=session_id,
         name=name,
-        scope_text=req.business_context,
+        scope_text=business_context,
         status=flow.state.status,
         created_at=created_at,
     )
