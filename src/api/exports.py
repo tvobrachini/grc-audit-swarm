@@ -217,7 +217,7 @@ def report_markdown(
     report: FinalReportSchema, trail: list[dict[str, str]], ctx: ExportContext
 ) -> str:
     lines = [
-        f"# GRC Audit Report — {_one_line(ctx.session_name)}",
+        sanitize_report(f"# GRC Audit Report — {_one_line(ctx.session_name)}"),
         "",
         f"> Report status: {ctx.artifact_state(3)} (session status {ctx.status}).",
         "",

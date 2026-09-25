@@ -19,7 +19,7 @@ from api.exports import (
     sanitize_cell,
     sanitize_report,
 )
-from api.job_store import remove_flow, set_flow
+from api.job_store import get_flow, remove_flow, set_flow
 from swarm import session_manager
 from swarm.audit_flow import AuditFlow
 from swarm.demo import demo_final_report
@@ -137,6 +137,8 @@ class TestRacmExport:
         assert r.status_code == 200
         info = dict(_rows(_open(r.content)["Export Info"])[1:])
         assert info["Planning artifact"] == "Approved at Gate 1"
+        # A download does not cache the flow as a side effect.
+        assert get_flow(sid) is None
 
 
 class TestWorkingPapersExport:
