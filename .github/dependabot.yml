@@ -24,6 +24,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # crewai pins chromadb~=1.1.0, and chromadb 1.1.x imports pydantic.v1,
+      # which fails on Python 3.14. Stay on the newest version CI tests
+      # (3.13) until crewai allows a newer chromadb.
+      - dependency-name: "python"
+        versions: [">=3.14"]
 
   - package-ecosystem: "docker" # Frontend Dockerfile base image
     directory: "/frontend"
