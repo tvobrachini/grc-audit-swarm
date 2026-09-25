@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuditList } from "@/hooks/useAuditList";
+import { useAppConfig } from "@/hooks/useAppConfig";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { NotificationBadge } from "@/components/ui/NotificationBadge";
 import { NewAuditModal } from "@/components/audit/NewAuditModal";
@@ -13,6 +14,7 @@ interface Props {
 
 export function AuditSidebar({ selectedId, onSelect }: Props) {
   const { data: sessions = [] } = useAuditList();
+  const { data: config } = useAppConfig();
   const [showModal, setShowModal] = useState(false);
 
   const sorted = [...sessions].sort((a, b) => {
@@ -30,8 +32,16 @@ export function AuditSidebar({ selectedId, onSelect }: Props) {
         style={{ width: 260 }}
       >
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
+          <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
             Audits
+            {config?.demo_mode && (
+              <span
+                title="DEMO_MODE is on: crews are replaced with fixed demo artifacts — no LLM or AWS calls are made."
+                className="rounded border border-amber-600/60 bg-amber-900/30 px-1.5 py-0.5 text-[9px] font-bold tracking-wider text-amber-300"
+              >
+                DEMO MODE
+              </span>
+            )}
           </span>
           <button
             onClick={() => setShowModal(true)}

@@ -42,6 +42,5 @@ USER app
 
 EXPOSE 8000
 
-# Default CMD runs the FastAPI backend. The Streamlit UI (being retired) is
-# started separately via docker-compose's `streamlit` profile/command.
+# Runs the FastAPI backend; the React UI is served by the frontend image.
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

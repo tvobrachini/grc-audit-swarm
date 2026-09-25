@@ -21,6 +21,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_buffering off;
         proxy_cache off;
+        # Scope documents are capped at 5 MB by the API; allow the multipart
+        # envelope on top (nginx's default limit is 1 MB).
+        client_max_body_size 6m;
     }
 
     location / {
