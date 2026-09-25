@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, Loader2 } from "lucide-react";
-import { api } from "@/api/client";
+import { api, describeError } from "@/api/client";
 import type { SessionDetail } from "@/api/client";
 
 interface Props {
@@ -36,8 +36,11 @@ export function ApprovalGate({ session }: Props) {
       api.sessions.approve(session.session_id, gateInfo.gate, humanId),
     onSuccess: () => {
       // Immediately update cache so polling can't flip back to gate state
+      // (gate 3 completes the audit; gates 1/2 start the next phase).
+      const next =
+        gateInfo.gate === 3 ? "COMPLETED" : `RUNNING_PHASE_${gateInfo.gate + 1}`;
       qc.setQueryData(["session", session.session_id], (old: SessionDetail | undefined) =>
-        old ? { ...old, status: `RUNNING_PHASE_${gateInfo.gate + 1}`, needs_input: false } : old
+        old ? { ...old, status: next, needs_input: false } : old
       );
       qc.invalidateQueries({ queryKey: ["sessions"] });
       qc.invalidateQueries({ queryKey: ["session", session.session_id] });
@@ -85,8 +88,8 @@ export function ApprovalGate({ session }: Props) {
       </div>
 
       {mutation.isError && (
-        <p className="mt-2 text-xs text-red-400">
-          {(mutation.error as Error).message}
+        <p role="alert" className="mt-2 text-xs text-red-400">
+          {describeError(mutation.error)}
         </p>
       )}
     </div>

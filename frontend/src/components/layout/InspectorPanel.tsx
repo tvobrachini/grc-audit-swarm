@@ -30,6 +30,7 @@ function panelConfig(
       tabs: [
         { id: "frameworks", label: "Frameworks" },
         { id: "files", label: "Files" },
+        { id: "trail", label: "Approvals" },
       ],
     };
   }
@@ -48,6 +49,7 @@ function panelConfig(
       tabs: [
         { id: "vault", label: "Vault" },
         { id: "files", label: "Files" },
+        { id: "trail", label: "Approvals" },
       ],
     };
   }
@@ -69,9 +71,11 @@ function panelConfig(
       ],
     };
   }
+  // Gate 3, QA rejections, errors: the trail shows prior retries/overrides.
   return {
     title: "Details",
     tabs: [
+      { id: "trail", label: "Approvals" },
       { id: "log", label: "Log" },
       { id: "files", label: "Files" },
     ],
@@ -81,7 +85,12 @@ function panelConfig(
 export function InspectorPanel({ session, events }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const config = panelConfig(session.status);
-  const [activeTab, setActiveTab] = useState(config.tabs[0]?.id ?? "log");
+  const [selectedTab, setActiveTab] = useState(config.tabs[0]?.id ?? "log");
+  // The tab set changes with the status; fall back to the first tab when the
+  // selected one is not offered for the current status.
+  const activeTab = config.tabs.some((t) => t.id === selectedTab)
+    ? selectedTab
+    : (config.tabs[0]?.id ?? "log");
 
   if (collapsed) {
     return (

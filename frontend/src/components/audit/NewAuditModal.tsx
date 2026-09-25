@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { api } from "@/api/client";
+import { api, describeError } from "@/api/client";
 
 interface Props {
   onClose: () => void;
@@ -9,20 +9,24 @@ interface Props {
 }
 
 const DEFAULT_FRAMEWORKS = ["COSO", "PCAOB", "IIA"];
+// Mirrors the API limit (src/api/scope_document.py); the server enforces it.
+const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
 
 export function NewAuditModal({ onClose, onCreated }: Props) {
   const qc = useQueryClient();
   const [theme, setTheme] = useState("");
   const [context, setContext] = useState("");
   const [frameworks, setFrameworks] = useState(DEFAULT_FRAMEWORKS);
+  const [scopeFile, setScopeFile] = useState<File | null>(null);
+  const documentTooLarge = scopeFile !== null && scopeFile.size > MAX_DOCUMENT_BYTES;
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.sessions.create({
-        theme,
-        business_context: context,
-        frameworks,
-      }),
+    mutationFn: () => {
+      const body = { theme, business_context: context, frameworks };
+      return scopeFile
+        ? api.sessions.createWithDocument(body, scopeFile)
+        : api.sessions.create(body);
+    },
     onSuccess: (session) => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
       onCreated(session.session_id);
@@ -82,6 +86,27 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
           </div>
 
           <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+              Scope document (optional — PDF, .txt or .md, max 5 MB)
+            </label>
+            <input
+              type="file"
+              accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+              onChange={(e) => setScopeFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-xs text-[var(--color-text-secondary)] file:mr-3 file:rounded file:border-0 file:bg-[var(--color-bg-elevated)] file:px-2.5 file:py-1 file:text-xs file:text-[var(--color-text-primary)]"
+            />
+            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              Its text is added to the business context, marked as untrusted
+              user-supplied content.
+            </p>
+            {documentTooLarge && (
+              <p role="alert" className="mt-1 text-[11px] text-red-400">
+                The document is larger than 5 MB.
+              </p>
+            )}
+          </div>
+
+          <div>
             <label className="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]">
               Frameworks
             </label>
@@ -113,7 +138,12 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
           </button>
           <button
             onClick={() => mutation.mutate()}
-            disabled={!theme.trim() || !context.trim() || mutation.isPending}
+            disabled={
+              !theme.trim() ||
+              (!context.trim() && !scopeFile) ||
+              documentTooLarge ||
+              mutation.isPending
+            }
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
           >
             {mutation.isPending ? "Launching..." : "Launch Audit"}
@@ -121,8 +151,8 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
         </div>
 
         {mutation.isError && (
-          <p className="mt-3 text-xs text-red-400">
-            {(mutation.error as Error).message}
+          <p role="alert" className="mt-3 text-xs text-red-400">
+            {describeError(mutation.error)}
           </p>
         )}
       </div>
