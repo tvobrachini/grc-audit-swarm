@@ -47,8 +47,10 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
             )
 
     if os.environ.get("GEMINI_API_KEY"):
-        logger.info("[LLM Factory] Binding to Gemini 2.0 Flash.")
-        return LLM(model="gemini/gemini-2.0-flash", temperature=temperature)
+        # gemini-2.0-flash was shut down on 2026-06-01; override with GEMINI_MODEL.
+        gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        logger.info(f"[LLM Factory] Binding to Gemini: {gemini_model}.")
+        return LLM(model=f"gemini/{gemini_model}", temperature=temperature)
 
     if os.environ.get("OPENAI_API_KEY"):
         logger.info("[LLM Factory] Binding to OpenAI GPT-4o-mini.")
