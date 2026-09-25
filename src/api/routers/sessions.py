@@ -5,16 +5,29 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from api.executor import get_executor
-from api.job_store import get_flow, push_event, remove_flow, set_flow, set_job
+from api.job_store import (
+    get_flow,
+    push_event,
+    remove_flow,
+    session_lock,
+    set_flow,
+    set_job,
+)
 from api.models import (
     ApproveGateRequest,
     CreateSessionRequest,
+    QAOverrideRequest,
+    RetryPhaseRequest,
     SessionDetail,
     SessionSummary,
     _needs_input,
     _phase_from_status,
 )
-from swarm.audit_flow import AuditFlow
+from swarm.audit_flow import (
+    AuditFlow,
+    InvalidTransitionError,
+    PhaseArtifactMissingError,
+)
 from swarm.session_manager import (
     delete_session,
     get_session,
@@ -261,53 +274,138 @@ def get_session_detail(session_id: str) -> SessionDetail:
 
 @router.delete("/{session_id}", status_code=204)
 def remove_session(session_id: str) -> None:
-    delete_session(session_id)
-    remove_flow(session_id)
+    # Serialise with approve/retry/override so an action racing a delete
+    # cannot re-cache the flow after it was removed.
+    with session_lock(session_id):
+        delete_session(session_id)
+        remove_flow(session_id)
+
+
+_PHASE_RUNNERS = {1: _run_phase_1, 2: _run_phase_2, 3: _run_phase_3}
+
+
+def _require_session(session_id: str) -> dict[str, Any]:
+    data = get_session(session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return data
+
+
+def _require_flow(session_id: str) -> AuditFlow:
+    flow = _get_or_load_flow(session_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="flow not found")
+    return flow
+
+
+def _conflict(action: str, flow: AuditFlow, exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=f"Cannot {action} (status={flow.state.status}): {exc}",
+    )
+
+
+def _submit_phase(session_id: str, phase: int) -> str:
+    job_id = str(uuid.uuid4())
+    set_job(job_id, "running")
+    get_executor().submit(session_id, _PHASE_RUNNERS[phase], session_id, job_id)
+    return job_id
+
+
+def _summary(
+    session_id: str, data: dict[str, Any], status: str, needs_input: bool = False
+) -> SessionSummary:
+    return SessionSummary(
+        session_id=session_id,
+        name=data.get("name", session_id),
+        status=status,
+        phase=_phase_from_status(status),
+        needs_input=needs_input,
+        created_at=data.get("created_at", ""),
+    )
 
 
 @router.patch("/{session_id}/approve", response_model=SessionSummary)
 def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
-    data = get_session(session_id)
-    if not data:
-        raise HTTPException(status_code=404, detail="Session not found")
+    """Approve human gate 1, 2 or 3.
 
-    job_id = str(uuid.uuid4())
-    set_job(job_id, "running")
-
-    flow = _get_or_load_flow(session_id)
-
-    if req.gate_number == 1:
-        # Stamp trail + transition machine synchronously before thread starts
-        if flow:
-            flow.begin_phase_2(req.human_id)
-        get_executor().submit(session_id, _run_phase_2, session_id, job_id)
-        next_status = "RUNNING_PHASE_2"
-    elif req.gate_number == 2:
-        if flow:
-            flow.begin_phase_3(req.human_id)
-        get_executor().submit(session_id, _run_phase_3, session_id, job_id)
-        next_status = "RUNNING_PHASE_3"
-    elif req.gate_number == 3:
-        # Gate 3 has no further crew phase to run — approve and persist synchronously.
-        if not flow:
-            raise HTTPException(status_code=404, detail="flow not found")
-        flow.finalize_audit(req.human_id)
-        if flow.state.status != "COMPLETED":
-            raise HTTPException(
-                status_code=409,
-                detail=f"Gate 3 not ready to approve (status={flow.state.status})",
-            )
-        _repo.save(session_id, flow)
-        set_job(job_id, "completed")
-        next_status = flow.state.status
-    else:
+    Gates 1/2 start the next phase crew; gate 3 completes the audit. Returns
+    409 when the session is not waiting at that gate (e.g. a double click),
+    in which case no crew is started.
+    """
+    if req.gate_number not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="gate_number must be 1, 2, or 3")
+    data = _require_session(session_id)
 
-    return SessionSummary(
-        session_id=session_id,
-        name=data.get("name", session_id),
-        status=next_status,
-        phase=_phase_from_status(next_status),
-        needs_input=False,
-        created_at=data.get("created_at", ""),
-    )
+    # check-transition-submit is atomic per session: a concurrent duplicate
+    # request blocks here, then sees the new status and gets a 409.
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        approve = {
+            1: flow.begin_phase_2,
+            2: flow.begin_phase_3,
+            3: flow.finalize_audit,
+        }[req.gate_number]
+        try:
+            approve(req.human_id)
+        except InvalidTransitionError as exc:
+            raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        if req.gate_number == 3:
+            # No further crew phase — persist the sign-off synchronously.
+            _repo.save(session_id, flow)
+            next_status = flow.state.status
+        else:
+            _submit_phase(session_id, req.gate_number + 1)
+            next_status = f"RUNNING_PHASE_{req.gate_number + 1}"
+
+    return _summary(session_id, data, next_status)
+
+
+@router.post("/{session_id}/retry", response_model=SessionSummary)
+def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
+    """Re-run a phase that ended QA_REJECTED_PHASE_n or ERROR_PHASE_n.
+
+    The retry is stamped in the approval trail. 409 if the phase is not in a
+    retryable state.
+    """
+    data = _require_session(session_id)
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        try:
+            flow.retry_phase(req.phase, req.human_id)
+        except InvalidTransitionError as exc:
+            raise _conflict(f"retry phase {req.phase}", flow, exc) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _submit_phase(session_id, req.phase)
+        next_status = flow.state.status
+
+    return _summary(session_id, data, next_status)
+
+
+@router.post("/{session_id}/qa-override", response_model=SessionSummary)
+def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSummary:
+    """Supervisor override: accept a QA-rejected artifact with a justification.
+
+    Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n (the normal gate approval
+    still follows) and records approver + reason in the approval trail.
+    409 if the phase is not QA-rejected or produced no artifact.
+    """
+    data = _require_session(session_id)
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        try:
+            flow.override_qa_rejection(req.phase, req.human_id, req.reason)
+        except (InvalidTransitionError, PhaseArtifactMissingError) as exc:
+            raise _conflict(
+                f"override QA rejection for phase {req.phase}", flow, exc
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _repo.save(session_id, flow)
+        next_status = flow.state.status
+
+    return _summary(session_id, data, next_status, needs_input=True)

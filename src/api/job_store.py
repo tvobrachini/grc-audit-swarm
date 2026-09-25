@@ -23,6 +23,22 @@ _flows_lock = threading.Lock()
 _event_queues: dict[str, asyncio.Queue] = {}
 _queues_lock = threading.Lock()
 
+# session_id → Lock serialising state-changing actions (approve / retry /
+# override): check-transition-submit must be atomic per session so a double
+# request cannot start two crews on one flow.
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_guard = threading.Lock()
+
+
+def session_lock(session_id: str) -> threading.Lock:
+    """Return the per-session action lock (created on first use)."""
+    with _session_locks_guard:
+        lock = _session_locks.get(session_id)
+        if lock is None:
+            lock = _session_locks[session_id] = threading.Lock()
+        return lock
+
+
 # job_id → {status: running|completed|failed, error: str|None}
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()

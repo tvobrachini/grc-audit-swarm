@@ -1,5 +1,5 @@
 from typing import Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreateSessionRequest(BaseModel):
@@ -12,6 +12,21 @@ class CreateSessionRequest(BaseModel):
 class ApproveGateRequest(BaseModel):
     human_id: str
     gate_number: int  # 1, 2, or 3
+
+
+class RetryPhaseRequest(BaseModel):
+    """Re-run a phase that is QA_REJECTED_PHASE_n or ERROR_PHASE_n."""
+
+    human_id: str = Field(min_length=1)
+    phase: int = Field(ge=1, le=3)
+
+
+class QAOverrideRequest(BaseModel):
+    """Supervisor accepts a QA-rejected artifact (→ WAITING_HUMAN_GATE_n)."""
+
+    human_id: str = Field(min_length=1)
+    phase: int = Field(ge=1, le=3)
+    reason: str = Field(min_length=1)
 
 
 class SessionSummary(BaseModel):
