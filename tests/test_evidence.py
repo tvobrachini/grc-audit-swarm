@@ -4,6 +4,7 @@ Covers: account ID redaction, configurable vault path, SHA-256 hashing,
         path-traversal protection, and verify_exact_quote.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -263,3 +264,104 @@ class TestVerifyExactQuoteWeakInput:
         assert EvidenceAssuranceProtocol.verify_exact_quote(
             result["vault_id"], "evidence"
         )
+
+
+class TestEncryptedVaultKeyedDigest:
+    """With encryption on, the stored digest must be keyed, so a guessable
+    payload can't be confirmed from the vault file without the key."""
+
+    @staticmethod
+    def _enable_encryption(tmp_path, monkeypatch):
+        import base64
+        import os as _os
+
+        from swarm.evidence import _build_fernet
+
+        _build_fernet.cache_clear()
+        key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
+        return key
+
+    @staticmethod
+    def _read(tmp_path, vault_id):
+        with open(tmp_path / f"{vault_id}.json") as f:
+            return json.load(f)
+
+    def test_encrypted_record_stores_hmac_not_plain_sha256(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        payload = '{"MinimumPasswordLength": 14}'
+        result = EvidenceAssuranceProtocol.register_evidence(payload, "op")
+
+        record = self._read(tmp_path, result["vault_id"])
+        plain_hash = hashlib.sha256(payload.encode()).hexdigest()
+        assert "sha256" not in record
+        assert len(record["hmac_sha256"]) == 64
+        assert plain_hash not in json.dumps(record)
+        assert result["hmac_sha256"] == record["hmac_sha256"]
+
+    def test_hmac_depends_on_key(self, tmp_path, monkeypatch):
+        from swarm.evidence import _keyed_digest
+
+        key_a = self._enable_encryption(tmp_path, monkeypatch)
+        key_b = self._enable_encryption(tmp_path, monkeypatch)
+        assert _keyed_digest("same payload", key_a) != _keyed_digest(
+            "same payload", key_b
+        )
+
+    def test_encrypted_record_verifies(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "MFA enabled for user alice", "op"
+        )
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "MFA enabled for user alice"
+        )
+
+    def test_tampered_hmac_fails_verification(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "MFA enabled for user alice", "op"
+        )
+        path = tmp_path / f"{result['vault_id']}.json"
+        record = self._read(tmp_path, result["vault_id"])
+        record["hmac_sha256"] = "0" * 64
+        path.write_text(json.dumps(record))
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            result["vault_id"], "MFA enabled for user alice"
+        )
+
+    def test_legacy_encrypted_record_with_plain_sha256_still_verifies(
+        self, tmp_path, monkeypatch
+    ):
+        """Records written before the keyed digest existed keep verifying."""
+        import uuid
+
+        from swarm.evidence import _get_fernet
+
+        self._enable_encryption(tmp_path, monkeypatch)
+        payload = "legacy evidence payload"
+        vault_id = str(uuid.uuid4())
+        (tmp_path / f"{vault_id}.json").write_text(
+            json.dumps(
+                {
+                    "vault_id": vault_id,
+                    "sha256": hashlib.sha256(payload.encode()).hexdigest(),
+                    "mcp_source": "op",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "raw_payload": _get_fernet()
+                    .encrypt(payload.encode())
+                    .decode("ascii"),
+                    "encrypted": True,
+                }
+            )
+        )
+        assert EvidenceAssuranceProtocol.verify_exact_quote(vault_id, payload)
+
+    def test_unencrypted_record_still_uses_plain_sha256(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("VAULT_ENCRYPTION_KEY", raising=False)
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        result = EvidenceAssuranceProtocol.register_evidence("plain payload", "op")
+        record = self._read(tmp_path, result["vault_id"])
+        assert "hmac_sha256" not in record
+        assert record["sha256"] == hashlib.sha256("plain payload".encode()).hexdigest()
