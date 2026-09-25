@@ -3,8 +3,12 @@ services:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
+    # Named volume, not a ./data bind mount: the API runs as the non-root
+    # `app` user, and Docker seeds a new named volume from the image's
+    # /app/data (owned by `app`), so it stays writable. A host bind mount is
+    # owned by root or the host user and the API could not write to it.
     volumes:
-      - ./data:/app/data
+      - app-data:/app/data
     environment:
       - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
       - SESSIONS_PATH=/app/data/audit_sessions.json
@@ -34,18 +38,5 @@ services:
       - api
     restart: unless-stopped
 
-  streamlit:
-    build: .
-    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
-    profiles: ["streamlit"]
-    ports:
-      - "127.0.0.1:8501:8501"
-    volumes:
-      - ./data:/app/data
-    environment:
-      - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
-      - SESSIONS_PATH=/app/data/audit_sessions.json
-    env_file:
-      - path: .env
-        required: false
-    restart: unless-stopped
+volumes:
+  app-data:

@@ -2,10 +2,13 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
+DEFAULT_FRAMEWORKS = ("COSO", "PCAOB", "IIA")
+
+
 class CreateSessionRequest(BaseModel):
     theme: str
     business_context: str
-    frameworks: list[str] = ["COSO", "PCAOB", "IIA"]
+    frameworks: list[str] = list(DEFAULT_FRAMEWORKS)
     name: Optional[str] = None
 
 

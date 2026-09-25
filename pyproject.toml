@@ -1,12 +1,18 @@
 [project]
 name = "grc-audit-swarm"
 version = "0.1.0"
-description = "CrewAI audit workflow with human approval gates, read-only AWS evidence collection and a hashed evidence vault"
+description = "Human-gated audit workflow: CrewAI agents draft a RACM, working papers and a report, with QA review, three approval gates, read-only AWS evidence and a hashed evidence vault"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Tiago Brachini" }]
 readme = "README.md"
 requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
-    "streamlit>=1.31.0",
-    "pandas>=2.2.0",
     "pdfplumber>=0.10.3",
     "pydantic>=2.7.0",
     "python-dotenv>=1.2.2",
@@ -22,6 +28,10 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.31",
 ]
+
+[project.urls]
+Repository = "https://github.com/tvobrachini/grc-audit-swarm"
+Issues = "https://github.com/tvobrachini/grc-audit-swarm/issues"
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]

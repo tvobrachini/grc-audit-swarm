@@ -16,7 +16,11 @@ export default function App() {
 
       {session ? (
         <>
-          <MiddlePanel session={session} events={events} />
+          <MiddlePanel
+            session={session}
+            events={events}
+            onDeleted={() => setSelectedId(null)}
+          />
           <InspectorPanel session={session} events={events} />
         </>
       ) : (
