@@ -21,7 +21,7 @@ import os
 import tempfile
 import threading
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,22 +35,49 @@ SESSIONS_PATH = os.environ.get("SESSIONS_PATH", _DEFAULT_SESSIONS_PATH)
 _LOCK = threading.Lock()
 
 
+def _backup_corrupt_file(reason: str) -> None:
+    """Move an unreadable sessions file aside so the next save cannot wipe it."""
+    backup = f"{SESSIONS_PATH}.corrupt-{datetime.now().strftime('%Y%m%dT%H%M%S%f')}"
+    try:
+        os.replace(SESSIONS_PATH, backup)
+    except FileNotFoundError:
+        # Another reader already moved it aside.
+        return
+    logger.error(
+        "Sessions file at %s is corrupt (%s) — backed it up to %s and starting "
+        "with an empty session map. Restore it manually if needed.",
+        SESSIONS_PATH,
+        reason,
+        backup,
+    )
+
+
 def _load() -> Dict:
-    if os.path.exists(SESSIONS_PATH):
-        try:
-            with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            logger.exception(
-                "Failed to load sessions file at %s — returning empty session map",
-                SESSIONS_PATH,
-            )
-            return {}
-    return {}
+    """Read the sessions map.
+
+    A file that exists but cannot be parsed is renamed to
+    ``<path>.corrupt-<timestamp>`` before returning an empty map; otherwise the
+    next ``_save`` would silently overwrite every stored session. I/O errors
+    (permissions, disk) are re-raised rather than treated as "no sessions" for
+    the same reason.
+    """
+    if not os.path.exists(SESSIONS_PATH):
+        return {}
+    try:
+        with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (ValueError, UnicodeDecodeError) as exc:  # JSONDecodeError ⊂ ValueError
+        _backup_corrupt_file(f"{type(exc).__name__}: {exc}")
+        return {}
+    if not isinstance(data, dict):
+        _backup_corrupt_file(f"top-level JSON is {type(data).__name__}, not object")
+        return {}
+    return data
 
 
 def _save(data: Dict) -> None:
-    dir_path = os.path.dirname(SESSIONS_PATH)
+    """Write the sessions map atomically (temp file in the same dir + os.replace)."""
+    dir_path = os.path.dirname(SESSIONS_PATH) or "."
     os.makedirs(dir_path, exist_ok=True)
     tmp_path = None
     try:
@@ -59,8 +86,10 @@ def _save(data: Dict) -> None:
         ) as tmp:
             tmp_path = tmp.name
             json.dump(data, tmp, indent=2)
+            tmp.flush()
+            os.fsync(tmp.fileno())
         os.replace(tmp_path, SESSIONS_PATH)
-    except OSError:
+    except (OSError, TypeError, ValueError):
         logger.exception("Failed to save sessions file at %s", SESSIONS_PATH)
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -72,32 +101,45 @@ def save_session(
     name: str,
     scope_text: str = "",
     chat_history: Optional[list] = None,
+    **extra_fields: Any,
 ) -> None:
-    """Register/update an audit session by thread_id."""
+    """Register/update an audit session by thread_id.
+
+    Creates the entry if missing. Fields this function does not own
+    (``status``, ``ui_phase``, ``state_snapshot`` …) are preserved, and any
+    ``extra_fields`` are merged in the same locked write.
+    """
     with _LOCK:
         data = _load()
-        existing = data.get(thread_id, {})
-        data[thread_id] = {
-            "name": name,
-            "created_at": existing.get(
-                "created_at", datetime.now().isoformat(timespec="seconds")
-            ),
-            "scope_preview": scope_text[:200],  # keep it short for display
-            "scope_text": scope_text,
-            "chat_history": chat_history or existing.get("chat_history", []),
-        }
+        entry = dict(data.get(thread_id, {}))
+        entry.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
+        entry.update(
+            {
+                "name": name,
+                "scope_preview": scope_text[:200],  # keep it short for display
+                "scope_text": scope_text,
+                "chat_history": chat_history or entry.get("chat_history", []),
+            }
+        )
+        entry.update(extra_fields)
+        data[thread_id] = entry
         _save(data)
 
 
-def update_session(thread_id: str, **fields) -> None:
-    """Merge selected session fields for an existing thread."""
+def update_session(thread_id: str, **fields) -> bool:
+    """Merge fields into an existing session in a single locked write.
+
+    Never creates a session: returns False (and writes nothing) when the
+    thread_id is unknown, e.g. because it was deleted while a phase was running.
+    """
     with _LOCK:
         data = _load()
         if thread_id not in data:
-            return
+            return False
 
         data[thread_id].update(fields)
         _save(data)
+        return True
 
 
 def list_sessions() -> Dict:
