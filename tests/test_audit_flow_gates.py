@@ -228,6 +228,75 @@ class TestRetryPhase:
         assert flow.state.status == "WAITING_HUMAN_GATE_1"
 
 
+_FEEDBACK_KEY = {1: "qa_feedback", 2: "qa_feedback", 3: "tone_qa_feedback"}
+
+
+class TestRetryCarriesQaFeedback:
+    """A human retry of a QA-rejected phase feeds the stored rejection reason
+    back to the crew (same input the automatic retry uses)."""
+
+    @pytest.mark.parametrize("phase", [1, 2, 3])
+    def test_retry_injects_previous_rejection(self, phase):
+        flow = make_flow(phase)
+        artifact = PHASES[phase]["make"]()
+        rejected = QA_PushbackSchema(
+            approved=False, rejection_reason="Controls lack sampling {detail}"
+        )
+        run_phase(
+            flow,
+            phase,
+            [crew_result(phase, rejected, artifact)] * 2,
+        )
+        assert flow.state.status == f"QA_REJECTED_PHASE_{phase}"
+
+        flow.retry_phase(phase, "supervisor@co.com")
+        mock_crew, _ = run_phase(flow, phase, [crew_result(phase, APPROVED, artifact)])
+
+        inputs = mock_crew.kickoff.call_args.kwargs["inputs"]
+        feedback = inputs[_FEEDBACK_KEY[phase]]
+        assert "Controls lack sampling {detail}" in feedback
+        assert feedback.startswith(" IMPORTANT")
+        assert flow.state.status == f"WAITING_HUMAN_GATE_{phase}"
+
+    def test_retry_after_error_has_no_feedback(self):
+        flow = make_flow(2)
+        run_phase(flow, 2, [crew_result(2, APPROVED, None)])
+        assert flow.state.status == "ERROR_PHASE_2"
+        flow.retry_phase(2, "bob")
+        mock_crew, _ = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        assert mock_crew.kickoff.call_args.kwargs["inputs"]["qa_feedback"] == ""
+
+    def test_first_run_after_gate_has_no_feedback(self):
+        # An old retry entry followed by a gate approval must not leak into
+        # the next phase's first run.
+        flow = make_flow(1)
+        rejected = QA_PushbackSchema(approved=False, rejection_reason="bad RACM")
+        run_phase(flow, 1, [crew_result(1, rejected, make_racm())] * 2)
+        flow.retry_phase(1, "sup")
+        run_phase(flow, 1, [crew_result(1, APPROVED, make_racm())])
+        flow.begin_phase_2("sup")
+        mock_crew, _ = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        assert mock_crew.kickoff.call_args.kwargs["inputs"]["qa_feedback"] == ""
+
+    def test_feedback_survives_reload(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            session_manager, "SESSIONS_PATH", str(tmp_path / "sessions.json")
+        )
+        flow = make_flow(1)
+        rejected = QA_PushbackSchema(approved=False, rejection_reason="bad RACM")
+        run_phase(flow, 1, [crew_result(1, rejected, make_racm())] * 2)
+        flow.retry_phase(1, "sup")
+        session_manager.save_session("s1", "n", flow.state.business_context)
+        FlowRepository().save("s1", flow)
+
+        loaded = FlowRepository().load("s1")
+        assert loaded is not None
+        mock_crew, _ = run_phase(
+            loaded.flow, 1, [crew_result(1, APPROVED, make_racm())]
+        )
+        assert "bad RACM" in mock_crew.kickoff.call_args.kwargs["inputs"]["qa_feedback"]
+
+
 class TestSupervisorOverride:
     def _rejected_flow(self, phase: int = 1) -> AuditFlow:
         flow = make_flow(phase)
