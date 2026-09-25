@@ -34,7 +34,7 @@ def render_phase2_review(
     k4.metric("❌ Material Weaknesses", fails)
 
     st.markdown("---")
-    st.markdown("### 📋 Working Papers (IIA 2330 / PCAOB AS 1215 Immutable Vault)")
+    st.markdown("### 📋 Working Papers (Standard 14.6, formerly IIA 2330; PCAOB AS 1215) — Hashed Evidence Vault")
 
     for f in findings:
         cid = f.get("control_id")
@@ -107,7 +107,7 @@ def render_phase2_review(
 
     with c_center:
         if st.button(
-            "✅ Approve Working Papers & Generate Final Report (IIA 2340)",
+            "✅ Approve Working Papers & Generate Final Report (Standard 12.3, formerly IIA 2340)",
             type="primary",
             use_container_width=True,
         ):

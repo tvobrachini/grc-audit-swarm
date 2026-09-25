@@ -99,7 +99,7 @@ def render_phase1_review(
 
     with col_approve:
         if st.button(
-            "🚀 Approve & Target Collection (IIA 2340 Stamping)",
+            "🚀 Approve & Target Collection (Standard 12.3, formerly IIA 2340)",
             type="primary",
             use_container_width=True,
         ):
