@@ -552,7 +552,9 @@ elif st.session_state.phase == 3:
     )
 
     st.markdown("---")
-    st.markdown("### 📝 Engagement Supervision Audit Trail (Standard 12.3, formerly IIA 2340)")
+    st.markdown(
+        "### 📝 Engagement Supervision Audit Trail (Standard 12.3, formerly IIA 2340)"
+    )
     trail = flow.state.approval_trail
     if trail:
         for entry in trail:
