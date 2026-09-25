@@ -38,12 +38,13 @@ app = FastAPI(title="GRC Audit Swarm API", version="0.1.0", lifespan=lifespan)
 
 # The API is credentialed (bearer token), so a wildcard origin is invalid per
 # the CORS spec when allow_credentials=True — browsers reject that combination.
-# CORS_ALLOWED_ORIGINS is a comma-separated allow-list; defaults cover local dev.
+# CORS_ALLOWED_ORIGINS is a comma-separated allow-list; the default covers the
+# Vite dev server (the compose frontend is same-origin via its nginx proxy).
 _allowed_origins = [
     origin.strip()
-    for origin in os.environ.get(
-        "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8502"
-    ).split(",")
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(
+        ","
+    )
     if origin.strip() and origin.strip() != "*"
 ]
 

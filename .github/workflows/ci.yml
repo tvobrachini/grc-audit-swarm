@@ -136,8 +136,6 @@ jobs:
           # GHSA-xf7x-x43h-rpqh: json-repair 0.25.2, pinned transitively by
           #   chromadb 1.1.1; fixed in json-repair 0.60.1 but that requires a
           #   chromadb/crewai bump — revisit then.
-          # PYSEC-2026-3819: crewai-tools 0.76.0 itself; fixed in 1.15.1,
-          #   same major-upgrade constraint as above.
 
   frontend:
     name: frontend
