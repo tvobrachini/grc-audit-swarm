@@ -6,6 +6,8 @@ gates, and view the hashed evidence vault.
 
 ## Development
 
+Requires Node.js 24 (the current LTS line; CI and the Docker build stage use it too).
+
 ```bash
 cd frontend
 npm ci
