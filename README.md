@@ -236,9 +236,9 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
 - pytest on Python 3.11, 3.12 and 3.13, failing below 50% coverage;
 - bandit, and pip-audit against the exported `uv.lock` requirements (the ignored advisories are listed and explained in the workflow);
 - frontend lint, build and `npm audit --audit-level=high`;
-- Docker builds for both images and `docker compose config`.
+- Docker builds for both images and `docker compose config`. The API image runs Python 3.13, the newest version the test matrix covers; the frontend build stage uses Node.js 24, the current LTS line, which is also what CI's frontend job uses.
 
-All GitHub Actions are pinned to commit SHAs. A dependency-review workflow runs on pull requests, and Dependabot tracks uv, npm, GitHub Actions and both Dockerfiles.
+All GitHub Actions are pinned to commit SHAs. A dependency-review workflow runs on pull requests, and Dependabot tracks uv, npm, GitHub Actions and both Dockerfiles. Python 3.14 is not supported yet: crewai pins `chromadb~=1.1.0`, and chromadb 1.1.x fails to import on 3.14, so Dependabot is told not to propose it.
 
 ---
 
