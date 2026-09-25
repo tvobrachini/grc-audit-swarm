@@ -130,14 +130,12 @@ jobs:
             --ignore-vuln PYSEC-2026-3813 \
             --ignore-vuln PYSEC-2026-3814 \
             --ignore-vuln PYSEC-2026-3815 \
-            --ignore-vuln GHSA-xf7x-x43h-rpqh \
-            --ignore-vuln PYSEC-2026-3819
-          # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, no fixed version
-          #   published upstream yet.
+            --ignore-vuln GHSA-xf7x-x43h-rpqh
+          # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, pulled in directly
+          #   by crewai; no fixed version published upstream yet.
           # GHSA-xf7x-x43h-rpqh: json-repair 0.25.2, pinned transitively by
-          #   crewai-tools 0.76.0; fixed in json-repair 0.60.1 but that
-          #   requires a major crewai-tools bump (crews are owned by another
-          #   in-flight change) — revisit once crewai-tools is upgraded.
+          #   chromadb 1.1.1; fixed in json-repair 0.60.1 but that requires a
+          #   chromadb/crewai bump — revisit then.
           # PYSEC-2026-3819: crewai-tools 0.76.0 itself; fixed in 1.15.1,
           #   same major-upgrade constraint as above.
 
