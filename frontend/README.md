@@ -1,42 +1,43 @@
 # GRC Audit Swarm — React Frontend
 
-This directory contains the modern **React + Vite** frontend for the GRC Audit Swarm platform. It replaces the legacy Streamlit interface to provide a more dynamic, scalable, and customizable user experience for interacting with the AI agent crews and viewing the immutable evidence vault.
+React + Vite + TypeScript UI for the GRC Audit Swarm platform. It talks to the
+FastAPI backend in `src/api/` to launch audit runs, walk the human review
+gates, and view the hashed evidence vault.
 
-## Tech Stack
-- **Framework:** React 18
-- **Build Tool:** Vite
-- **Language:** TypeScript
-- **Backend Communication:** REST API (FastAPI backend in `src/api`)
+## Development
 
-## Getting Started
-
-### Prerequisites
-Make sure you have Node.js (v18+) and npm installed. The FastAPI backend must also be running for the frontend to function properly.
-
-### Installation
 ```bash
 cd frontend
-npm install
-```
-
-### Development Server
-To start the Vite development server with Hot Module Replacement (HMR):
-```bash
+npm ci
 npm run dev
 ```
-The application will be available at `http://localhost:5173`.
 
-### Docker Deployment
-For production or full-stack testing, the frontend is built and served via Nginx in the root `docker-compose.yml`:
+This starts the Vite dev server against a local API. Vite proxies `/api`
+requests to `http://localhost:8000`, so run the FastAPI backend separately
+(see the repo root README).
+
+`VITE_API_AUTH_TOKEN` is a **dev-only** convenience: set it in a local `.env`
+file to have the dev server attach a bearer token to API requests. It gets
+baked into the JS bundle at build time, so it must never be set for a
+production build — see the comment in `src/api/client.ts` for details.
+
+## Production
+
+The frontend is built and served via Nginx, driven by the root
+`docker-compose.yml`:
+
 ```bash
 cd ..
-docker-compose up --build
+docker compose up --build
 ```
-This maps the frontend to port `3000`.
 
-## Integration with FastAPI
-The frontend communicates directly with the FastAPI backend defined in `src/api/`. By default, Vite proxies `/api` requests to `http://localhost:8000` during development to avoid CORS issues.
+In this setup nginx (see `nginx.conf.template`) injects the `Authorization`
+header server-side when proxying to the API, so the built bundle carries no
+token of its own.
 
-## Environment Variables
-Authentication tokens and API URLs can be configured using `.env` files in this directory:
-- `VITE_API_AUTH_TOKEN`: Shared bearer token used to call the protected FastAPI routes.
+## Checks
+
+```bash
+npm run lint
+npm run build
+```
