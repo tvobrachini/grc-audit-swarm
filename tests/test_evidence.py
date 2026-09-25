@@ -9,6 +9,8 @@ import json
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
@@ -365,3 +367,140 @@ class TestEncryptedVaultKeyedDigest:
         record = self._read(tmp_path, result["vault_id"])
         assert "hmac_sha256" not in record
         assert record["sha256"] == hashlib.sha256("plain payload".encode()).hexdigest()
+
+
+class TestMigrateLegacyDigests:
+    """migrate_legacy_digests() re-seals old encrypted records with the HMAC."""
+
+    @staticmethod
+    def _enable_encryption(tmp_path, monkeypatch):
+        import base64
+        import os as _os
+
+        from swarm.evidence import _build_fernet
+
+        _build_fernet.cache_clear()
+        key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
+        return key
+
+    @staticmethod
+    def _write_legacy_record(tmp_path, payload, stored_sha256=None):
+        import uuid
+
+        from swarm.evidence import _get_fernet
+
+        vault_id = str(uuid.uuid4())
+        (tmp_path / f"{vault_id}.json").write_text(
+            json.dumps(
+                {
+                    "vault_id": vault_id,
+                    "sha256": stored_sha256
+                    or hashlib.sha256(payload.encode()).hexdigest(),
+                    "mcp_source": "op",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "raw_payload": _get_fernet()
+                    .encrypt(payload.encode())
+                    .decode("ascii"),
+                    "encrypted": True,
+                }
+            )
+        )
+        return vault_id
+
+    @staticmethod
+    def _read(tmp_path, vault_id):
+        with open(tmp_path / f"{vault_id}.json") as f:
+            return json.load(f)
+
+    def test_legacy_record_is_rekeyed_and_plain_hash_removed(
+        self, tmp_path, monkeypatch
+    ):
+        from swarm.evidence import _keyed_digest
+
+        key = self._enable_encryption(tmp_path, monkeypatch)
+        payload = '{"MinimumPasswordLength": 14}'
+        vault_id = self._write_legacy_record(tmp_path, payload)
+
+        counts = EvidenceAssuranceProtocol.migrate_legacy_digests()
+
+        record = self._read(tmp_path, vault_id)
+        assert counts["migrated"] == 1
+        assert "sha256" not in record
+        assert record["hmac_sha256"] == _keyed_digest(payload, key)
+        assert hashlib.sha256(payload.encode()).hexdigest() not in json.dumps(record)
+        assert EvidenceAssuranceProtocol.verify_exact_quote(vault_id, payload)
+
+    def test_keyed_and_unencrypted_records_are_left_alone(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        keyed = EvidenceAssuranceProtocol.register_evidence("keyed payload", "op")
+        monkeypatch.delenv("VAULT_ENCRYPTION_KEY")
+        plain = EvidenceAssuranceProtocol.register_evidence("plain payload", "op")
+        self._enable_encryption(tmp_path, monkeypatch)
+        before_plain = (tmp_path / f"{plain['vault_id']}.json").read_text()
+
+        counts = EvidenceAssuranceProtocol.migrate_legacy_digests()
+
+        assert counts["migrated"] == 0
+        assert counts["unencrypted"] == 1
+        assert (tmp_path / f"{plain['vault_id']}.json").read_text() == before_plain
+        # The keyed record was written under a different key, so it counts as
+        # already keyed and is not touched.
+        assert counts["already_keyed"] == 1
+        assert "hmac_sha256" in self._read(tmp_path, keyed["vault_id"])
+
+    def test_corrupted_record_is_not_resealed(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        vault_id = self._write_legacy_record(
+            tmp_path, "real payload", stored_sha256="0" * 64
+        )
+        before = (tmp_path / f"{vault_id}.json").read_text()
+
+        counts = EvidenceAssuranceProtocol.migrate_legacy_digests()
+
+        assert counts == {
+            "migrated": 0,
+            "already_keyed": 0,
+            "unencrypted": 0,
+            "failed": 1,
+        }
+        assert (tmp_path / f"{vault_id}.json").read_text() == before
+
+    def test_migration_is_idempotent(self, tmp_path, monkeypatch):
+        self._enable_encryption(tmp_path, monkeypatch)
+        self._write_legacy_record(tmp_path, "payload one")
+
+        first = EvidenceAssuranceProtocol.migrate_legacy_digests()
+        second = EvidenceAssuranceProtocol.migrate_legacy_digests()
+
+        assert first["migrated"] == 1
+        assert second["migrated"] == 0
+        assert second["already_keyed"] == 1
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_requires_encryption_key(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        monkeypatch.delenv("VAULT_ENCRYPTION_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="VAULT_ENCRYPTION_KEY"):
+            EvidenceAssuranceProtocol.migrate_legacy_digests()
+
+    def test_cli_migrates_and_reports_counts(self, tmp_path, monkeypatch):
+        import os as _os
+        import subprocess
+
+        self._enable_encryption(tmp_path, monkeypatch)
+        self._write_legacy_record(tmp_path, "cli payload")
+        src_dir = _os.path.join(_os.path.dirname(__file__), "..", "src")
+        env = {**_os.environ, "PYTHONPATH": src_dir}
+
+        proc = subprocess.run(  # noqa: S603 - fixed argv, test-only
+            [sys.executable, "-m", "swarm.evidence", "migrate-digests"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout.strip().splitlines()[-1])["migrated"] == 1

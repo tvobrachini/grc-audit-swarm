@@ -176,6 +176,11 @@ Generate a vault encryption key:
 python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
+If you enabled encryption before the keyed digest was introduced, re-seal the older encrypted records (the command exits non-zero if any record fails its integrity check):
+```bash
+PYTHONPATH=src uv run python -m swarm.evidence migrate-digests
+```
+
 ---
 
 ## 🔬 Testing

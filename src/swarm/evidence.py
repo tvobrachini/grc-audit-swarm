@@ -215,3 +215,94 @@ class EvidenceAssuranceProtocol:
                 "verify_exact_quote failed for vault_id=%s: %s", vault_id, exc
             )
             return False
+
+    @staticmethod
+    def migrate_legacy_digests() -> dict:
+        """Replace the plain SHA-256 on encrypted records with the keyed HMAC.
+
+        Encrypted records written before the keyed digest existed still carry
+        an unkeyed SHA-256 next to the ciphertext, which lets anyone holding
+        the file confirm a guessed payload. This rewrites each such record
+        with an HMAC-SHA256 and drops the plain hash. A record is only
+        migrated if its payload decrypts and still matches its stored SHA-256,
+        so corrupted evidence is never re-sealed with a valid digest; those
+        records are left untouched and counted as failed. Unencrypted records
+        are not changed. Each file is rewritten atomically.
+
+        Returns counts: {"migrated", "already_keyed", "unencrypted", "failed"}.
+        """
+        key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
+        fernet = _get_fernet()
+        if fernet is None or not key_b64:
+            raise RuntimeError(
+                "VAULT_ENCRYPTION_KEY must be set to migrate encrypted records."
+            )
+
+        counts = {"migrated": 0, "already_keyed": 0, "unencrypted": 0, "failed": 0}
+        evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
+        if not os.path.isdir(evidence_dir):
+            return counts
+
+        for name in sorted(os.listdir(evidence_dir)):
+            if not name.endswith(".json") or not _UUID_RE.fullmatch(name[:-5]):
+                continue
+            filepath = os.path.join(evidence_dir, name)
+            try:
+                with open(filepath, "r") as f:
+                    record = json.load(f)
+
+                if not record.get("encrypted"):
+                    counts["unencrypted"] += 1
+                    continue
+                if "hmac_sha256" in record:
+                    counts["already_keyed"] += 1
+                    continue
+
+                payload = fernet.decrypt(record["raw_payload"].encode("ascii")).decode(
+                    "utf-8"
+                )
+                plain = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                if not hmac.compare_digest(plain, str(record["sha256"])):
+                    logger.error(
+                        "Not migrating %s: payload does not match its stored "
+                        "SHA-256 (corrupted or tampered)",
+                        name,
+                    )
+                    counts["failed"] += 1
+                    continue
+
+                del record["sha256"]
+                record["hmac_sha256"] = _keyed_digest(payload, key_b64)
+                tmp_path = f"{filepath}.tmp"
+                try:
+                    with open(tmp_path, "w") as f:
+                        json.dump(record, f, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, filepath)
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                counts["migrated"] += 1
+            except (
+                KeyError,
+                json.JSONDecodeError,
+                OSError,
+                ValueError,
+                InvalidToken,
+            ) as exc:
+                logger.error("Not migrating %s: %s", name, exc)
+                counts["failed"] += 1
+
+        return counts
+
+
+if __name__ == "__main__":
+    import sys
+
+    if sys.argv[1:] != ["migrate-digests"]:
+        sys.exit("usage: python -m swarm.evidence migrate-digests")
+    logging.basicConfig(level=logging.INFO)
+    result = EvidenceAssuranceProtocol.migrate_legacy_digests()
+    print(json.dumps(result))
+    sys.exit(1 if result["failed"] else 0)
