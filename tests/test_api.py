@@ -345,3 +345,34 @@ class TestJobStatus:
             resp = client.get("/api/jobs/job-1/status", headers=_auth_headers())
         assert resp.status_code == 200
         assert resp.json() == job_data
+
+
+# ─── Wave 0 hardening: auth token comparison on non-ASCII input ───────────────
+# Appended in a self-contained block to avoid conflicting with concurrent edits
+# elsewhere in this file.
+
+
+class TestAuthNonAsciiToken:
+    """httpx/TestClient itself refuses to send non-ASCII header *values*, so
+    these call require_api_auth directly (as FastAPI would, via Depends) to
+    exercise the comparison with a non-ASCII provided token."""
+
+    def test_non_ascii_bearer_token_is_rejected_not_500(self, monkeypatch):
+        monkeypatch.setenv("API_AUTH_TOKEN", "test-token")
+        from fastapi import HTTPException
+
+        from api.auth import require_api_auth
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_api_auth(authorization="Bearer café-not-the-token")
+        assert exc_info.value.status_code == 401
+
+    def test_non_ascii_x_api_token_is_rejected_not_500(self, monkeypatch):
+        monkeypatch.setenv("API_AUTH_TOKEN", "test-token")
+        from fastapi import HTTPException
+
+        from api.auth import require_api_auth
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_api_auth(authorization=None, x_api_token="éééééé")
+        assert exc_info.value.status_code == 401

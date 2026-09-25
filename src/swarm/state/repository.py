@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from swarm.audit_flow import AuditFlow
 
 from swarm.schema import FinalReportSchema, RiskControlMatrixSchema, WorkingPaperSchema
-from swarm.session_manager import get_session, save_session, update_session
+from swarm.session_manager import get_session, update_session
 from swarm.state.machine import AuditStatus
 
 logger = logging.getLogger(__name__)
@@ -31,14 +31,28 @@ class LoadResult:
 
 
 class FlowRepository:
-    def save(self, session_id: str, flow: "AuditFlow") -> None:
-        data = get_session(session_id) or {}
-        save_session(
-            thread_id=session_id,
-            name=data.get("name", session_id),
-            scope_text=flow.state.business_context,
+    def save(self, session_id: str, flow: "AuditFlow") -> bool:
+        """Persist the flow snapshot into an existing session entry.
+
+        A single locked read-modify-write that preserves every other field
+        (name, created_at, ui_phase …). It never creates the entry, so a phase
+        thread finishing after ``DELETE /sessions/{id}`` cannot resurrect the
+        deleted session. Returns False when the session no longer exists.
+        """
+        scope_text = flow.state.business_context
+        saved = update_session(
+            session_id,
+            scope_text=scope_text,
+            scope_preview=scope_text[:200],
+            status=flow.state.status,
+            state_snapshot=flow.state.model_dump(mode="json"),
         )
-        update_session(session_id, state_snapshot=flow.state.model_dump())
+        if not saved:
+            logger.info(
+                "Session %s no longer exists (deleted?) — snapshot not saved",
+                session_id,
+            )
+        return saved
 
     def load(self, session_id: str) -> Optional[LoadResult]:
         from swarm.audit_flow import AuditFlow
@@ -85,5 +99,14 @@ class FlowRepository:
                     "Failed to set field %s for session %s: %s", k, session_id, exc
                 )
                 skipped.append(k)
+
+        # Domain skills are held in memory only; rebuild them from the persisted
+        # skill ids so Fieldwork/Reporting run with the same skills after a restart.
+        try:
+            flow.restore_skill_context()
+        except Exception as exc:
+            logger.warning(
+                "Failed to restore skill context for session %s: %s", session_id, exc
+            )
 
         return LoadResult(flow=flow, skipped_fields=skipped)

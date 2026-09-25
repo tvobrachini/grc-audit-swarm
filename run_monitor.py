@@ -53,7 +53,16 @@ def check_env():
             )
         return bool(os.environ.get(k))
 
+    llm_keys = [
+        "OLLAMA_MODEL",
+        "NVIDIA_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "GROQ_API_KEY",
+    ]
     keys_to_check = [
+        "OLLAMA_MODEL",
+        "NVIDIA_API_KEY",
         "GEMINI_API_KEY",
         "GROQ_API_KEY",
         "OPENAI_API_KEY",
@@ -66,9 +75,7 @@ def check_env():
         status = "✅ SET" if is_set(k) else "❌ MISSING"
         print(f"  {status}  {k}")
 
-    if not any(
-        [is_set("GEMINI_API_KEY"), is_set("GROQ_API_KEY"), is_set("OPENAI_API_KEY")]
-    ):
+    if not any(is_set(k) for k in llm_keys):
         print("\n  FATAL: No LLM API key found. Aborting.")
         sys.exit(1)
     print()
@@ -125,13 +132,14 @@ def run_phase1(flow) -> bool:
         print(f"  ❌ QA REJECTED (after retry): {flow.state.qa_rejection_reason}")
         return False
 
-    racm = flow.state.racm_plan or {}
-    risks = racm.get("risks", [])
-    print(f"\n  ✅ RACM generated — theme: '{racm.get('theme')}', risks: {len(risks)}")
-    for r in risks:
-        ctrls = r.get("controls", [])
+    racm = flow.state.racm_plan
+    if racm is None:
+        print("  ❌ No RACM in state after Phase 1")
+        return False
+    print(f"\n  ✅ RACM generated — theme: '{racm.theme}', risks: {len(racm.risks)}")
+    for r in racm.risks:
         print(
-            f"     Risk {r.get('risk_id')}: {len(ctrls)} control(s)  — {r.get('description', '')[:60]}"
+            f"     Risk {r.risk_id}: {len(r.controls)} control(s)  — {r.description[:60]}"
         )
     return True
 
@@ -155,12 +163,12 @@ def run_phase2(flow, skip_aws: bool) -> bool:
                     severity="Pass",
                 )
             ],
-        ).model_dump()
+        )
         # Drive the real state machine (begin_phase_2 stamps the trail too) so
         # downstream gate checks (e.g. generate_reporting) see a consistent state.
         flow.begin_phase_2("MONITOR_RUNNER")
         flow.machine.complete_phase_2()
-        flow.state.status = flow.machine.status.value
+        flow._commit_status()
         print("  ✅ Mock working papers injected.")
         return True
 
@@ -184,14 +192,17 @@ def run_phase2(flow, skip_aws: bool) -> bool:
         print(f"  ❌ QA REJECTED (after retry): {flow.state.qa_rejection_reason}")
         return False
 
-    papers = flow.state.working_papers or {}
-    findings = papers.get("findings", [])
+    papers = flow.state.working_papers
+    if papers is None:
+        print("  ❌ No working papers in state after Phase 2")
+        return False
+    findings = papers.findings
     print(f"\n  ✅ Working Papers generated — {len(findings)} finding(s)")
     for f in findings:
         print(
-            f"     {f.get('control_id')}  [{f.get('severity')}]  vault={f.get('vault_id_reference', '')[:16]}…"
+            f"     {f.control_id}  [{f.severity}]  vault={f.vault_id_reference[:16]}…"
         )
-        quote = f.get("exact_quote_from_evidence", "")
+        quote = f.exact_quote_from_evidence
         print(f'       Quote: "{quote[:80]}{"…" if len(quote) > 80 else ""}"')
 
     # Vault verification
@@ -199,14 +210,14 @@ def run_phase2(flow, skip_aws: bool) -> bool:
 
     print("\n  VAULT VERIFICATION:")
     for f in findings:
-        vid = f.get("vault_id_reference", "")
-        quote = f.get("exact_quote_from_evidence", "")
+        vid = f.vault_id_reference
+        quote = f.exact_quote_from_evidence
         if vid and quote:
             verified = EvidenceAssuranceProtocol.verify_exact_quote(vid, quote)
             icon = "✅" if verified else "❌ HALLUCINATION DETECTED"
-            print(f"     {icon}  {f.get('control_id')}  vault={vid[:16]}…")
+            print(f"     {icon}  {f.control_id}  vault={vid[:16]}…")
         else:
-            print(f"     ⚠️  {f.get('control_id')}  missing vault_id or quote")
+            print(f"     ⚠️  {f.control_id}  missing vault_id or quote")
 
     return True
 
@@ -233,13 +244,16 @@ def run_phase3(flow) -> bool:
         print(f"  ❌ QA REJECTED: {flow.state.qa_rejection_reason}")
         return False
 
-    # Gate 3 (IIA 2340): final human sign-off before the audit is COMPLETED.
+    # Gate 3 (Standard 12.3, formerly IIA 2340): final human sign-off before the audit is COMPLETED.
     flow.finalize_audit("MONITOR_RUNNER")
 
-    rep = flow.state.final_report or {}
+    rep = flow.state.final_report
+    if rep is None:
+        print("  ❌ No final report in state after Phase 3")
+        return False
     print("\n  ✅ Final Report generated")
-    print(f"\n  EXECUTIVE SUMMARY:\n  {rep.get('executive_summary', '(empty)')[:300]}")
-    print(f"\n  TONE APPROVED: {rep.get('compliance_tone_approved')}")
+    print(f"\n  EXECUTIVE SUMMARY:\n  {(rep.executive_summary or '(empty)')[:300]}")
+    print(f"\n  TONE APPROVED: {rep.compliance_tone_approved}")
     return True
 
 

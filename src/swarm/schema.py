@@ -69,7 +69,7 @@ class AuditFindingSchema(BaseModel):
     control_id: str = Field(..., description="The ID of the control being evaluated.")
     vault_id_reference: str = Field(
         ...,
-        description="The immutable UUID hash belonging to the raw testing evidence.",
+        description="The UUID/hash pair identifying the raw testing evidence in the vault.",
     )
     exact_quote_from_evidence: str = Field(
         ..., description="Exact substring from the raw evidence proving the condition."

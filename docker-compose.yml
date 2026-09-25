@@ -1,34 +1,51 @@
-version: '3.8'
-
 services:
   api:
     build: .
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
-      - ./.env:/app/.env:ro
-    env_file: .env
+    environment:
+      - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
+      - SESSIONS_PATH=/app/data/audit_sessions.json
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
+    # Only the API token is needed here (nginx injects it into /api requests);
+    # compose interpolates it from .env, so the LLM and AWS keys stay out of
+    # this container.
+    environment:
+      - API_AUTH_TOKEN=${API_AUTH_TOKEN}
     depends_on:
       - api
     restart: unless-stopped
 
   streamlit:
     build: .
-    command: streamlit run app.py --server.port 8501
+    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    profiles: ["streamlit"]
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     volumes:
       - ./data:/app/data
-      - ./.env:/app/.env:ro
-    env_file: .env
+    environment:
+      - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
+      - SESSIONS_PATH=/app/data/audit_sessions.json
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped

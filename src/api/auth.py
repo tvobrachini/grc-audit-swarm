@@ -26,7 +26,10 @@ def require_api_auth(
         if scheme.lower() == "bearer":
             provided = value
 
-    if not provided or not secrets.compare_digest(provided, expected):
+    # Compare as bytes: secrets.compare_digest raises TypeError on str inputs
+    # that aren't ASCII-only, which would otherwise turn a bad/garbled token
+    # into an unhandled 500 instead of a 401.
+    if not provided or not secrets.compare_digest(provided.encode(), expected.encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API token",

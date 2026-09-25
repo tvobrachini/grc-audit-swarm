@@ -58,6 +58,26 @@ class TestGetIamPasswordPolicy:
         assert "Vault ID:" in result
         assert "No IAM password policy" in result
 
+    def test_client_creation_failure_does_not_raise_unboundlocalerror(
+        self, tmp_path, monkeypatch
+    ):
+        """If _boto_client() itself raises, the except clause referencing
+        `client.exceptions.NoSuchEntityException` must not blow up with an
+        UnboundLocalError — it should fall through to a clean error string."""
+        from botocore.exceptions import NoCredentialsError
+
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        with patch(
+            "swarm.tools.aws_tools._boto_client",
+            side_effect=NoCredentialsError(),
+        ):
+            from swarm.tools.aws_tools import get_iam_password_policy
+
+            result = get_iam_password_policy.run("")
+
+        assert "Vault ID:" in result
+        assert "Error fetching password policy" in result
+
     def test_account_id_not_in_output(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         mock_client = MagicMock()
