@@ -47,6 +47,26 @@ class TestCorruptFile:
         assert session_manager.get_session("anything") is None
         assert list(sessions_path.parent.glob("audit_sessions.json.corrupt-*"))
 
+    def test_file_fixed_by_another_thread_is_not_backed_up(
+        self, sessions_path, monkeypatch
+    ):
+        # Reader sees a corrupt file, but by the time it holds the lock a
+        # writer has replaced it with a valid one: that file must survive.
+        sessions_path.write_text('{"sess-1": {"name": "ok"}}', encoding="utf-8")
+        real_read = session_manager._read_file
+        calls = {"n": 0}
+
+        def flaky_read():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise session_manager._CorruptSessionsFile("simulated")
+            return real_read()
+
+        monkeypatch.setattr(session_manager, "_read_file", flaky_read)
+        assert session_manager.get_session("sess-1") == {"name": "ok"}
+        assert not list(sessions_path.parent.glob("*.corrupt-*"))
+        assert sessions_path.exists()
+
     def test_missing_file_returns_empty_without_backup(self, sessions_path):
         assert session_manager.list_sessions() == {}
         assert not list(sessions_path.parent.glob("*.corrupt-*"))
