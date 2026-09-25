@@ -51,6 +51,18 @@ class TestLlmFactoryPriority:
         result = _call_factory({})
         assert result["model"].startswith("gemini/")
 
+    def test_gemini_model_is_overridable(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+        result = _call_factory({})
+        assert result["model"] == "gemini/gemini-test-model"
+
+    def test_gemini_default_is_not_retired_model(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        monkeypatch.delenv("GEMINI_MODEL", raising=False)
+        result = _call_factory({})
+        assert "gemini-2.0-flash" not in result["model"]
+
     def test_openai_preferred_over_groq_when_no_gemini(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
         monkeypatch.setenv("GROQ_API_KEY", "groq-key")
