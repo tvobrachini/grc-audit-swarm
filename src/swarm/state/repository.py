@@ -100,4 +100,13 @@ class FlowRepository:
                 )
                 skipped.append(k)
 
+        # Domain skills are held in memory only; rebuild them from the persisted
+        # skill ids so Fieldwork/Reporting run with the same skills after a restart.
+        try:
+            flow.restore_skill_context()
+        except Exception as exc:
+            logger.warning(
+                "Failed to restore skill context for session %s: %s", session_id, exc
+            )
+
         return LoadResult(flow=flow, skipped_fields=skipped)

@@ -25,6 +25,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from swarm.audit_flow import AuditFlow  # noqa: E402
 from swarm.session_manager import save_session, get_session, update_session  # noqa: E402
+from swarm.state.repository import FlowRepository  # noqa: E402
 from ui.components.styles import inject_swarm_css  # noqa: E402
 from ui.components.sidebar import render_sidebar  # noqa: E402
 from ui.components.phase1_review import render_phase1_review  # noqa: E402
@@ -70,21 +71,16 @@ if "load_session_id" in st.session_state:
     tid = st.session_state.pop("load_session_id")
     meta = get_session(tid)
     if meta:
-        restored = AuditFlow()
-        snapshot = meta.get("state_snapshot") or {}
-        if snapshot:
-            skipped_fields = []
-            for k, v in snapshot.items():
-                try:
-                    setattr(restored.state, k, v)
-                except Exception:
-                    skipped_fields.append(k)
-            if skipped_fields:
-                st.warning(
-                    f"Session restored with schema mismatches — the following fields "
-                    f"were skipped (schema may have changed): {', '.join(skipped_fields)}. "
-                    "Start a new audit if behaviour is unexpected."
-                )
+        # FlowRepository.load keeps the state machine in sync with the saved
+        # status and restores the domain skill context.
+        loaded = FlowRepository().load(tid)
+        restored = loaded.flow if loaded else AuditFlow()
+        if loaded and not loaded.is_clean:
+            st.warning(
+                f"Session restored with schema mismatches — the following fields "
+                f"were skipped (schema may have changed): {', '.join(loaded.skipped_fields)}. "
+                "Start a new audit if behaviour is unexpected."
+            )
         st.session_state.flow = restored
         st.session_state.phase = meta.get("ui_phase", 0)
         st.session_state.audit_session_id = tid
