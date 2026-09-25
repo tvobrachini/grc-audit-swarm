@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -66,13 +67,37 @@ def _build_fernet(key_b64: str):
         )
 
 
+# Domain-separation label for deriving the HMAC key from VAULT_ENCRYPTION_KEY,
+# so the Fernet key itself is never reused directly for a second purpose.
+_HMAC_KEY_LABEL = b"grc-audit-swarm/evidence-vault/hmac-sha256/v1"
+
+
+def _derive_hmac_key(key_b64: str) -> bytes:
+    """Derive the vault's HMAC key from the base64 VAULT_ENCRYPTION_KEY."""
+    raw_key = base64.urlsafe_b64decode(key_b64.encode())
+    return hmac.new(raw_key, _HMAC_KEY_LABEL, hashlib.sha256).digest()
+
+
+def _keyed_digest(payload: str, key_b64: str) -> str:
+    """HMAC-SHA256 of the payload, keyed from VAULT_ENCRYPTION_KEY.
+
+    Used instead of a bare SHA-256 when the vault is encrypted: evidence
+    payloads are small and guessable (a password policy, a user's MFA flag),
+    so a plain hash stored next to the ciphertext would let anyone holding the
+    file confirm a guessed payload without the key.
+    """
+    return hmac.new(
+        _derive_hmac_key(key_b64), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
 def _redact_account_ids(text: str) -> str:
     """Replace 12-digit AWS account IDs with [REDACTED] before storing."""
     return _ACCOUNT_ID_RE.sub("[REDACTED]", text)
 
 
 class EvidenceAssuranceProtocol:
-    """SHA-256 integrity check plus exact-quote anti-hallucination check for collected audit evidence."""
+    """Integrity digest (SHA-256, or HMAC-SHA256 when encrypted) plus exact-quote check for collected audit evidence."""
 
     @staticmethod
     def _evidence_dir() -> str:
@@ -81,9 +106,10 @@ class EvidenceAssuranceProtocol:
     @staticmethod
     def register_evidence(raw_payload: str, source_mcp_operation: str) -> dict:
         """
-        Receives raw payload from an MCP, scrubs AWS account IDs, calculates SHA-256
-        hash, stores it on disk, and returns the Vault-ID/Hash to the agent so it
-        cannot hallucinate the evidence.
+        Receives raw payload from an MCP, scrubs AWS account IDs, computes an
+        integrity digest (SHA-256, or HMAC-SHA256 keyed from VAULT_ENCRYPTION_KEY
+        when the vault is encrypted), stores it on disk, and returns the
+        Vault-ID and digest.
         """
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
         os.makedirs(evidence_dir, exist_ok=True)
@@ -92,19 +118,28 @@ class EvidenceAssuranceProtocol:
         sanitized_payload = _redact_account_ids(raw_payload)
 
         vault_id = str(uuid.uuid4())
-        sha256_hash = hashlib.sha256(sanitized_payload.encode("utf-8")).hexdigest()
-
         fernet = _get_fernet()
         encrypted = fernet is not None
-        stored_payload = (
-            fernet.encrypt(sanitized_payload.encode("utf-8")).decode("ascii")
-            if encrypted
-            else sanitized_payload
-        )
+        if fernet is not None:
+            # Keyed digest: a bare SHA-256 beside the ciphertext would leak
+            # guessable payloads (see _keyed_digest).
+            digest_field = "hmac_sha256"
+            digest = _keyed_digest(
+                sanitized_payload, os.environ["VAULT_ENCRYPTION_KEY"]
+            )
+            stored_payload = fernet.encrypt(sanitized_payload.encode("utf-8")).decode(
+                "ascii"
+            )
+        else:
+            # Plaintext is stored alongside, so the hash reveals nothing extra;
+            # it detects accidental corruption only.
+            digest_field = "sha256"
+            digest = hashlib.sha256(sanitized_payload.encode("utf-8")).hexdigest()
+            stored_payload = sanitized_payload
 
         evidence_record = {
             "vault_id": vault_id,
-            "sha256": sha256_hash,
+            digest_field: digest,
             "mcp_source": source_mcp_operation,
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "raw_payload": stored_payload,
@@ -115,7 +150,7 @@ class EvidenceAssuranceProtocol:
         with open(filepath, "w") as f:
             json.dump(evidence_record, f, indent=2)
 
-        return {"vault_id": vault_id, "sha256": sha256_hash}
+        return {"vault_id": vault_id, digest_field: digest}
 
     @staticmethod
     def verify_exact_quote(vault_id: str, exact_quote_claim: str) -> bool:
@@ -153,10 +188,18 @@ class EvidenceAssuranceProtocol:
                     return False
                 payload = fernet.decrypt(payload.encode("ascii")).decode("utf-8")
 
-            if (
-                hashlib.sha256(payload.encode("utf-8")).hexdigest()
-                != evidence_record["sha256"]
-            ):
+            if "hmac_sha256" in evidence_record:
+                key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
+                if not key_b64:
+                    return False
+                expected = _keyed_digest(payload, key_b64)
+                stored = evidence_record["hmac_sha256"]
+            else:
+                # Unencrypted records, and encrypted records written before
+                # the keyed digest was introduced.
+                expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                stored = evidence_record["sha256"]
+            if not hmac.compare_digest(expected, str(stored)):
                 return False
 
             return exact_quote_claim in payload
