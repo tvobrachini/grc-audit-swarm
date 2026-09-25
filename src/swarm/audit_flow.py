@@ -454,7 +454,7 @@ class AuditFlow:
         self._commit_status()
         self.state.current_human_dossier = (
             "Planning QA Loop complete. No major structural flaws found. "
-            "Please review the RACM below for final IIA 2340 approval."
+            "Please review the RACM below for final Standard 12.3 (formerly IIA 2340) approval."
         )
 
     def generate_fieldwork(self, event_callback=None):
@@ -499,8 +499,8 @@ class AuditFlow:
         self.machine.complete_phase_2()
         self._commit_status()
         self.state.current_human_dossier = (
-            "Execution Fieldwork complete with Substantive Immutable Proofs evaluated. "
-            "Please review Findings for final IIA 2340 approval."
+            "Execution Fieldwork complete with substantive evidence evaluated. "
+            "Please review Findings for final Standard 12.3 (formerly IIA 2340) approval."
         )
 
     def generate_reporting(self, event_callback=None):

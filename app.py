@@ -252,9 +252,9 @@ if st.session_state.phase == 0:
 # PHASE 1 — Planning Phase Gate (RACM)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 1:
-    # IIA 2340: capture approver identity before the gate fires.
+    # Standard 12.3 (formerly IIA 2340): capture approver identity before the gate fires.
     gate1_approver = st.text_input(
-        "Approver Name / Email (IIA 2340 Gate 1)",
+        "Approver Name / Email (Gate 1)",
         value=st.session_state.get("gate1_approver", ""),
         placeholder="e.g. jane.doe@company.com",
         key="gate1_approver_input",
@@ -381,9 +381,9 @@ elif st.session_state.phase == 1:
 # PHASE 2 — Execution Phase Gate (Working Papers)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 2:
-    # IIA 2340: capture approver identity before the gate fires.
+    # Standard 12.3 (formerly IIA 2340): capture approver identity before the gate fires.
     gate2_approver = st.text_input(
-        "Approver Name / Email (IIA 2340 Gate 2)",
+        "Approver Name / Email (Gate 2)",
         value=st.session_state.get(
             "gate2_approver", st.session_state.get("gate1_approver", "")
         ),
@@ -410,7 +410,7 @@ elif st.session_state.phase == 2:
                             "and S3 buckets were scanned."
                         ),
                         detailed_report=(
-                            "Technical findings indicate compliance with CIS AWS Foundations. "
+                            "Technical findings map to CIS AWS Foundations control objectives. "
                             "Vault hashes have been verified against raw evidence."
                         ),
                         compliance_tone_approved=True,
@@ -454,7 +454,7 @@ elif st.session_state.phase == 2:
                 )
                 st.rerun()
             elif flow.state.status == "WAITING_HUMAN_GATE_3":
-                # Gate 3 (IIA 2340): same approver who requested the report signs
+                # Gate 3 (Standard 12.3, formerly IIA 2340): same approver who requested the report signs
                 # off to finalize it — mirrors the Gate 1/2 approval pattern.
                 flow.finalize_audit(approver or "DEMO_USER")
                 st.session_state.phase = 3
@@ -499,7 +499,7 @@ elif st.session_state.phase == 2:
     render_phase2_review(flow.state.working_papers, on_phase2_finalize)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PHASE 3 — Final Report and Immutable Audit Trail
+# PHASE 3 — Final Report and Audit Trail
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.phase == 3:
     st.success("🎉 Swarm Run Finished. Phase 3 (Reporting) Output Received!")
@@ -552,7 +552,7 @@ elif st.session_state.phase == 3:
     )
 
     st.markdown("---")
-    st.markdown("### 📝 Engagement Supervision Audit Trail (IIA 2340 Stamping)")
+    st.markdown("### 📝 Engagement Supervision Audit Trail (Standard 12.3, formerly IIA 2340)")
     trail = flow.state.approval_trail
     if trail:
         for entry in trail:

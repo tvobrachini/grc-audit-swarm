@@ -244,7 +244,7 @@ def run_phase3(flow) -> bool:
         print(f"  ❌ QA REJECTED: {flow.state.qa_rejection_reason}")
         return False
 
-    # Gate 3 (IIA 2340): final human sign-off before the audit is COMPLETED.
+    # Gate 3 (Standard 12.3, formerly IIA 2340): final human sign-off before the audit is COMPLETED.
     flow.finalize_audit("MONITOR_RUNNER")
 
     rep = flow.state.final_report

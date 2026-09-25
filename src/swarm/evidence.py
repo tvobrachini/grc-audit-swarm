@@ -82,7 +82,7 @@ class EvidenceAssuranceProtocol:
     def register_evidence(raw_payload: str, source_mcp_operation: str) -> dict:
         """
         Receives raw payload from an MCP, scrubs AWS account IDs, calculates SHA-256
-        hash, stores it immutably, and returns the Vault-ID/Hash to the agent so it
+        hash, stores it on disk, and returns the Vault-ID/Hash to the agent so it
         cannot hallucinate the evidence.
         """
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
