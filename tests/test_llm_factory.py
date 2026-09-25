@@ -91,7 +91,7 @@ class TestLlmFactoryPriority:
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
         result = _call_factory({})
         # The key goes to the LLM object, never into other providers' env vars.
-        assert result["api_key"] == "nvapi-key"
+        assert result["api_key"] == "nvapi-key"  # pragma: allowlist secret
         assert result["base_url"].startswith("https://")
         assert "OPENAI_API_KEY" not in os.environ
         assert "NVIDIA_NIM_API_KEY" not in os.environ
@@ -100,7 +100,7 @@ class TestLlmFactoryPriority:
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-key")
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
         _call_factory({})
-        assert os.environ["OPENAI_API_KEY"] == "openai-key"
+        assert os.environ["OPENAI_API_KEY"] == "openai-key"  # pragma: allowlist secret
 
     def test_ollama_preferred_over_all(self, monkeypatch):
         monkeypatch.setenv("OLLAMA_MODEL", "llama3")
