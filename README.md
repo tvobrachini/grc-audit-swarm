@@ -82,7 +82,7 @@ graph TD
 
 - **🤖 CrewAI Multi-Agent Crews:** Three independent sequential crews (Planning, Fieldwork, Reporting), each with dedicated YAML-configured agents and a QA gate.
 - **🔁 QA Auto-Retry Loop:** On rejection, the rejection reason is automatically injected as feedback and the crew re-runs once — no manual intervention needed.
-- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, preventing hallucinations. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
+- **🔐 Hashed Evidence Vault:** SHA-256 hashed evidence files, in the spirit of PCAOB AS 1215's documentation-integrity principles (not a compliance claim — the standard doesn't mandate hashing). `verify_exact_quote()` confirms agent quotes are verbatim from collected data and match the stored hash, flagging quotes that are not found in the collected evidence. Optional Fernet at-rest encryption via `VAULT_ENCRYPTION_KEY`.
 - **☁️ Live AWS Evidence Collection:** boto3-based tools call real AWS APIs directly (`get_iam_password_policy`, `list_iam_users_with_mfa`, `list_public_s3_buckets`) — no AWS CLI installation required. Requires only minimal read-only IAM permissions.
 
 <details>
@@ -206,7 +206,7 @@ src/
       aws_tools.py      # boto3-based AWS evidence collection tools
     evidence.py         # EvidenceAssuranceProtocol — SHA-256 vault + optional encryption
     audit_flow.py       # AuditFlow orchestrator (plain class, 3 methods)
-    llm_factory.py      # Multi-provider LLM binding (Gemini → OpenAI → Groq)
+    llm_factory.py      # Multi-provider LLM binding (Ollama → NVIDIA → Gemini → OpenAI → Groq)
     mcp_server.py       # FastMCP server exposing AWS tools for MCP clients
     schema.py           # RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
     session_manager.py  # Persistent audit session serialization
