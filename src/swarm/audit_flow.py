@@ -341,11 +341,13 @@ class AuditFlow:
                 rejection,
             )
             # Keep the rejected draft so a supervisor can review / override it.
-            if artifact is not None:
-                try:
-                    setattr(self.state, field, artifact)
-                except Exception:
-                    logger.warning("Rejected %s draft failed validation", field)
+            # Replace (or clear) any older draft so an override can never
+            # accept an artifact from a previous run of this phase.
+            try:
+                setattr(self.state, field, artifact)
+            except Exception:
+                logger.warning("Rejected %s draft failed validation", field)
+                setattr(self.state, field, None)
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection

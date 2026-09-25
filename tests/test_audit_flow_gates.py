@@ -277,6 +277,16 @@ class TestSupervisorOverride:
             flow.override_qa_rejection(1, "cae@co.com", "Accepted")
         assert flow.state.status == "QA_REJECTED_PHASE_1"
 
+    def test_rejection_without_artifact_clears_stale_draft(self):
+        # A stale draft from an earlier run must not be overridable.
+        flow = make_flow(2)
+        flow.state.working_papers = make_papers()
+        run_phase(flow, 2, [crew_result(2, None, None), crew_result(2, None, None)])
+        assert flow.state.status == "QA_REJECTED_PHASE_2"
+        assert flow.state.working_papers is None
+        with pytest.raises(PhaseArtifactMissingError):
+            flow.override_qa_rejection(2, "cae@co.com", "Accepted")
+
     def test_override_wrong_state_raises(self):
         flow = AuditFlow(initial_status="ERROR_PHASE_1")
         flow.state.racm_plan = make_racm()
