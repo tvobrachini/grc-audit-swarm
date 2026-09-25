@@ -62,14 +62,21 @@ class PlanningCrew:
         )
 
         # Pydantic Enforcement.
-        # Context is limited explicitly to avoid stacking all prior outputs
-        # into a single prompt — Groq/free-tier providers cap single requests at ~6k tokens.
+        # Token trade-off: in a sequential crew a task with no explicit context
+        # receives *every* prior output (scope memo + crosswalk + weighting),
+        # which overflows Groq/free-tier providers (~6k tokens per request).
+        # An empty context kept requests small but meant the RACM ignored the
+        # upstream analysis entirely. The weighting task's ranked top-3 risk
+        # list is both the most relevant and the smallest upstream output (its
+        # expected_output is a 3-line list; the Specialist already consumed the
+        # memo and crosswalk), so it is the only context passed here. Scope,
+        # theme and frameworks arrive via kickoff inputs.
         racm_task = Task(
             **self.tasks_config["racm_drafting_task"],
             name="racm_drafting_task",
             agent=auditor,
             output_pydantic=RiskControlMatrixSchema,
-            context=[],  # no prior task context — inputs injected via kickoff; keeps request under 6k TPM
+            context=[weighting_task],
         )
         qa_task = Task(
             **self.tasks_config["qa_gate_task"],

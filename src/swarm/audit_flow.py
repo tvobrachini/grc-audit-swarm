@@ -74,6 +74,29 @@ def _require_text(value: str, what: str) -> str:
     return value.strip()
 
 
+def racm_summary(racm: Any) -> str:
+    """One line per risk and control — IDs, descriptions and mappings only."""
+    if racm is None:
+        return "(no RACM available)"
+    lines: list[str] = []
+    for risk in racm.risks:
+        mapping = ", ".join(risk.regulatory_mapping)
+        lines.append(f"{risk.risk_id}: {risk.description} [{mapping}]")
+        for control in risk.controls:
+            lines.append(f"  - {control.control_id}: {control.description}")
+    return "\n".join(lines) or "(RACM contains no risks)"
+
+
+def findings_index(papers: Any) -> str:
+    """``control_id | severity | vault_id`` per finding, for OSCAL mapping."""
+    if papers is None or not papers.findings:
+        return "(no findings)"
+    return "\n".join(
+        f"{f.control_id} | {f.severity} | {f.vault_id_reference}"
+        for f in papers.findings
+    )
+
+
 class AuditFlow:
     """
     Orchestrates the three-phase GRC audit: Planning → Fieldwork → Reporting.
@@ -343,6 +366,52 @@ class AuditFlow:
             return False
         return True
 
+    # ── Crew inputs ──────────────────────────────────────────────────────────
+    # Every ``{placeholder}`` in the crews' YAML task/agent configs must be a
+    # key here (CrewAI raises on a missing one; tests/test_prompt_inputs.py
+    # checks all three crews).
+
+    def _scope_string(self) -> str:
+        return (
+            f"Theme: {self.state.theme}. "
+            f"Business context: {self.state.business_context}. "
+            f"Frameworks: {', '.join(self.state.frameworks) or 'n/a'}."
+        )
+
+    def _planning_inputs(self) -> dict[str, Any]:
+        return {
+            "theme": self.state.theme,
+            "business_context": self.state.business_context,
+            "frameworks": ", ".join(self.state.frameworks),
+            "qa_feedback": "",
+        }
+
+    def _fieldwork_inputs(self) -> dict[str, Any]:
+        racm = self.state.racm_plan
+        return {
+            # Fieldwork needs the full test procedures, but not null fields.
+            "racm_string": racm.model_dump_json(exclude_none=True) if racm else "",
+            "qa_feedback": "",
+        }
+
+    def _reporting_inputs(self) -> dict[str, Any]:
+        papers = self.state.working_papers
+        return {
+            "theme": self.state.theme,
+            "scope_string": self._scope_string(),
+            # Compact RACM (risks → controls, no test steps): the writer needs
+            # the control universe, not the procedures, and the full RACM plus
+            # the working papers would overflow low-TPM providers.
+            "racm_summary": racm_summary(self.state.racm_plan),
+            "working_papers_string": (
+                papers.model_dump_json(exclude_none=True) if papers else ""
+            ),
+            # Small control_id → vault_id index for the OSCAL mapper, which
+            # otherwise only sees the narrative draft via task context.
+            "findings_index": findings_index(papers),
+            "tone_qa_feedback": "",
+        }
+
     # ── Phase runners ────────────────────────────────────────────────────────
 
     def generate_planning(self, event_callback=None):
@@ -360,12 +429,7 @@ class AuditFlow:
         logger.info("Starting Planning Phase...")
         self.state.qa_rejection_reason = None
 
-        inputs = {
-            "theme": self.state.theme,
-            "business_context": self.state.business_context,
-            "frameworks": ", ".join(self.state.frameworks),
-            "qa_feedback": "",
-        }
+        inputs = self._planning_inputs()
 
         ok = self._run_crew_with_qa(
             1,
@@ -408,10 +472,10 @@ class AuditFlow:
         logger.info("Starting Fieldwork Execution Phase...")
         self.state.qa_rejection_reason = None
 
-        racm_str = (
-            self.state.racm_plan.model_dump_json() if self.state.racm_plan else ""
-        )
-        inputs = {"racm_string": racm_str, "qa_feedback": ""}
+        if self.state.racm_plan is None:
+            self._fail_phase(2, "Cannot run Fieldwork: no Phase 1 RACM in state.")
+            return
+        inputs = self._fieldwork_inputs()
 
         ok = self._run_crew_with_qa(
             2,
@@ -456,16 +520,12 @@ class AuditFlow:
         logger.info("Starting Reporting Phase...")
         self.state.qa_rejection_reason = None
 
-        papers_str = (
-            self.state.working_papers.model_dump_json()
-            if self.state.working_papers
-            else ""
-        )
-        inputs = {
-            "scope_string": self.state.business_context,
-            "working_papers_string": papers_str,
-            "tone_qa_feedback": "",
-        }
+        if self.state.working_papers is None:
+            self._fail_phase(
+                3, "Cannot run Reporting: no Phase 2 working papers in state."
+            )
+            return
+        inputs = self._reporting_inputs()
 
         ok = self._run_crew_with_qa(
             3,
