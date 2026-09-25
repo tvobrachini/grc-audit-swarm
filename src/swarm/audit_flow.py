@@ -12,6 +12,7 @@ from swarm.crews.planning_crew import PlanningCrew
 from swarm.crews.fieldwork_crew import FieldworkCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
+from swarm.demo import DemoCrew, demo_mode_enabled, demo_reject_phase
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +413,32 @@ class AuditFlow:
             return False
         return True
 
+    # ── Crew construction ────────────────────────────────────────────────────
+
+    def _build_crew(self, phase: int, event_callback: Any = None) -> Any:
+        """The phase crew, or its fixed-output stand-in when DEMO_MODE is on.
+
+        Only the crew is swapped in demo mode; QA gating, the state machine
+        and the approval trail run exactly as for a real crew.
+        """
+        if demo_mode_enabled():  # raises in production/staging
+            return DemoCrew(
+                phase,
+                event_callback=event_callback,
+                reject=demo_reject_phase() == phase and not self._was_retried(phase),
+            )
+        crew_cls = {1: PlanningCrew, 2: FieldworkCrew, 3: ReportingCrew}[phase]
+        return crew_cls(
+            event_callback=event_callback, skill_context=self._skill_context
+        ).crew()
+
+    def _was_retried(self, phase: int) -> bool:
+        gate = f"Retry ({_PHASE_LABELS[phase]})"
+        return any(
+            e.get("action") == "retry" and e.get("gate") == gate
+            for e in self.state.approval_trail
+        )
+
     # ── Crew inputs ──────────────────────────────────────────────────────────
     # Every ``{placeholder}`` in the crews' YAML task/agent configs must be a
     # key here (CrewAI raises on a missing one; tests/test_prompt_inputs.py
@@ -482,9 +509,7 @@ class AuditFlow:
 
         ok = self._run_crew_with_qa(
             1,
-            lambda: PlanningCrew(
-                event_callback=event_callback, skill_context=self._skill_context
-            ).crew(),
+            lambda: self._build_crew(1, event_callback),
             inputs,
             qa_task="qa_gate_task",
             artifact_task="racm_drafting_task",
@@ -526,9 +551,7 @@ class AuditFlow:
 
         ok = self._run_crew_with_qa(
             2,
-            lambda: FieldworkCrew(
-                event_callback=event_callback, skill_context=self._skill_context
-            ).crew(),
+            lambda: self._build_crew(2, event_callback),
             inputs,
             qa_task="eval_qa_gate_task",
             artifact_task="execution_evaluation_task",
@@ -574,9 +597,7 @@ class AuditFlow:
 
         ok = self._run_crew_with_qa(
             3,
-            lambda: ReportingCrew(
-                event_callback=event_callback, skill_context=self._skill_context
-            ).crew(),
+            lambda: self._build_crew(3, event_callback),
             inputs,
             qa_task="tone_qa_task",
             artifact_task="final_report_assembly_task",

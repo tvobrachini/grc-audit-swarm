@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -5,14 +7,22 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import require_api_auth
-import asyncio
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
-from api.routers import evidence, phases, sessions
+from api.routers import config, evidence, phases, sessions
+from swarm.demo import demo_mode_enabled
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to start with DEMO_MODE in production/staging: demo_mode_enabled()
+    # raises DemoModeNotAllowedError there, which aborts startup.
+    if demo_mode_enabled():
+        logger.warning(
+            "DEMO_MODE is on: phase crews are replaced with fixed demo artifacts."
+        )
     set_main_loop(asyncio.get_running_loop())
     init_executor()
     yield
@@ -50,6 +60,9 @@ app.include_router(
 )
 app.include_router(
     phases.router, prefix="/api", tags=["phases"], dependencies=_api_auth
+)
+app.include_router(
+    config.router, prefix="/api", tags=["config"], dependencies=_api_auth
 )
 app.include_router(
     evidence.router,
