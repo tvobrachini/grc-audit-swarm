@@ -4,6 +4,20 @@ from crewai import LLM
 
 logger = logging.getLogger(__name__)
 
+_NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
+
+_PROVIDER_ENV_VARS = (
+    "OLLAMA_MODEL",
+    "NVIDIA_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+    "GROQ_API_KEY",
+)
+
+
+class LLMConfigurationError(RuntimeError):
+    """Raised when no LLM provider is configured in the environment."""
+
 
 def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
     """
@@ -14,36 +28,43 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
       3. Gemini (Most generous free-tier TPM)
       4. OpenAI (Enterprise standard)
       5. Groq (Fastest, but harsh TPM limits)
+
+    Credentials are passed to the LLM object directly — this function never
+    mutates ``os.environ``, so one provider's key cannot leak into another
+    provider's client elsewhere in the process.
+
+    Raises:
+        LLMConfigurationError: if none of the supported providers is configured.
+            There is deliberately no silent fallback: a crew run without a real
+            model would only fail later with a confusing authentication error.
     """
-    if os.environ.get("OLLAMA_MODEL"):
+    ollama_model = os.environ.get("OLLAMA_MODEL")
+    if ollama_model:
         # Local Ollama integration
-        model_name = os.environ.get("OLLAMA_MODEL")
-        logger.info(f"[LLM Factory] Binding to Local Ollama: {model_name}.")
+        logger.info(f"[LLM Factory] Binding to Local Ollama: {ollama_model}.")
         return LLM(
-            model=f"ollama/{model_name}",
-            base_url="http://localhost:11434",
+            model=f"ollama/{ollama_model}",
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=temperature,
             timeout=120,
         )
 
-    if os.environ.get("NVIDIA_API_KEY"):
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key:
         try:
-            # Native NVIDIA NIM provider often expects this specific env var
-            os.environ["NVIDIA_NIM_API_KEY"] = os.environ["NVIDIA_API_KEY"]
-            # Also set OPENAI_API_KEY as a backup for compatibility layers
-            os.environ["OPENAI_API_KEY"] = os.environ["NVIDIA_API_KEY"]
-
             model_name = "meta/llama-3.3-70b-instruct"
             logger.info(f"[LLM Factory] Binding to NVIDIA NIM: {model_name}.")
             return LLM(
                 model=f"nvidia_nim/{model_name}",
-                api_key=os.environ.get("NVIDIA_API_KEY"),
+                api_key=nvidia_key,
+                base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_DEFAULT_BASE_URL),
                 temperature=temperature,
                 timeout=120,
             )
         except Exception as e:
             logger.warning(
-                f"[LLM Factory] NVIDIA NIM failed to initialize: {e}. Falling back to Gemini."
+                f"[LLM Factory] NVIDIA NIM failed to initialize: {e}. "
+                "Falling back to the next configured provider."
             )
 
     if os.environ.get("GEMINI_API_KEY"):
@@ -60,10 +81,11 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
         logger.info("[LLM Factory] Binding to Groq Llama 3.3 70B Versatile.")
         return LLM(model="groq/llama-3.3-70b-versatile", temperature=temperature)
 
-    logger.warning(
-        "[LLM Factory] No API keys found! Defaulting to mocked/fallback LLM."
+    raise LLMConfigurationError(
+        "No LLM provider configured. Set one of: "
+        + ", ".join(_PROVIDER_ENV_VARS)
+        + " (or run with DEMO_MODE=1 to bypass the crews)."
     )
-    return LLM(model="openai/gpt-4o-mini", temperature=temperature)
 
 
 # Alias for runtime_adapters compatibility
