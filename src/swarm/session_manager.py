@@ -1,8 +1,8 @@
 """
 Audit Session Manager
 ----------------------------
-Stores a mapping of LangGraph thread_ids → human-readable audit names
-in a simple JSON file on disk so sessions survive Streamlit restarts.
+Stores audit sessions (name, status, flow state snapshot) keyed by session id
+in a simple JSON file on disk so sessions survive process restarts.
 
 File: data/audit_sessions.json
 Schema: {
@@ -31,18 +31,34 @@ _DEFAULT_SESSIONS_PATH = os.path.join(
 SESSIONS_PATH = os.environ.get("SESSIONS_PATH", _DEFAULT_SESSIONS_PATH)
 
 # Guards the read-modify-write sequence in save_session/update_session/delete_session
-# against lost updates from concurrent requests within this process.
-_LOCK = threading.Lock()
+# against lost updates from concurrent requests within this process. Re-entrant
+# because the corrupt-file backup path in _load (called by those writers while
+# they hold the lock) takes it too.
+_LOCK = threading.RLock()
+
+
+class _CorruptSessionsFile(Exception):
+    pass
+
+
+def _read_file() -> Dict:
+    """Parse the sessions file. Raises FileNotFoundError or _CorruptSessionsFile."""
+    try:
+        with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (ValueError, UnicodeDecodeError) as exc:  # JSONDecodeError ⊂ ValueError
+        raise _CorruptSessionsFile(f"{type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise _CorruptSessionsFile(
+            f"top-level JSON is {type(data).__name__}, not object"
+        )
+    return data
 
 
 def _backup_corrupt_file(reason: str) -> None:
     """Move an unreadable sessions file aside so the next save cannot wipe it."""
     backup = f"{SESSIONS_PATH}.corrupt-{datetime.now().strftime('%Y%m%dT%H%M%S%f')}"
-    try:
-        os.replace(SESSIONS_PATH, backup)
-    except FileNotFoundError:
-        # Another reader already moved it aside.
-        return
+    os.replace(SESSIONS_PATH, backup)
     logger.error(
         "Sessions file at %s is corrupt (%s) — backed it up to %s and starting "
         "with an empty session map. Restore it manually if needed.",
@@ -61,18 +77,23 @@ def _load() -> Dict:
     (permissions, disk) are re-raised rather than treated as "no sessions" for
     the same reason.
     """
-    if not os.path.exists(SESSIONS_PATH):
-        return {}
     try:
-        with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (ValueError, UnicodeDecodeError) as exc:  # JSONDecodeError ⊂ ValueError
-        _backup_corrupt_file(f"{type(exc).__name__}: {exc}")
+        return _read_file()
+    except FileNotFoundError:
         return {}
-    if not isinstance(data, dict):
-        _backup_corrupt_file(f"top-level JSON is {type(data).__name__}, not object")
-        return {}
-    return data
+    except _CorruptSessionsFile:
+        pass
+    # Re-check under the writer lock before moving the file aside: another
+    # thread may already have backed it up and written a fresh, valid file,
+    # which must not be mistaken for the corrupt one.
+    with _LOCK:
+        try:
+            return _read_file()
+        except FileNotFoundError:
+            return {}
+        except _CorruptSessionsFile as exc:
+            _backup_corrupt_file(str(exc))
+            return {}
 
 
 def _save(data: Dict) -> None:
