@@ -8,7 +8,9 @@ services:
     environment:
       - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
       - SESSIONS_PATH=/app/data/audit_sessions.json
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -23,9 +25,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:3000:80"
+    # Only the API token is needed here (nginx injects it into /api requests);
+    # compose interpolates it from .env, so the LLM and AWS keys stay out of
+    # this container.
     environment:
       - API_AUTH_TOKEN=${API_AUTH_TOKEN}
-    env_file: .env
     depends_on:
       - api
     restart: unless-stopped
@@ -41,5 +45,7 @@ services:
     environment:
       - EVIDENCE_VAULT_PATH=/app/data/evidence_vault
       - SESSIONS_PATH=/app/data/audit_sessions.json
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped

@@ -182,4 +182,4 @@ jobs:
         run: docker build -t swarm-frontend-test ./frontend
 
       - name: Compose Smoke Test
-        run: docker compose config
+        run: docker compose config -q
