@@ -29,7 +29,7 @@ This project asks a narrow question: if agents draft the work, can the workflow 
 | Reviewer pushback | Each crew ends with a QA reviewer agent. A rejection, or a QA answer that cannot be parsed, fails the phase closed. The crew is re-run once with the reason as feedback. After that a person decides: retry, or accept the draft with a written justification and then approve the gate as usual. | `_run_crew_with_qa` in `audit_flow.py` |
 | Test design vs effectiveness | The RACM schema requires test-of-design, test-of-effectiveness and substantive steps for every control. The Planning QA prompt rejects inquiry-only effectiveness tests and missing substantive steps. | `src/swarm/schema.py`, `src/swarm/config/planning_tasks.yaml` |
 | Evidence integrity (inspired by PCAOB AS 1215 and IIA Standard 14.6, formerly 2330) | Evidence is redacted, stored with a SHA-256 digest (or a keyed HMAC plus Fernet encryption when a key is set), and each quote in the working papers is checked word for word against the stored record | `src/swarm/evidence.py` |
-| Scope and access limits | Evidence tools make read-only AWS calls. The README lists the eight IAM actions they need. AWS account IDs are redacted before storage and before the model sees the output. | `src/swarm/tools/aws_tools.py` |
+| Scope and access limits | Evidence tools make read-only AWS calls. The README lists the eight IAM actions they need. AWS account IDs are redacted before storage and before the model sees the output. | `src/swarm/tools/aws_checks.py` (boto3 reads), `aws_tools.py` (CrewAI wrappers) |
 | Consistent inputs between phases | Fieldwork receives the approved RACM. Reporting receives the scope, a RACM summary and the approved working papers. A test checks that every prompt placeholder is filled. | `tests/test_prompt_inputs.py` |
 
 The standards are cited as design inspiration. Neither AS 1215 nor the IIA Standards require hashing or any other specific mechanism. AS 1215 governs audits of public-company financial statements, which this tool does not perform. The project makes no compliance claim.
@@ -67,7 +67,7 @@ If the approach holds up, a reviewer would spend their time challenging a struct
 1. `src/swarm/audit_flow.py`: phase orchestration, the fail-closed QA retry loop, gate actions and the approval trail.
 2. `src/swarm/state/machine.py`: the allowed state transitions.
 3. `src/swarm/evidence.py`: redaction, digests, optional encryption, quote verification and `migrate-digests`.
-4. `src/swarm/tools/aws_tools.py`: the read-only AWS evidence tools.
+4. `src/swarm/tools/aws_checks.py` (boto3 reads) and `aws_tools.py` (CrewAI wrappers): the read-only AWS evidence tools.
 5. `src/swarm/crews/` and `src/swarm/config/`: the crews and their agent and task prompts.
 6. `src/api/` and `frontend/src/`: the FastAPI backend and the React UI (gates, retry and override, findings with vault checks, exports).
 7. `tests/`: including `test_audit_flow_gates.py`, `test_api_gates.py`, `test_evidence.py` and `test_prompt_inputs.py`.

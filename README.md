@@ -147,7 +147,7 @@ flowchart TD
 
 **Evidence.** The Field Evidence Collector calls three boto3-based tools: IAM password policy, IAM users with MFA status, and S3 buckets with a PUBLIC / NOT_PUBLIC / UNKNOWN verdict per bucket (from the bucket policy status, ACL grants, and account- and bucket-level Block Public Access). A read that is denied makes the verdict UNKNOWN rather than a guess. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
 
-**Outputs.** The UI shows the RACM, a findings board with per-finding vault checks, the report and the approval trail. Four downloads are available once the artifact exists (`GET /api/sessions/{id}/export/...`): `racm.xlsx`, `working-papers.xlsx`, `report.md` and `oscal.json`. Spreadsheet cells are sanitised against formula injection.
+**Outputs.** The UI shows the RACM, a findings board with per-finding vault checks, the report and the approval trail. Four downloads are available once the artifact exists (`GET /api/sessions/{id}/export/...`): `racm.xlsx`, `working-papers.xlsx`, `report.md` and `oscal.json`. Spreadsheet cells are sanitized against formula injection.
 
 **Scope documents.** A new audit can include a PDF or text scope document (up to 5 MB, 30 PDF pages and 20,000 extracted characters). The extracted text is wrapped in delimiters that label it as untrusted user-supplied content. This reduces prompt-injection risk but does not remove it. The human gates are the control that matters.
 
@@ -327,7 +327,9 @@ src/
       repository.py      # Save / load a flow with its artifacts
     crews/               # PlanningCrew, FieldworkCrew, ReportingCrew, result adapter
     config/              # YAML agent and task prompts per crew; MCP server config
-    tools/aws_tools.py   # Read-only boto3 evidence tools
+    tools/
+      aws_checks.py      # Read-only boto3 evidence logic (shared with the MCP server)
+      aws_tools.py       # CrewAI tool wrappers: redaction and vault registration
     evidence.py          # Evidence vault, redaction, quote check, migrate-digests
     schema.py            # RACM, working paper, final report and OSCAL-inspired models
     demo.py              # DEMO_MODE stand-in crews and labeled demo artifacts
@@ -338,12 +340,15 @@ src/
   api/
     main.py              # FastAPI app, auth, CORS, upload size limit
     auth.py              # Bearer-token check
+    executor.py          # Thread pool for phase jobs
+    job_store.py         # Job status tracking
+    models.py            # Request/response models
     routers/             # sessions (gates, retry, override), exports, phases (jobs, stream), evidence, config
-    exports.py           # xlsx / Markdown / OSCAL JSON builders with formula-injection sanitising
+    exports.py           # xlsx / Markdown / OSCAL JSON builders with formula-injection sanitizing
     scope_document.py    # PDF and text scope-document extraction and wrapping
 frontend/                # React + Vite UI, served by nginx in Compose (nginx.conf.template)
 skills/                  # Domain skill prompts (AWS, ITGC, PCI DSS, HIPAA, GDPR)
-tests/                   # pytest suite
+tests/                   # pytest suite; tests/eval/ holds the moto evidence-layer evaluation
 run_monitor.py           # Headless run of all three crews
 aws_safety_heartbeat.py  # Checks a lab AWS account for running EC2 / RDS resources
 Dockerfile, docker-compose.yml
