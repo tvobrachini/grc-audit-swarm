@@ -53,10 +53,13 @@ specialist_system_prompt: |
   4. **Evidence that maps directly** to a CIS benchmark control or AWS Well-Architected question
 
   Reject vague generic steps — every TOE step must name the exact AWS service and metric being tested.
+  A single API or console read shows configuration at one point in time (design and implementation).
+  For operating effectiveness over a period, use configuration history (e.g. AWS Config, CloudTrail)
+  or rely on tested change-management controls, and say which.
 
-# Context injected into the Researcher agent for the 1-Pager Risk Context
 researcher_context_hint: >
-  Focus research on: recent AWS misconfigurations causing breaches (S3 exposure, IAM
-  privilege escalation), AWS-specific regulatory enforcement actions, cloud-native
-  attack patterns (SSRF → metadata service, container escape), and FinOps vs Security
-  tradeoffs in cloud environments.
+  Focus on well-known AWS misconfiguration patterns (S3 exposure, IAM privilege escalation,
+  long-lived access keys), cloud-native attack patterns (SSRF to the instance metadata service,
+  container escape), and FinOps vs security trade-offs in cloud environments.
+  Do not cite specific enforcement actions, fines, incidents, filings or dates
+  you cannot source; describe them as general patterns.

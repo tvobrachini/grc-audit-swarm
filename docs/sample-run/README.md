@@ -14,9 +14,9 @@ exported, so each file also carries a real (demo) approval trail.
 
 | File | What it is |
 | --- | --- |
-| `racm.xlsx` | The Risk and Control Matrix from Gate 1 (Planning): risks, mapped controls, and the test-of-design / test-of-operation / substantive-testing steps for each control. |
-| `working-papers.xlsx` | The fieldwork findings from Gate 2: one row per control tested, its severity, conclusion, the evidence quote, and whether that quote is verified against the evidence vault (`Quote Verified in Vault`). Demo evidence is synthetic but is written to the vault under a DEMO DATA label, so this column shows the real verification result ("Yes" in this sample). |
-| `report.md` | The final report from Gate 3: executive summary, detailed findings, and the full approval trail (who approved which gate, and when). |
+| `racm.xlsx` | The Risk and Control Matrix from Gate 1 (Planning): risks with likelihood and impact, mapped controls with their attributes (owner, frequency, nature, type, key control, assertions / objectives, IPE), the test-of-design / test-of-operating-effectiveness / substantive-testing steps, and the test design (population, sample size, sampling method, period of reliance). |
+| `working-papers.xlsx` | The fieldwork findings from Gate 2: one row per control, with its test-of-design and operating-effectiveness conclusions, the basis for the operating-effectiveness conclusion, items tested, exceptions, result, preliminary-deficiency flag, conclusion, the evidence quote, and whether that quote is verified against the evidence vault (`Quote Verified in Vault`). The sample shows the three cases: a password policy read at one point in time (design effective, operating effectiveness not tested), a control with no evidence tool (not tested), and an exception. Demo evidence is synthetic but is written to the vault under a DEMO DATA label, so this column shows the real verification result ("Yes" for the two tested controls in this sample). |
+| `report.md` | The final report from Gate 3: executive summary, detailed findings, the proposed engagement-level deficiency evaluation, and the full approval trail (who approved which gate, and when). |
 | `oscal.json` | The same findings in the project's OSCAL-inspired structure, modelled on [OSCAL](https://pages.nist.gov/OSCAL/) Assessment Results (`observations` keyed to control IDs and vault references). It is not validated against the official OSCAL schema and may need conversion before an OSCAL tool will load it. |
 
 ## How to regenerate these

@@ -1,3 +1,17 @@
+deficiency_evaluation_task:
+  description: |-
+    Audit scope (Phase 1): {scope_string}
+
+    Risk and Control Matrix approved at Gate 1 (risk → controls, with key-control and nature attributes):
+    {racm_summary}
+
+    Working Papers approved at Gate 2 (JSON; one finding per control with ToD / ToE conclusions, result, exceptions, preliminary_deficiency, evidence quote and vault_id_reference):
+    {working_papers_string}
+
+    Evaluate the deficiencies at engagement level. {deficiency_scale_guidance}
+    For the findings with preliminary_deficiency=true: group findings that affect the same risk, assertion or system into one evaluation (aggregation); consider compensating controls from the RACM and credit one only if the working papers show it was tested without exception; rate likelihood and magnitude; propose a classification and explain it in the rationale. Findings concluded 'Not tested' are scope limitations, not deficiencies. Use only the scope, RACM and working papers above; do not invent findings, controls or evidence. This is a DRAFT proposal for the auditor's judgement at Gate 3.
+  expected_output: "A DeficiencyEvaluationSetSchema object: deficiency_scale and one evaluation per deficiency or aggregated group (an empty list if no finding has preliminary_deficiency=true)."
+
 drafting_task:
   description: |-
     Audit scope (Phase 1): {scope_string}
@@ -5,30 +19,30 @@ drafting_task:
     Risk and Control Matrix approved at Gate 1 (risk → controls):
     {racm_summary}
 
-    Working Papers approved at Gate 2 (JSON; one finding per tested control, with severity, test conclusion, exact evidence quote and vault_id_reference):
+    Working Papers approved at Gate 2 (JSON; one finding per control with ToD / ToE conclusions, result, exceptions, test conclusion, exact evidence quote and vault_id_reference):
     {working_papers_string}
 
-    Using ONLY the scope, RACM and working papers above, write the full comprehensive Draft Audit Report. Cover every finding, cite its control_id and vault_id_reference, map it back to its risk and regulatory framework, and highlight severe findings (Significant Deficiency / Material Weakness) distinctly. Do not invent findings, controls or evidence that are not listed above.{tone_qa_feedback}
+    The engagement-level deficiency evaluation is in your context. Using ONLY the scope, RACM, working papers and deficiency evaluation, write the full comprehensive Draft Audit Report. Cover every finding, cite its control_id and vault_id_reference, and map it back to its risk and framework. Present each deficiency with the classification and rationale from the deficiency evaluation, labelled as proposed and subject to the auditor's judgement at Gate 3; do not re-classify. List controls concluded 'Not tested' separately as scope limitations. Do not invent findings, controls or evidence, and do not state or imply that the organisation is compliant or certified.{tone_qa_feedback}
   expected_output: "A detailed drafting of the technical report."
 
 executive_summary_task:
-  description: "Consume the Draft Audit Report. Distill the most severe elements into a succinct Executive Summary."
+  description: "Consume the Draft Audit Report. Distill the most significant deficiencies (by their proposed classification) and any scope limitations into a succinct Executive Summary."
   expected_output: "Board-ready Executive Summary overview."
 
 tone_qa_task:
-  description: "Review both the Draft Report and the Executive Summary. If the language is subjective, inflammatory, or confusing, reject it with rejection_reasons. Otherwise, approve it."
+  description: "Review the Draft Report and the Executive Summary against the deficiency evaluation. Reject with a rejection_reason if the language is subjective, inflammatory or confusing; if a deficiency is minimised or overstated relative to its proposed classification; if a classification is presented as final rather than proposed; or if SOX terms (significant deficiency, material weakness) are used when the deficiency scale is a risk rating. Otherwise, approve it."
   expected_output: "A QA_PushbackSchema object validating the report tone and completeness."
 
 final_report_assembly_task:
-  description: "Take the QA-approved components and structure them into the FinalReportSchema."
+  description: "Take the QA-approved components and structure them into the FinalReportSchema. Copy deficiency_scale and deficiency_evaluations exactly from the deficiency evaluation in your context; do not change any classification."
   expected_output: "The strict Pydantic FinalReportSchema output."
 
 generate_oscal_sar_task:
   description: |-
     Translate the narrative audit findings into a standardized machine-readable format using the OSCAL_SAR_Schema. Audit theme: '{theme}'.
 
-    Authoritative findings index from the Phase 2 working papers (control_id | severity | vault_id):
+    Authoritative findings index from the Phase 2 working papers (control_id | result (ToD; ToE) | vault_id):
     {findings_index}
 
-    Create one observation per finding in the index: put its control_id in subjects and its vault_id in relevant_evidence exactly as listed (never invent IDs), and use the draft report for the narrative description. Include the required import_ap field referencing the assessment plan this audit was conducted against (use the audit theme as the href if no formal OSCAL assessment plan document exists).
+    Create one observation per finding in the index: put its control_id in subjects and its vault_id in relevant_evidence exactly as listed (never invent IDs; use an empty list where the index says '(no evidence)'), and use the draft report for the narrative description. Include the required import_ap field referencing the assessment plan this audit was conducted against (use the audit theme as the href if no formal OSCAL assessment plan document exists).
   expected_output: "A complete OSCAL_SAR_Schema object, including import_ap."

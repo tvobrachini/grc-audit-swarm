@@ -66,11 +66,12 @@ class PlanningCrew:
         # receives *every* prior output (scope memo + crosswalk + weighting),
         # which overflows Groq/free-tier providers (~6k tokens per request).
         # An empty context kept requests small but meant the RACM ignored the
-        # upstream analysis entirely. The weighting task's ranked top-3 risk
-        # list is both the most relevant and the smallest upstream output (its
-        # expected_output is a 3-line list; the Specialist already consumed the
-        # memo and crosswalk), so it is the only context passed here. Scope,
-        # theme and frameworks arrive via kickoff inputs.
+        # upstream analysis entirely. The weighting task's ranked risk list is
+        # both the most relevant and the smallest upstream output (one line
+        # per risk, 3-8 risks by scope, with likelihood / impact; the
+        # Specialist already consumed the memo and crosswalk), so it is the
+        # only context passed here. Scope, theme and frameworks arrive via
+        # kickoff inputs.
         racm_task = Task(
             **self.tasks_config["racm_drafting_task"],
             name="racm_drafting_task",
