@@ -140,5 +140,5 @@ From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the reject
 
 **Consequences.**
 - The token does not appear in the browser. Anyone who can reach the frontend's port can still use the API through the proxy, which is why Compose binds ports to `127.0.0.1`.
-- One shared token means there is no per-user identity or authorisation (see ADR-004).
+- One shared token means there is no per-user identity or authorization (see ADR-004).
 - In the Vite dev setup the agent feed's `EventSource` request has no token and gets 401. Status still refreshes through polling.
