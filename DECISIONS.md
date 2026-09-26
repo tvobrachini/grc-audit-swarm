@@ -79,14 +79,17 @@ The IAM tools paginate `ListUsers` and `ListMFADevices`. A missing password poli
 - Gate 2 (`WAITING_HUMAN_GATE_2`) must be approved before Reporting runs.
 - Gate 3 (`WAITING_HUMAN_GATE_3`) must be approved before the audit is `COMPLETED`.
 
-From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the rejection. From `ERROR_PHASE_n` only a retry is possible. An override requires a reason and moves the phase to its normal gate, which still has to be approved. It is refused if the phase kept no artifact. A human retry out of a QA rejection passes the stored rejection reason to the crew (`AuditFlow._retry_feedback`, read back from the persisted trail).
+At `WAITING_HUMAN_GATE_n` a reviewer can approve, or return the phase for rework (`WAITING_HUMAN_GATE_n → RUNNING_PHASE_n`) with required review notes. From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the rejection. From `ERROR_PHASE_n` only a retry is possible. An override requires a reason and moves the phase to its normal gate, which still has to be approved. It is refused if the phase kept no artifact, and a gate approval is refused if the phase has no artifact to approve. A re-run passes feedback to the crew through the same per-phase input the automatic QA retry uses: after a return, the review notes; after a human retry out of a QA rejection, the stored rejection reason (`AuditFlow._carried_feedback`, read back from the persisted trail). If the re-run is then auto-retried, the new QA reason is added to that feedback rather than replacing it.
 
-`AuditFlow._stamp_trail` appends one entry per action to `approval_trail`: `gate`, `human` (the reviewer identifier), `timestamp` (UTC, ISO 8601) and `action` (`gate_approval`, `retry` or `qa_override`). A retry also records `previous_status` and `previous_reason`. An override records `reason` and the `qa_rejection_reason` it overrode. The API returns 409 for an invalid transition, such as approving the same gate twice, and 422 for a blank reviewer or reason (`src/api/routers/sessions.py`).
+For Fieldwork, a deterministic check (`swarm.evidence.unverified_findings`) verifies every finding's quote against the vault after the QA agent. An unverified quote is treated as a QA rejection that lists the control IDs; a finding without a quote passes only if it concludes "Not tested". Gate 2 approval re-runs the check and is refused unless every unverified control was accepted by a supervisor override recorded against the same working papers (matched by digest).
+
+`AuditFlow._stamp_trail` appends one entry per action to `approval_trail`: `gate`, `human` (the reviewer identifier), `timestamp` (UTC, ISO 8601) and `action` (`audit_created`, `gate_approval`, `return_for_rework`, `retry` or `qa_override`). A gate approval records the `artifact` and its `artifact_digest`. A return records `notes`. A retry also records `previous_status` and `previous_reason`. An override records `reason`, the `qa_rejection_reason` it overrode, the accepted artifact's digest and, for Fieldwork, `unverified_controls`. Entries are hash-chained (ADR-009). The API returns 409 for an invalid transition (such as approving the same gate twice) or a policy refusal (segregation of duties, unverified evidence, missing artifact), and 422 for a blank reviewer, notes or reason (`src/api/routers/sessions.py`). Every action is persisted before any crew it starts runs. `DELETE /api/sessions/{id}` returns 409 once a gate has been approved or the audit is completed; only drafts can be deleted.
 
 **Consequences.**
 - Fieldwork, and therefore the AWS calls, does not run until a person approves the plan. No report is marked complete without a final sign-off.
-- The workflow waits at each gate until someone acts.
-- The reviewer identifier is free text supplied by the client. The API has one shared token and does not authenticate individual reviewers, so the trail records who the reviewer said they were.
+- The workflow waits at each gate until someone acts. A reviewer who disagrees can send the work back with notes instead of choosing between approving and abandoning it.
+- A Fieldwork result whose quotes are not in the vault cannot reach Gate 2 approval without a named supervisor's written justification.
+- The reviewer identifier is free text supplied by the client. The API has one shared token and does not authenticate individual reviewers, so the trail records who the reviewer said they were, and the segregation-of-duties rules (ADR-009) compare those declared names.
 
 **Inspiration.** IIA Standard 12.3, formerly 2340 (supervision of engagements). This is design inspiration, not a compliance claim.
 
@@ -142,3 +145,25 @@ From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the reject
 - The token does not appear in the browser. Anyone who can reach the frontend's port can still use the API through the proxy, which is why Compose binds ports to `127.0.0.1`.
 - One shared token means there is no per-user identity or authorization (see ADR-004).
 - In the Vite dev setup the agent feed's `EventSource` request has no token and gets 401. Status still refreshes through polling.
+
+---
+
+## ADR-009: Hash-chained approval trail and segregation-of-duties policy
+
+**Status:** Accepted
+
+**Decision (trail).** The approval trail is append-only: entries are added only through `swarm.trail.append_entry`. Each entry stores `hash_alg`, `prev_hash` (the previous entry's `entry_hash`, or 64 zeros for the first) and `entry_hash`, a digest over the canonical JSON of the entry (sorted keys, compact separators, UTF-8; every field except `entry_hash`). With `VAULT_ENCRYPTION_KEY` set the digest is HMAC-SHA256 under a key derived from it with its own label (`grc-audit-swarm/approval-trail/hmac-sha256/v1`, see `swarm.evidence.derive_labelled_key`), so it is never the vault's HMAC key; otherwise it is SHA-256. Entries written before chaining are left as they are; the first chained entry's `prev_hash` is a digest over them, which fixes their content from then on. `swarm.trail.verify_trail` recomputes the chain and returns `ok`, a `status` and `first_broken_index`. `FlowRepository.save` also writes the entry count and last hash to a separate anchor file (`TRAIL_ANCHORS_PATH`); the anchor never moves backwards.
+
+What verification detects: an edited entry; reordered entries; a removed or inserted entry anywhere except at the end; a gate-approved artifact that no longer matches the digest recorded at approval (`artifact_changed`). With the key it also detects a chain recomputed without the key: such entries can only be unkeyed and are reported as `unkeyed` when they are not sealed by a later keyed entry. Against the anchor it detects a trail shorter than the anchored count (`truncated`) or one that diverges from the anchored hash.
+
+What it does not detect: removal of entries from the end, or of the whole trail, when there is no anchor or the anchor file was edited too; a full rewrite by someone who can edit the sessions file and the anchor file, unless the key is in use and they do not have it; a trail copied from another session (the chain is not bound to the session ID, only the anchor file is keyed by it). Legacy trails report `legacy_unchained`. A keyed trail read without the key reports `key_unavailable`. None of this is a guarantee that the trail is untampered; it makes certain changes detectable.
+
+**Decision (segregation of duties).** Each audit records `prepared_by` at creation, also as the trail's first entry (`audit_created`). `swarm.review_policy.sod_violation` is the single policy function:
+1. The preparer may not approve a gate, override a QA rejection, or return work (`PREPARER_EXCLUDED_ACTIONS`). A retry is allowed; it re-runs preparation rather than reviewing it. The preparer is taken from both `prepared_by` and the `audit_created` entry.
+2. A gate's approver must differ from the approvers of the gates listed in `DISTINCT_APPROVER_GATES` (default: Gate 3 differs from Gate 2, the manager / in-charge separation).
+Identities are compared after case folding and collapsing whitespace. Audits created before `prepared_by` existed have no preparer, so rule 1 cannot apply to them.
+
+**Consequences.**
+- A self-review or a single person signing off both fieldwork and the report is refused with a 409 that names the rule, and the owner can change the policy in one place.
+- Identity is declared, not authenticated (ADR-008): the checks stop honest mistakes and make self-review visible; they do not stop someone typing another name. Real enforcement needs per-user authentication.
+- The anchor file only adds protection if it is kept where the people who can edit the sessions file cannot edit it (separate storage or an append-only store); by default it sits next to the sessions file.
