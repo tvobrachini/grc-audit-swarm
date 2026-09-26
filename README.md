@@ -107,13 +107,22 @@ The workflow runs three CrewAI crews in sequence. Each crew ends with a QA revie
 
 **QA gates (automatic).** QA reviewers run at temperature 0. The other agents run at 0.1. If QA rejects the output, or its answer cannot be parsed, the phase counts as rejected: QA fails closed. The flow then re-runs the crew once with the rejection reason added to the drafting prompt. This happens in all three phases. A second rejection stops the phase in `QA_REJECTED_PHASE_n` and keeps the rejected draft for review. A crew error stops it in `ERROR_PHASE_n`.
 
+**Deterministic evidence check (Fieldwork).** After the QA agent, every finding's quote is checked in code against the evidence vault record it cites; no model is involved. A finding with an empty quote passes only if it concludes the control was "Not tested". A quote that does not verify counts as a QA rejection whose reason lists the control IDs, so it goes through the same automatic retry and, if it fails again, stops in `QA_REJECTED_PHASE_2`. A supervisor can still override it with a written reason; the override records which controls were accepted unverified and a digest of the working papers it applies to. Approving Gate 2 re-runs the check and is refused (409) if a quote no longer verifies and was not accepted by an override of those exact working papers.
+
+**QA independence (optional).** By default the QA reviewers use the same provider and model as the agents whose work they check, so they share its blind spots: a QA approval from the same model is not an independent review. `QA_LLM_MODEL` (with optional `QA_LLM_API_KEY` and `QA_LLM_BASE_URL`) gives the QA reviewers a different model through `get_qa_llm()` in `src/swarm/llm_factory.py`. A different model is still not a human reviewer.
+
 **Human gates.** An explicit state machine (`src/swarm/state/machine.py`) decides which moves are allowed. Any other move raises `InvalidTransitionError`, which the API returns as HTTP 409 (for example, approving the same gate twice). At each gate a reviewer can:
 
-- **Approve.** Gates 1 and 2 start the next phase. Gate 3 marks the audit `COMPLETED`.
+- **Approve.** Gates 1 and 2 start the next phase. Gate 3 marks the audit `COMPLETED`. A gate with no artifact to approve is refused.
+- **Return for rework** (`POST /api/sessions/{id}/return`) with required review notes. The phase re-runs, and the notes are passed to the crew the same way a QA rejection reason is.
 - **Retry** a QA-rejected or failed phase. After a QA rejection, the stored rejection reason is passed back to the crew.
 - **Approve despite the QA rejection** (supervisor override). This requires a written reason and does not skip anything: the phase moves to its normal human gate, which still has to be approved.
 
-Each action is recorded in the approval trail with the gate, the reviewer's name as entered, a UTC timestamp, the action (`gate_approval`, `retry` or `qa_override`) and, where relevant, the override reason and the QA rejection it overrode.
+**Segregation of duties.** Every audit records who prepared it (`prepared_by`, required when the audit is created). The preparer cannot approve a gate, return work or override a QA rejection on that audit; the preparer may retry a phase. The Gate 3 (report) approver must be a different person from the Gate 2 (fieldwork) approver. Names are compared ignoring case and extra whitespace. The policy is in `src/swarm/review_policy.py`. These checks work on names as typed: the API has one shared token and cannot tell people apart, so they prevent accidental self-review and make it visible, but they do not stop someone who types another name. Audits created before `prepared_by` existed have no preparer, so only the Gate 2 / Gate 3 rule applies to them.
+
+**Approval trail.** Each action is recorded with the gate, the reviewer's name as entered, a UTC timestamp, the action (`audit_created`, `gate_approval`, `return_for_rework`, `retry` or `qa_override`) and, where relevant, the notes, the override reason, the QA rejection it overrode and a SHA-256 digest of the artifact approved or accepted. Entries are only appended, and each one is hash-chained to the one before it (`prev_hash`, `entry_hash`); with `VAULT_ENCRYPTION_KEY` set the chain uses HMAC-SHA256 with a key derived from it for this purpose. `GET /api/sessions/{id}/trail/verify` (also shown in the session detail) recomputes the chain. It detects an edited entry, reordered entries, a removed entry other than the last one, and an approved artifact that changed after approval. With the key, it also detects an editor who recomputed every hash without the key. On its own it does not detect entries cut from the end of the trail. For that, the entry count and last hash are also written to a separate anchor file (`TRAIL_ANCHORS_PATH`), which only helps if whoever can edit the sessions file cannot also edit the anchor file. Without the key, someone who can edit both files can rewrite the trail undetected. Trails from before chaining are reported as "unchained (legacy)".
+
+**Deleting audits.** `DELETE /api/sessions/{id}` only deletes drafts. Once any gate has been approved or the audit is completed it returns 409, so signed-off work and its trail are kept.
 
 ```mermaid
 flowchart TD
@@ -123,6 +132,7 @@ flowchart TD
     qa1 -- "rejected: one automatic retry with the reason" --> p1
     qa1 -- "rejected again" --> r1["QA rejected phase 1"]
     qa1 -- "approved" --> g1{{"Human gate 1"}}
+    g1 -- "return for rework with review notes" --> p1
     r1 -- "human retry with stored QA reason" --> p1
     r1 -- "supervisor override with written reason" --> g1
 
@@ -131,6 +141,7 @@ flowchart TD
     qa2 -- "rejected: one automatic retry with the reason" --> p2
     qa2 -- "rejected again" --> r2["QA rejected phase 2"]
     qa2 -- "approved" --> g2{{"Human gate 2"}}
+    g2 -- "return for rework with review notes" --> p2
     r2 -- "human retry with stored QA reason" --> p2
     r2 -- "supervisor override with written reason" --> g2
 
@@ -139,6 +150,7 @@ flowchart TD
     qa3 -- "rejected: one automatic retry with the reason" --> p3
     qa3 -- "rejected again" --> r3["QA rejected phase 3"]
     qa3 -- "approved" --> g3{{"Human gate 3"}}
+    g3 -- "return for rework with review notes" --> p3
     r3 -- "human retry with stored QA reason" --> p3
     r3 -- "supervisor override with written reason" --> g3
 
@@ -240,6 +252,9 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key. Turns on Fernet encryption and keyed digests in the vault. |
 | `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `/app/data/evidence_vault` in the `app-data` volume). |
 | `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
+| `TRAIL_ANCHORS_PATH` | Approval-trail anchor file: entry count and last hash per audit (default `trail_anchors.json` next to the sessions file). It only adds protection if it is stored where someone who can edit the sessions file cannot edit it. |
+| `QA_LLM_MODEL` | Optional LiteLLM model string (for example `openai/gpt-4o-mini`) for the QA reviewer agents. Unset: QA uses the same provider as the other agents. |
+| `QA_LLM_API_KEY`, `QA_LLM_BASE_URL` | Optional key and endpoint passed only to the QA model's client. |
 | `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. `run_monitor.py`'s environment check also accepts `AWS_REGION` in place of `AWS_DEFAULT_REGION`. |
 
@@ -361,7 +376,8 @@ Dockerfile, docker-compose.yml
 - **Decision support only.** The output is a draft for a qualified auditor. It is not an audit opinion and does not replace engagement supervision.
 - **Not benchmarked.** There are no measured accuracy, precision, time-saving or cost figures.
 - **QA is another LLM.** Temperature 0 lowers variance on hosted models but does not remove it. A QA approval does not show the output is correct.
-- **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity.
+- **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity, so the segregation-of-duties checks compare typed names only.
+- **Approval trail.** The hash chain makes edits to the stored trail detectable; it does not prevent them. Without `VAULT_ENCRYPTION_KEY`, anyone who can write the sessions file and the anchor file can rebuild a consistent trail. With the key, they also need the key. Entries cut from the end are only detected against the anchor file.
 - **Evidence vault.** Each record's digest is stored in the same writable JSON file as the payload. Without encryption the digest detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering. A verified quote shows the words are in the evidence; it does not show the conclusion drawn from them is right. Matching is exact, so paraphrases show as not verified.
 - **AWS coverage.** Live collection covers the IAM account password policy, IAM user MFA, and S3 bucket public access. The Fieldwork crew has no other evidence tools, so controls outside these reads have no collected evidence behind them. Within them:
   - The S3 verdict combines the bucket policy status, bucket ACL grants to `AllUsers` / `AuthenticatedUsers`, and account- and bucket-level Block Public Access. Whether a policy is public is AWS's own evaluation (`GetBucketPolicyStatus`); the tool does not parse policies. It does not cover S3 access points (or their policies), Multi-Region Access Points, object-level ACLs, or presigned URLs. A policy that grants access to specific other AWS accounts is not "public" in AWS's sense, so cross-account sharing is not flagged. Per-bucket reads use one S3 client and rely on botocore's automatic region redirect for buckets in other regions; this is tested with stubs and moto only, not against a live multi-region account.
