@@ -50,6 +50,49 @@ To run a real audit, set one LLM provider (see [Configuration](#configuration)) 
 
 ---
 
+## What it looks like
+
+All screenshots below are from a `DEMO_MODE=1` run — the theme, findings and report text are fixed demo content, not language-model output, and no AWS account was examined. Every screen carries a visible DEMO MODE badge and labels demo findings as such.
+
+<table>
+<tr>
+<td width="50%">
+
+![Gate 1 — the RACM awaiting planning approval, with the frameworks referenced in the sidebar](docs/screenshots/gate-1-planning-review-racm.png)
+
+Gate 1 — the RACM drafted by planning, waiting for a human to approve it before fieldwork starts.
+
+</td>
+<td width="50%">
+
+![Gate 2 — the findings board, with a per-finding evidence-vault verification badge](docs/screenshots/gate-2-findings-board-vault-verification.png)
+
+Gate 2 — findings from fieldwork, each with a badge showing whether its quoted evidence verifies against the evidence vault.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+![Gate 3 — the draft report awaiting final approval](docs/screenshots/gate-3-report-review.png)
+
+Gate 3 — the draft report, awaiting the final approval before issuance.
+
+</td>
+<td width="50%">
+
+![The completed audit, its full approval trail, and the export buttons](docs/screenshots/completed-approval-trail-and-exports.png)
+
+Completed audit: the full approval trail and the export buttons for the RACM, working papers, report and OSCAL results.
+
+</td>
+</tr>
+</table>
+
+There is also a screenshot of the [QA-rejection / retry / override](docs/screenshots/qa-rejection-retry-and-override.png) path, and the sample RACM, working papers, report and OSCAL exports these screenshots came from are in [docs/sample-run/](docs/sample-run/) (also demo data, with a note on what each file is). To regenerate any of this yourself, see [scripts/capture_screenshots.mjs](scripts/capture_screenshots.mjs).
+
+---
+
 ## How it works
 
 The workflow runs three CrewAI crews in sequence. Each crew ends with a QA reviewer agent, and each phase ends at a human gate.
