@@ -200,7 +200,9 @@ def test_create_with_text_and_default_frameworks(client):
     )
     assert r.status_code == 201, r.text
     flow = get_flow(r.json()["session_id"])
-    assert flow.state.frameworks == ["COSO", "PCAOB", "IIA"]
+    from api.models import DEFAULT_FRAMEWORKS
+
+    assert flow.state.frameworks == list(DEFAULT_FRAMEWORKS)
 
 
 def test_unsupported_document_is_415_and_creates_nothing(client):

@@ -334,3 +334,34 @@ class TestPhaseRunIntegration:
 
         assert session_manager.get_session(sid) is None
         assert client.get(f"/api/sessions/{sid}", headers=AUTH).status_code == 404
+
+
+class TestSnapshotDetailMigratesArtifacts:
+    """A session read from disk (not in memory) returns current-schema artifacts."""
+
+    def test_legacy_severity_is_migrated_in_snapshot_detail(self):
+        import json as _json
+
+        from api.routers.sessions import _migrated_snapshot_artifact
+        from swarm.schema import WorkingPaperSchema
+
+        path = os.path.join(
+            os.path.dirname(__file__), "mock_data", "legacy_session_snapshot.json"
+        )
+        with open(path) as fh:
+            legacy = _json.load(fh)["working_papers"]
+        assert any("severity" in f for f in legacy["findings"])
+
+        migrated = _migrated_snapshot_artifact(WorkingPaperSchema, legacy)
+
+        for finding in migrated["findings"]:
+            assert "toe_conclusion" in finding and "result" in finding
+            assert finding.get("legacy_severity")
+
+    def test_unvalidatable_artifact_is_returned_as_stored(self):
+        from api.routers.sessions import _migrated_snapshot_artifact
+        from swarm.schema import WorkingPaperSchema
+
+        raw = {"not": "a working paper"}
+        assert _migrated_snapshot_artifact(WorkingPaperSchema, raw) == raw
+        assert _migrated_snapshot_artifact(WorkingPaperSchema, None) is None

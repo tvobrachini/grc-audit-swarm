@@ -169,3 +169,14 @@ class TestQaLlm:
         assert result["model"] == "ollama/qwen2.5"
         assert "api_key" not in result
         assert "base_url" not in result
+
+
+def test_every_crew_builds_its_qa_reviewer_with_get_qa_llm():
+    """QA independence only works if the crews ask for the QA model."""
+    import inspect
+
+    from swarm.crews import fieldwork_crew, planning_crew, reporting_crew
+
+    for module in (planning_crew, fieldwork_crew, reporting_crew):
+        source = inspect.getsource(module)
+        assert "qa_llm = get_qa_llm(" in source, module.__name__

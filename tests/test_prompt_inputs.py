@@ -305,6 +305,7 @@ class TestPlanningContextWiring:
 
         with (
             patch.object(planning_crew, "get_crew_llm"),
+            patch.object(planning_crew, "get_qa_llm"),
             patch.object(planning_crew, "Agent"),
             patch.object(planning_crew, "Crew"),
             patch.object(planning_crew, "Task", side_effect=fake_task),
@@ -342,6 +343,7 @@ def _build_crew(module_name: str, crew_cls: str) -> dict[str, MagicMock]:
 
     with (
         patch.object(module, "get_crew_llm"),
+        patch.object(module, "get_qa_llm"),
         patch.object(module, "Agent"),
         patch.object(module, "Crew"),
         patch.object(module, "Task", side_effect=fake_task),

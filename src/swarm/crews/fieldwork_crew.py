@@ -7,7 +7,7 @@ from swarm.tools.aws_tools import (
     list_iam_users_with_mfa,
     list_public_s3_buckets,
 )
-from swarm.llm_factory import get_crew_llm
+from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class FieldworkCrew:
@@ -46,7 +46,7 @@ class FieldworkCrew:
         auditor = Agent(**auditor_config, verbose=True, llm=base_llm, max_iter=5)
 
         # Anti-Hallucination: QA runs at temp 0.0
-        qa_llm = get_crew_llm(temperature=0.0)
+        qa_llm = get_qa_llm(temperature=0.0)
         qa_reviewer = Agent(
             **self.agents_config["qa_field_reviewer"],
             verbose=True,
