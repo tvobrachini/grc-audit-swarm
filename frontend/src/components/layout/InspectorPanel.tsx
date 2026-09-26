@@ -140,7 +140,7 @@ export function InspectorPanel({ session, events }: Props) {
 
       <div className="flex-1 overflow-y-auto p-3">
         {activeTab === "log" && <AgentLogPane events={events} />}
-        {activeTab === "vault" && <EvidenceVaultPane events={events} />}
+        {activeTab === "vault" && <EvidenceVaultPane session={session} />}
         {activeTab === "frameworks" && (
           <FrameworkPane frameworks={session.frameworks} />
         )}

@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "title": "[DEMO DATA] AWS IAM and S3 access controls \u2014 sample results",
+    "last_modified": "2026-01-01T00:00:00+00:00",
+    "version": "demo",
+    "oscal_version": "1.1.2"
+  },
+  "import_ap": {
+    "href": "demo://assessment-plan",
+    "remarks": "Demo data: no assessment plan exists."
+  },
+  "results": [
+    {
+      "assessment_result_id": "demo-result-1",
+      "start_date": "2026-01-01T00:00:00+00:00",
+      "end_date": "2026-01-01T00:00:00+00:00",
+      "observations": [
+        {
+          "observation_id": "demo-obs-1",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] The sample password policy meets the length requirement in the test step.",
+          "methods": [
+            "test"
+          ],
+          "subjects": [
+            "CTRL-01"
+          ],
+          "relevant_evidence": [
+            "628f6dd1-eccb-4e61-8a0a-74523f3e3cd1"
+          ]
+        },
+        {
+          "observation_id": "demo-obs-2",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] One sample bucket does not block public ACLs; remediation would be needed.",
+          "methods": [
+            "test"
+          ],
+          "subjects": [
+            "CTRL-02"
+          ],
+          "relevant_evidence": [
+            "9a2dd38b-f30a-4fbd-a48e-f99142c0a8d8"
+          ]
+        }
+      ]
+    }
+  ]
+}

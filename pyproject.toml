@@ -6,7 +6,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Tiago Brachini" }]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -46,4 +46,5 @@ dev = [
     "pytest-cov>=5.0.0",
     "pyright>=1.1.0",
     "ruff>=0.15.5",
+    "moto[iam,s3,s3control,sts]>=5.1",
 ]

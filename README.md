@@ -44,9 +44,52 @@ cd frontend && npm ci && VITE_API_AUTH_TOKEN=dev-token npm run dev
 
 Open http://localhost:5173. `VITE_API_AUTH_TOKEN` is built into the JavaScript bundle, so use it only for a throwaway local dev server. In this mode the live agent-activity feed returns 401, because the browser's `EventSource` cannot send an `Authorization` header. The audit status, gates and artifacts still refresh through polling. Use Compose for the full experience.
 
-Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer reject that phase until a person retries it, so the retry and override paths can be tried. `DEMO_STEP_DELAY` sets the pause between demo steps in seconds (default 0.4, capped at 5). Demo evidence is synthetic and is not written to the evidence vault, so demo findings show "Quote not verified".
+Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer reject that phase until a person retries it, so the retry and override paths can be tried. `DEMO_STEP_DELAY` sets the pause between demo steps in seconds (default 0.4, capped at 5). Demo evidence is synthetic. It is written to the evidence vault under a DEMO DATA label, so hashing and quote verification run for real on it and demo findings show "Quote verified in vault".
 
 To run a real audit, set one LLM provider (see [Configuration](#configuration)) and, for live evidence, AWS credentials with the read-only policy below. Leave `DEMO_MODE` unset.
+
+---
+
+## What it looks like
+
+All screenshots below are from a `DEMO_MODE=1` run — the theme, findings and report text are fixed demo content, not language-model output, and no AWS account was examined. Every screen carries a visible DEMO MODE badge and labels demo findings as such.
+
+<table>
+<tr>
+<td width="50%">
+
+![Gate 1 — the RACM awaiting planning approval, with the frameworks referenced in the sidebar](docs/screenshots/gate-1-planning-review-racm.png)
+
+Gate 1 — the RACM drafted by planning, waiting for a human to approve it before fieldwork starts.
+
+</td>
+<td width="50%">
+
+![Gate 2 — the findings board, with a per-finding evidence-vault verification badge](docs/screenshots/gate-2-findings-board-vault-verification.png)
+
+Gate 2 — findings from fieldwork, each with a badge showing whether its quoted evidence verifies against the evidence vault.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+![Gate 3 — the draft report awaiting final approval](docs/screenshots/gate-3-report-review.png)
+
+Gate 3 — the draft report, awaiting the final approval before issuance.
+
+</td>
+<td width="50%">
+
+![The completed audit, its full approval trail, and the export buttons](docs/screenshots/completed-approval-trail-and-exports.png)
+
+Completed audit: the full approval trail and the export buttons for the RACM, working papers, report and OSCAL results.
+
+</td>
+</tr>
+</table>
+
+There is also a screenshot of the [QA-rejection / retry / override](docs/screenshots/qa-rejection-retry-and-override.png) path, and the sample RACM, working papers, report and OSCAL exports these screenshots came from are in [docs/sample-run/](docs/sample-run/) (also demo data, with a note on what each file is). To regenerate any of this yourself, see [scripts/capture_screenshots.mjs](scripts/capture_screenshots.mjs).
 
 ---
 
@@ -102,7 +145,7 @@ flowchart TD
     g3 -- "approve" --> done(["Completed: report, exports and approval trail"])
 ```
 
-**Evidence.** The Field Evidence Collector calls three boto3-based tools: IAM password policy, IAM users with MFA status, and S3 buckets with public-access settings. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
+**Evidence.** The Field Evidence Collector calls three boto3-based tools: IAM password policy, IAM users with MFA status, and S3 buckets with a PUBLIC / NOT_PUBLIC / UNKNOWN verdict per bucket (from the bucket policy status, ACL grants, and account- and bucket-level Block Public Access). A read that is denied makes the verdict UNKNOWN rather than a guess. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
 
 **Outputs.** The UI shows the RACM, a findings board with per-finding vault checks, the report and the approval trail. Four downloads are available once the artifact exists (`GET /api/sessions/{id}/export/...`): `racm.xlsx`, `working-papers.xlsx`, `report.md` and `oscal.json`. Spreadsheet cells are sanitised against formula injection.
 
@@ -149,7 +192,9 @@ flowchart TD
         "iam:ListUsers",
         "iam:ListMFADevices",
         "s3:ListAllMyBuckets",
+        "s3:GetAccountPublicAccessBlock",
         "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicyStatus",
         "s3:GetBucketAcl"
       ],
       "Resource": "*"
@@ -158,7 +203,7 @@ flowchart TD
 }
 ```
 
-These map to the boto3 calls in `src/swarm/tools/aws_tools.py`: `get_account_password_policy`, `list_users`, `list_mfa_devices`, `list_buckets`, `get_public_access_block` and `get_bucket_acl`. The separate `aws_safety_heartbeat.py` script (a cost check for a lab account) also uses `sts:GetCallerIdentity`, `ec2:DescribeInstances` and `rds:DescribeDBInstances`, which the audit itself does not need.
+These map to the boto3 calls in `src/swarm/tools/aws_checks.py`: `iam.get_account_password_policy`, `iam.list_users`, `iam.list_mfa_devices`, `s3.list_buckets`, `s3control.get_public_access_block` (account-level Block Public Access), `s3.get_public_access_block`, `s3.get_bucket_policy_status` and `s3.get_bucket_acl`. The S3 check also calls `sts.get_caller_identity` to get the account ID for the S3 Control call; that call needs no IAM permission, and the account ID is not included in the output. If one of the S3 read permissions is missing, the affected buckets are reported as UNKNOWN (with the reason) rather than public or not public. The separate `aws_safety_heartbeat.py` script (a cost check for a lab account) also uses `sts:GetCallerIdentity`, `ec2:DescribeInstances` and `rds:DescribeDBInstances`, which the audit itself does not need.
 </details>
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
@@ -227,7 +272,35 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients. They cover the state machine and gates, QA fail-closed behaviour and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 322 tests, 89% line coverage of `src/`.
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behaviour and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 371 tests, 90% line coverage of `src/`.
+
+### Evidence-layer evaluation
+
+`tests/eval/` checks the deterministic evidence collection against planted misconfigurations. Each scenario seeds a fresh in-memory AWS account ([moto](https://github.com/getmoto/moto)) with a known configuration, runs the real CrewAI evidence tool, and checks three things: the evidence matches what was planted, the output contains no account ID, and the output is in the evidence vault with an exact quote that verifies.
+
+```bash
+PYTHONPATH=. uv run pytest tests/eval -v      # add -s to print the scenario scorecard
+```
+
+| Scenario | Expected evidence |
+|---|---|
+| No account password policy | Finding: no policy set |
+| Weak policy (length 6, no symbols) / strong policy (length 14, all character types, rotation, reuse) | Policy values reported exactly |
+| 60 IAM users, every third with a virtual MFA device | Yes / No per user |
+| Private bucket; bucket policy granting only the owner account | NOT_PUBLIC |
+| ACL grant to AllUsers (READ; READ and WRITE) | PUBLIC, with each grant as a reason |
+| ACL grant to AuthenticatedUsers (any AWS account) | PUBLIC |
+| Bucket policy with `Principal: "*"` | PUBLIC |
+| Public policy, bucket-level RestrictPublicBuckets on | NOT_PUBLIC, with a note |
+| Public ACL, account-level IgnorePublicAcls on | NOT_PUBLIC, with a note |
+| Public ACL, all four bucket-level BPA flags on | NOT_PUBLIC |
+| Public ACL, only BlockPublicAcls on (blocks new ACLs, not existing ones) | PUBLIC |
+| Partial bucket-level BPA, nothing public | NOT_PUBLIC (the old check flagged this) |
+| Account ID inside a bucket name | Redacted in output and vault |
+
+moto does not implement everything faithfully. `GetBucketPolicyStatus` returns no `IsPublic` value, moto accepts public ACLs and policies that Block Public Access would reject, it returns only one grant for the `public-read-write` canned ACL, and it does not paginate `ListUsers`. The test module lists how each gap is handled, and `tests/test_aws_checks.py` covers those branches (policy status, access denied on each read, pagination markers) with botocore Stubber against the real AWS API models. For policy scenarios, the scenario states the `IsPublic` value AWS returns for the planted policy, so those rows test how the tool combines that value with the ACL and Block Public Access, not AWS's policy evaluation.
+
+This does not evaluate the LLM agents: whether they draw the right conclusion from the evidence, and the quality of the working papers and report, are still unmeasured.
 
 CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
 
@@ -285,8 +358,11 @@ Dockerfile, docker-compose.yml
 - **QA is another LLM.** Temperature 0 lowers variance on hosted models but does not remove it. A QA approval does not show the output is correct.
 - **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity.
 - **Evidence vault.** Each record's digest is stored in the same writable JSON file as the payload. Without encryption the digest detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering. A verified quote shows the words are in the evidence; it does not show the conclusion drawn from them is right. Matching is exact, so paraphrases show as not verified.
-- **AWS coverage.** Live collection covers the IAM account password policy, IAM user MFA, and S3 buckets. The S3 check looks only at each bucket's Public Access Block settings and ACL. It does not read bucket policies or account-level Block Public Access, so it can both miss a bucket made public by its policy and flag a bucket that account-level settings already protect. The Fieldwork crew has no other evidence tools, so controls outside these three reads have no collected evidence behind them.
-- **Standalone MCP server.** `src/swarm/mcp_server.py` returns raw results. It does not redact account IDs or register evidence in the vault.
+- **AWS coverage.** Live collection covers the IAM account password policy, IAM user MFA, and S3 bucket public access. The Fieldwork crew has no other evidence tools, so controls outside these reads have no collected evidence behind them. Within them:
+  - The S3 verdict combines the bucket policy status, bucket ACL grants to `AllUsers` / `AuthenticatedUsers`, and account- and bucket-level Block Public Access. Whether a policy is public is AWS's own evaluation (`GetBucketPolicyStatus`); the tool does not parse policies. It does not cover S3 access points (or their policies), Multi-Region Access Points, object-level ACLs, or presigned URLs. A policy that grants access to specific other AWS accounts is not "public" in AWS's sense, so cross-account sharing is not flagged. Per-bucket reads use one S3 client and rely on botocore's automatic region redirect for buckets in other regions; this is tested with stubs and moto only, not against a live multi-region account.
+  - The MFA check lists IAM users only. The account root user is not returned by `iam:ListUsers`, so root MFA is not covered. It reports whether any MFA device is assigned, for every user, and does not check whether the user has console access.
+  - The password-policy evidence is the policy as returned. "No policy set" is reported as a finding; judging whether a policy is strong enough is left to the auditor and the agents.
+- **Standalone MCP server.** `src/swarm/mcp_server.py` uses the same evidence logic as the CrewAI tools, but it does not register evidence in the vault or redact its final output (AWS error messages are redacted).
 - **OSCAL.** The results model is OSCAL-inspired, uses Python-style field names and is not validated against the official NIST OSCAL schema.
 - **Demo data.** DEMO_MODE output is fixed sample content, labelled as demo data in every artifact. It is not evidence and not a finding about any system.
 - **Standards.** References to IIA Global Internal Audit Standards 12.3 (formerly 2340) and 14.6 (formerly 2330), PCAOB AS 1215 and NIST OSCAL are design inspiration. The project makes no compliance claim against any of them.
