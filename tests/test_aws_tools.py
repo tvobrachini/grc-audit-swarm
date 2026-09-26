@@ -1,6 +1,7 @@
 """
-Tests for boto3-based AWS audit tools.
-All AWS API calls are mocked — no real credentials required.
+Tests for the CrewAI AWS evidence tools (vault registration, redaction, errors).
+The decision logic itself is tested in test_aws_checks.py and tests/eval/.
+All AWS API calls are stubbed — no real credentials required.
 """
 
 import json
@@ -8,15 +9,39 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError, NoRegionError
+from botocore.stub import Stubber
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from swarm.evidence import EvidenceAssuranceProtocol  # noqa: E402
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+ACCOUNT_ID = "123456789012"
 
 
-def _vault_result(tmp_path):
-    """Return a fake vault registration result."""
-    return {"vault_id": "test-vault-id", "sha256": "a" * 64}
+def _client(service):
+    return boto3.client(
+        service,
+        region_name="us-east-1",
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",  # pragma: allowlist secret
+    )
+
+
+def _split(result: str) -> tuple[str, str]:
+    head, raw = result.split("\nRaw Output: ", 1)
+    return head.removeprefix("Vault ID: "), raw
+
+
+def _user(name):
+    return {
+        "UserName": name,
+        "UserId": "AIDA" + "X" * 16,
+        "Arn": f"arn:aws:iam::{ACCOUNT_ID}:user/{name}",
+        "Path": "/",
+        "CreateDate": "2024-01-01T00:00:00Z",
+    }
 
 
 # ─── get_iam_password_policy ─────────────────────────────────────────────────
@@ -25,10 +50,9 @@ def _vault_result(tmp_path):
 class TestGetIamPasswordPolicy:
     def test_returns_vault_id_on_success(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        policy = {"MinimumPasswordLength": 14, "RequireSymbols": True}
         mock_client = MagicMock()
         mock_client.get_account_password_policy.return_value = {
-            "PasswordPolicy": policy
+            "PasswordPolicy": {"MinimumPasswordLength": 14, "RequireSymbols": True}
         }
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
@@ -36,36 +60,31 @@ class TestGetIamPasswordPolicy:
 
             result = get_iam_password_policy.run("")
 
-        assert "Vault ID:" in result
-        assert "MinimumPasswordLength" in result
+        vault_id, raw = _split(result)
+        assert json.loads(raw)["MinimumPasswordLength"] == 14
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            vault_id, '"MinimumPasswordLength": 14'
+        )
 
     def test_no_policy_defined_returns_finding(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        from botocore.exceptions import ClientError
+        iam = _client("iam")
+        with Stubber(iam) as stub:
+            stub.add_client_error(
+                "get_account_password_policy",
+                service_error_code="NoSuchEntity",
+                service_message=f"The Password Policy with domain name {ACCOUNT_ID} cannot be found.",
+                http_status_code=404,
+            )
+            with patch("swarm.tools.aws_tools._boto_client", return_value=iam):
+                from swarm.tools.aws_tools import get_iam_password_policy
 
-        mock_client = MagicMock()
-        mock_client.exceptions.NoSuchEntityException = ClientError
-        mock_client.get_account_password_policy.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchEntity", "Message": ""}},
-            "GetAccountPasswordPolicy",
-        )
+                result = get_iam_password_policy.run("")
 
-        with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
-            from swarm.tools.aws_tools import get_iam_password_policy
+        assert "Finding: No IAM account password policy is set" in result
+        assert ACCOUNT_ID not in result
 
-            result = get_iam_password_policy.run("")
-
-        assert "Vault ID:" in result
-        assert "No IAM password policy" in result
-
-    def test_client_creation_failure_does_not_raise_unboundlocalerror(
-        self, tmp_path, monkeypatch
-    ):
-        """If _boto_client() itself raises, the except clause referencing
-        `client.exceptions.NoSuchEntityException` must not blow up with an
-        UnboundLocalError — it should fall through to a clean error string."""
-        from botocore.exceptions import NoCredentialsError
-
+    def test_client_creation_failure_returns_clean_error(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         with patch(
             "swarm.tools.aws_tools._boto_client",
@@ -82,7 +101,7 @@ class TestGetIamPasswordPolicy:
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         mock_client = MagicMock()
         mock_client.get_account_password_policy.return_value = {
-            "PasswordPolicy": {"AccountId": "123456789012", "MinimumPasswordLength": 8}
+            "PasswordPolicy": {"AccountId": ACCOUNT_ID, "MinimumPasswordLength": 8}
         }
 
         with patch("swarm.tools.aws_tools._boto_client", return_value=mock_client):
@@ -90,194 +109,133 @@ class TestGetIamPasswordPolicy:
 
             result = get_iam_password_policy.run("")
 
-        assert "123456789012" not in result
+        assert ACCOUNT_ID not in result
 
 
 # ─── list_iam_users_with_mfa ─────────────────────────────────────────────────
 
 
 class TestListIamUsersWithMfa:
-    def _make_client(self, users, mfa_map):
-        mock_client = MagicMock()
-        paginator = MagicMock()
-        paginator.paginate.return_value = [{"Users": users}]
-        mock_client.get_paginator.return_value = paginator
-
-        def list_mfa(UserName):
-            devices = mfa_map.get(UserName, [])
-            return {"MFADevices": devices}
-
-        mock_client.list_mfa_devices.side_effect = list_mfa
-        return mock_client
-
-    def test_user_with_mfa_marked_yes(self, tmp_path, monkeypatch):
+    def test_user_with_and_without_mfa(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        users = [{"UserName": "alice"}]
-        client = self._make_client(users, {"alice": [{"SerialNumber": "arn:..."}]})
+        iam = _client("iam")
+        with Stubber(iam) as stub:
+            stub.add_response(
+                "list_users", {"Users": [_user("alice")], "IsTruncated": False}, {}
+            )
+            stub.add_response(
+                "list_mfa_devices",
+                {
+                    "MFADevices": [
+                        {
+                            "UserName": "alice",
+                            "SerialNumber": f"arn:aws:iam::{ACCOUNT_ID}:mfa/alice",
+                            "EnableDate": "2024-01-01T00:00:00Z",
+                        }
+                    ],
+                    "IsTruncated": False,
+                },
+                {"UserName": "alice"},
+            )
+            with patch("swarm.tools.aws_tools._boto_client", return_value=iam):
+                from swarm.tools.aws_tools import list_iam_users_with_mfa
 
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_iam_users_with_mfa
+                result = list_iam_users_with_mfa.run("")
 
-            result = list_iam_users_with_mfa.run("")
+        vault_id, raw = _split(result)
+        data = json.loads(raw)
+        assert data["Users"] == [
+            {"UserName": "alice", "MFA_Enabled": "Yes", "MFADeviceCount": 1}
+        ]
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            vault_id, '"MFA_Enabled": "Yes"'
+        )
 
-        assert '"MFA_Enabled": "Yes"' in result
-
-    def test_user_without_mfa_marked_no(self, tmp_path, monkeypatch):
+    def test_list_users_access_denied_is_error_and_redacted(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        users = [{"UserName": "bob"}]
-        client = self._make_client(users, {"bob": []})
+        iam = _client("iam")
+        with Stubber(iam) as stub:
+            stub.add_client_error(
+                "list_users",
+                service_error_code="AccessDenied",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/x is not authorized",
+            )
+            with patch("swarm.tools.aws_tools._boto_client", return_value=iam):
+                from swarm.tools.aws_tools import list_iam_users_with_mfa
 
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_iam_users_with_mfa
+                result = list_iam_users_with_mfa.run("")
 
-            result = list_iam_users_with_mfa.run("")
-
-        assert '"MFA_Enabled": "No"' in result
-
-    def test_multiple_users_all_reported(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        users = [{"UserName": "alice"}, {"UserName": "bob"}]
-        client = self._make_client(users, {"alice": [{"SerialNumber": "x"}], "bob": []})
-
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_iam_users_with_mfa
-
-            result = list_iam_users_with_mfa.run("")
-
-        assert "alice" in result
-        assert "bob" in result
+        assert "Error listing IAM users: AccessDenied" in result
+        assert ACCOUNT_ID not in result
 
 
 # ─── list_public_s3_buckets ──────────────────────────────────────────────────
 
 
 class TestListPublicS3Buckets:
-    def _make_s3_client(self, buckets, pab_configs, acl_grants=None):
-        """
-        buckets: list of {"Name": "..."} dicts
-        pab_configs: dict of bucket_name → PublicAccessBlockConfiguration dict (or ClientError)
-        acl_grants: dict of bucket_name → Grants list
-        """
-        from botocore.exceptions import ClientError
-
-        mock_client = MagicMock()
-        paginator = MagicMock()
-        paginator.paginate.return_value = [{"Buckets": buckets}]
-        mock_client.get_paginator.return_value = paginator
-
-        def get_pab(Bucket):
-            cfg = pab_configs.get(Bucket, {})
-            if isinstance(cfg, ClientError):
-                raise cfg
-            return {"PublicAccessBlockConfiguration": cfg}
-
-        def get_acl(Bucket):
-            grants = (acl_grants or {}).get(Bucket, [])
-            return {"Grants": grants}
-
-        mock_client.get_public_access_block.side_effect = get_pab
-        mock_client.get_bucket_acl.side_effect = get_acl
-        return mock_client
-
-    def _fully_blocked_pab(self):
-        return {
-            "BlockPublicAcls": True,
-            "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True,
-            "RestrictPublicBuckets": True,
-        }
-
-    def test_fully_blocked_bucket_not_flagged_public(self, tmp_path, monkeypatch):
+    def test_routes_each_service_to_its_client_and_registers(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        client = self._make_s3_client(
-            [{"Name": "private-bucket"}],
-            {"private-bucket": self._fully_blocked_pab()},
-        )
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_public_s3_buckets
-
-            result = list_public_s3_buckets.run("")
-
-        data = json.loads(result.split("\nRaw Output: ", 1)[1])
-        assert data[0]["IsPublic"] is False
-
-    def test_no_pab_config_flags_bucket_public(self, tmp_path, monkeypatch):
-        from botocore.exceptions import ClientError
-
-        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        no_pab_error = ClientError(
-            {"Error": {"Code": "NoSuchPublicAccessBlockConfiguration", "Message": ""}},
-            "GetPublicAccessBlock",
-        )
-        client = self._make_s3_client(
-            [{"Name": "exposed-bucket"}],
-            {"exposed-bucket": no_pab_error},
-        )
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_public_s3_buckets
-
-            result = list_public_s3_buckets.run("")
-
-        data = json.loads(result.split("\nRaw Output: ", 1)[1])
-        assert data[0]["IsPublic"] is True
-
-    def test_public_acl_grant_flags_bucket_public(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        acl_grants = {
-            "acl-bucket": [
-                {
-                    "Grantee": {
-                        "Type": "Group",
-                        "URI": "http://acs.amazonaws.com/groups/global/AllUsers",
-                    },
-                    "Permission": "READ",
-                }
-            ]
-        }
-        client = self._make_s3_client(
-            [{"Name": "acl-bucket"}],
+        clients = {s: _client(s) for s in ("s3", "s3control", "sts")}
+        stubs = {s: Stubber(c) for s, c in clients.items()}
+        stubs["sts"].add_response("get_caller_identity", {"Account": ACCOUNT_ID}, {})
+        stubs["s3control"].add_response(
+            "get_public_access_block",
             {
-                "acl-bucket": self._fully_blocked_pab()
-            },  # PAB is on, but ACL has public grant
-            acl_grants=acl_grants,
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": True,
+                    "IgnorePublicAcls": True,
+                    "BlockPublicPolicy": True,
+                    "RestrictPublicBuckets": True,
+                }
+            },
+            {"AccountId": ACCOUNT_ID},
+        )
+        stubs["s3"].add_response("list_buckets", {"Buckets": []})
+        for s in stubs.values():
+            s.activate()
+
+        with patch("swarm.tools.aws_tools._boto_client", side_effect=clients.get):
+            from swarm.tools.aws_tools import list_public_s3_buckets
+
+            result = list_public_s3_buckets.run("")
+
+        for s in stubs.values():
+            s.assert_no_pending_responses()
+        vault_id, raw = _split(result)
+        data = json.loads(raw)
+        assert data["AccountBlockPublicAccess"]["status"] == "configured"
+        assert data["Summary"]["buckets"] == 0
+        assert ACCOUNT_ID not in result
+        record = json.loads((tmp_path / f"{vault_id}.json").read_text())
+        assert record["mcp_source"] == "aws.s3.list_public_buckets"
+
+    def test_list_buckets_denied_is_error(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        client = MagicMock()
+        client.get_caller_identity.return_value = {"Account": ACCOUNT_ID}
+        client.get_public_access_block.return_value = {
+            "PublicAccessBlockConfiguration": {}
+        }
+        client.get_paginator.return_value.paginate.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": ""}}, "ListBuckets"
         )
         with patch("swarm.tools.aws_tools._boto_client", return_value=client):
             from swarm.tools.aws_tools import list_public_s3_buckets
 
             result = list_public_s3_buckets.run("")
 
-        data = json.loads(result.split("\nRaw Output: ", 1)[1])
-        assert data[0]["IsPublic"] is True
-        assert data[0]["ACL"] == "Public"
+        assert "Error listing S3 buckets: AccessDenied" in result
 
-    def test_multiple_buckets_mixed_visibility(self, tmp_path, monkeypatch):
-        from botocore.exceptions import ClientError
-
+    def test_missing_region_is_reported_not_raised(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        no_pab_error = ClientError(
-            {"Error": {"Code": "NoSuchPublicAccessBlockConfiguration", "Message": ""}},
-            "GetPublicAccessBlock",
-        )
-        client = self._make_s3_client(
-            [{"Name": "private-one"}, {"Name": "public-one"}],
-            {"private-one": self._fully_blocked_pab(), "public-one": no_pab_error},
-        )
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
-            from swarm.tools.aws_tools import list_public_s3_buckets
-
-            result = list_public_s3_buckets.run("")
-
-        data = json.loads(result.split("\nRaw Output: ", 1)[1])
-        by_name = {d["Bucket"]: d for d in data}
-        assert by_name["private-one"]["IsPublic"] is False
-        assert by_name["public-one"]["IsPublic"] is True
-
-    def test_vault_id_present_in_output(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        client = self._make_s3_client([], {})
-        with patch("swarm.tools.aws_tools._boto_client", return_value=client):
+        with patch("swarm.tools.aws_tools._boto_client", side_effect=NoRegionError()):
             from swarm.tools.aws_tools import list_public_s3_buckets
 
             result = list_public_s3_buckets.run("")
 
         assert "Vault ID:" in result
+        assert "Error listing S3 buckets: NoRegionError" in result
