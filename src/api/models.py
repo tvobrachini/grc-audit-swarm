@@ -1,8 +1,18 @@
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 DEFAULT_FRAMEWORKS = ("COSO", "PCAOB", "IIA")
+
+
+_MAX_IDENTITY = 200
+_MAX_NOTES = 4000
+
+
+def _not_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value.strip()
 
 
 class CreateSessionRequest(BaseModel):
@@ -10,6 +20,11 @@ class CreateSessionRequest(BaseModel):
     business_context: str
     frameworks: list[str] = list(DEFAULT_FRAMEWORKS)
     name: Optional[str] = None
+    # Declared (not authenticated) identity of the preparer; the preparer may
+    # not approve gates, override QA or return work on this audit.
+    prepared_by: str = Field(min_length=1, max_length=_MAX_IDENTITY)
+
+    _prepared_by_not_blank = field_validator("prepared_by")(_not_blank)
 
 
 class ApproveGateRequest(BaseModel):
@@ -32,6 +47,33 @@ class QAOverrideRequest(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class ReturnForReworkRequest(BaseModel):
+    """Reviewer returns WAITING_HUMAN_GATE_n → RUNNING_PHASE_n with notes."""
+
+    human_id: str = Field(min_length=1, max_length=_MAX_IDENTITY)
+    phase: int = Field(ge=1, le=3)
+    notes: str = Field(min_length=1, max_length=_MAX_NOTES)
+
+
+class TrailVerification(BaseModel):
+    """Result of recomputing the approval trail's hash chain.
+
+    ``status``: ok | legacy_unchained | broken | truncated | unkeyed |
+    key_unavailable | artifact_changed. ``ok`` is true only for ``ok``.
+    """
+
+    ok: bool
+    status: str
+    entries: int
+    legacy_entries: int = 0
+    first_broken_index: Optional[int] = None
+    keyed: bool = False
+    anchored: bool = False
+    head_hash: Optional[str] = None
+    changed_since_approval: list[str] = Field(default_factory=list)
+    detail: str = ""
+
+
 class SessionSummary(BaseModel):
     session_id: str
     name: str
@@ -39,6 +81,7 @@ class SessionSummary(BaseModel):
     phase: int
     needs_input: bool
     created_at: str
+    prepared_by: str = ""
 
 
 class SessionDetail(BaseModel):
@@ -57,6 +100,8 @@ class SessionDetail(BaseModel):
     final_report: Optional[dict[str, Any]]
     approval_trail: list[dict[str, str]]
     qa_rejection_reason: Optional[str]
+    prepared_by: str = ""
+    trail_verification: Optional[TrailVerification] = None
 
 
 class VerifyEvidenceRequest(BaseModel):

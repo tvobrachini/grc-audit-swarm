@@ -21,8 +21,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from flow_builders import (  # type: ignore[import-not-found]
     APPROVED,
     crew_result,
-    make_papers,
     make_racm,
+    make_report,
+    make_verified_papers,
 )
 from api.job_store import get_flow, remove_flow, set_flow
 from swarm import session_manager
@@ -51,13 +52,27 @@ def executor():
         yield ex
 
 
-def _new_session(status: str, *, cache: bool = True, racm: bool = True) -> str:
+def _new_session(
+    status: str,
+    *,
+    cache: bool = True,
+    racm: bool = True,
+    papers: bool = False,
+    report: bool = False,
+    prepared_by: str = "",
+) -> str:
     sid = f"sess-{uuid.uuid4()}"
     flow = AuditFlow(initial_status=status)
     flow.state.theme = "AWS S3"
     flow.state.business_context = "Fintech storing customer data in S3"
+    if prepared_by:
+        flow.record_preparer(prepared_by)
     if racm:
         flow.state.racm_plan = make_racm()
+    if papers:
+        flow.state.working_papers = make_verified_papers()
+    if report:
+        flow.state.final_report = make_report()
     session_manager.save_session(sid, "S3 audit", flow.state.business_context)
     FlowRepository().save(sid, flow)
     if cache:
@@ -129,7 +144,7 @@ class TestApproveIdempotency:
         executor.submit.assert_not_called()
 
     def test_gate_3_twice_is_409(self, client, executor):
-        sid = _new_session("WAITING_HUMAN_GATE_3")
+        sid = _new_session("WAITING_HUMAN_GATE_3", report=True)
         assert _approve(client, sid, gate=3).status_code == 200
         assert _approve(client, sid, gate=3).status_code == 409
         saved = session_manager.get_session(sid)
@@ -269,7 +284,9 @@ class TestPhaseRunIntegration:
         ex.submit.side_effect = lambda _sid, fn, *args: submitted.append((fn, args))
 
         mock_crew = MagicMock()
-        mock_crew.kickoff.return_value = crew_result(2, APPROVED, make_papers())
+        mock_crew.kickoff.return_value = crew_result(
+            2, APPROVED, make_verified_papers()
+        )
         with (
             patch("api.routers.sessions.get_executor", return_value=ex),
             patch("swarm.audit_flow.FieldworkCrew") as MockCrew,
@@ -281,24 +298,30 @@ class TestPhaseRunIntegration:
 
         saved = session_manager.get_session(sid)
         assert saved["status"] == "WAITING_HUMAN_GATE_2"
-        assert saved["state_snapshot"]["working_papers"]["findings"][0][
-            "vault_id_reference"
-        ] == ("vault-abc123")
+        finding = saved["state_snapshot"]["working_papers"]["findings"][0]
+        assert finding["exact_quote_from_evidence"] == "BlockPublicAcls: true"
 
     def test_phase_finishing_after_delete_does_not_resurrect(self, client):
-        sid = _new_session("WAITING_HUMAN_GATE_1")
+        # Only unapproved drafts can be deleted, so the race is a Planning
+        # re-run finishing after its draft audit was deleted.
+        sid = _new_session("ERROR_PHASE_1", racm=False)
         submitted = []
         ex = MagicMock()
         ex.submit.side_effect = lambda _sid, fn, *args: submitted.append((fn, args))
 
         mock_crew = MagicMock()
-        mock_crew.kickoff.return_value = crew_result(2, APPROVED, make_papers())
+        mock_crew.kickoff.return_value = crew_result(1, APPROVED, make_racm())
         with (
             patch("api.routers.sessions.get_executor", return_value=ex),
-            patch("swarm.audit_flow.FieldworkCrew") as MockCrew,
+            patch("swarm.audit_flow.PlanningCrew") as MockCrew,
         ):
             MockCrew.return_value.crew.return_value = mock_crew
-            assert _approve(client, sid).status_code == 200
+            resp = client.post(
+                f"/api/sessions/{sid}/retry",
+                headers=AUTH,
+                json={"phase": 1, "human_id": "alice"},
+            )
+            assert resp.status_code == 200
             flow = get_flow(sid)
             assert (
                 client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 204

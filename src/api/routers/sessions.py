@@ -19,8 +19,10 @@ from api.models import (
     CreateSessionRequest,
     QAOverrideRequest,
     RetryPhaseRequest,
+    ReturnForReworkRequest,
     SessionDetail,
     SessionSummary,
+    TrailVerification,
     _needs_input,
     _phase_from_status,
 )
@@ -34,13 +36,16 @@ from swarm.audit_flow import (
     AuditFlow,
     InvalidTransitionError,
     PhaseArtifactMissingError,
+    ReviewBlockedError,
 )
 from swarm.session_manager import (
     delete_session,
     get_session,
+    get_trail_anchor,
     list_sessions,
     save_session,
 )
+from swarm.trail import verify_trail
 from swarm.state.repository import FlowRepository
 
 router = APIRouter()
@@ -113,6 +118,30 @@ def _build_summary(session_id: str, data: dict[str, Any]) -> SessionSummary:
         phase=_phase_from_status(status),
         needs_input=_needs_input(status),
         created_at=data.get("created_at", ""),
+        prepared_by=_prepared_by(data, flow),
+    )
+
+
+def _prepared_by(data: dict[str, Any], flow: Optional[AuditFlow]) -> str:
+    """Preparer from the flow, the snapshot, or the session metadata ("" if legacy)."""
+    if flow is not None and flow.state.prepared_by:
+        return flow.state.prepared_by
+    snapshot = data.get("state_snapshot") or {}
+    return str(snapshot.get("prepared_by") or data.get("prepared_by") or "")
+
+
+def _snapshot_verification(
+    session_id: str, snapshot: dict[str, Any]
+) -> TrailVerification:
+    return TrailVerification(
+        **verify_trail(
+            snapshot.get("approval_trail") or [],
+            anchor=get_trail_anchor(session_id),
+            artifacts={
+                f: snapshot.get(f)
+                for f in ("racm_plan", "working_papers", "final_report")
+            },
+        )
     )
 
 
@@ -137,6 +166,10 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
             final_report=_artifact_dict(s.final_report),
             approval_trail=s.approval_trail,
             qa_rejection_reason=s.qa_rejection_reason,
+            prepared_by=_prepared_by(data, flow),
+            trail_verification=TrailVerification(
+                **flow.verify_trail(anchor=get_trail_anchor(session_id))
+            ),
         )
     # flow not in memory — return stored snapshot
     snapshot = data.get("state_snapshot", {})
@@ -157,6 +190,8 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
         final_report=snapshot.get("final_report"),
         approval_trail=snapshot.get("approval_trail", []),
         qa_rejection_reason=snapshot.get("qa_rejection_reason"),
+        prepared_by=_prepared_by(data, None),
+        trail_verification=_snapshot_verification(session_id, snapshot),
     )
 
 
@@ -230,7 +265,9 @@ def _run_phase_3(session_id: str, job_id: str) -> None:
 
 @router.post("", response_model=SessionSummary, status_code=201)
 def create_session(req: CreateSessionRequest) -> SessionSummary:
-    return _create_and_launch(req.theme, req.business_context, req.frameworks, req.name)
+    return _create_and_launch(
+        req.theme, req.business_context, req.frameworks, req.name, req.prepared_by
+    )
 
 
 @router.post("/with-document", response_model=SessionSummary, status_code=201)
@@ -239,6 +276,7 @@ def create_session_with_document(
     business_context: str = Form(""),
     frameworks: list[str] = Form(default_factory=lambda: list(DEFAULT_FRAMEWORKS)),
     name: Optional[str] = Form(None),
+    prepared_by: str = Form(..., min_length=1, max_length=200),
     document: UploadFile = File(...),
 ) -> SessionSummary:
     """Create an audit with a scope document (PDF, .txt or .md, ≤ 5 MB).
@@ -246,6 +284,8 @@ def create_session_with_document(
     The extracted text is appended to the business context inside delimiters
     that label it as untrusted, user-supplied document content.
     """
+    if not prepared_by.strip():
+        raise HTTPException(status_code=422, detail="prepared_by must not be blank")
     data = document.file.read(MAX_UPLOAD_BYTES + 1)
     try:
         doc = extract_scope_document(document.filename, data)
@@ -256,11 +296,16 @@ def create_session_with_document(
         merge_business_context(business_context, doc),
         [f for f in frameworks if f.strip()],
         name or None,
+        prepared_by,
     )
 
 
 def _create_and_launch(
-    theme: str, business_context: str, frameworks: list[str], name: Optional[str]
+    theme: str,
+    business_context: str,
+    frameworks: list[str],
+    name: Optional[str],
+    prepared_by: str,
 ) -> SessionSummary:
     session_id = str(uuid.uuid4())
     name = name or f"{theme[:40]} audit"
@@ -270,6 +315,10 @@ def _create_and_launch(
     flow.state.theme = theme
     flow.state.business_context = business_context
     flow.state.frameworks = frameworks
+    try:
+        flow.record_preparer(prepared_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Stamp RUNNING_PHASE_1 synchronously so polls see correct state immediately
     flow.begin_phase_1()
@@ -281,7 +330,10 @@ def _create_and_launch(
         scope_text=business_context,
         status=flow.state.status,
         created_at=created_at,
+        prepared_by=flow.state.prepared_by,
     )
+    # Persist the snapshot (and the trail's first, chained entry) right away.
+    _repo.save(session_id, flow)
 
     job_id = str(uuid.uuid4())
     set_job(job_id, "running")
@@ -294,6 +346,7 @@ def _create_and_launch(
         phase=1,
         needs_input=False,
         created_at=created_at,
+        prepared_by=flow.state.prepared_by,
     )
 
 
@@ -311,11 +364,50 @@ def get_session_detail(session_id: str) -> SessionDetail:
     return _build_detail(session_id, data)
 
 
+def _has_sign_off(session_id: str, data: dict[str, Any]) -> bool:
+    """True once any gate was approved or the audit completed.
+
+    Checks the in-memory flow and the persisted snapshot, by trail and by
+    status (every status past Planning implies Gate 1 was approved).
+    """
+    states: list[tuple[str, list[dict[str, str]]]] = []
+    flow = get_flow(session_id)
+    if flow is not None:
+        states.append((flow.state.status, flow.state.approval_trail))
+    snapshot = data.get("state_snapshot") or {}
+    states.append(
+        (
+            str(snapshot.get("status") or data.get("status") or ""),
+            snapshot.get("approval_trail") or [],
+        )
+    )
+    for status, trail in states:
+        if status == "COMPLETED" or _phase_from_status(status) >= 2:
+            return True
+        if any(e.get("action") == "gate_approval" for e in trail):
+            return True
+    return False
+
+
 @router.delete("/{session_id}", status_code=204)
 def remove_session(session_id: str) -> None:
+    """Delete an unapproved draft audit.
+
+    409 once any gate has been approved or the audit completed: signed-off
+    work and its approval trail are retained.
+    """
     # Serialise with approve/retry/override so an action racing a delete
     # cannot re-cache the flow after it was removed.
     with session_lock(session_id):
+        data = get_session(session_id)
+        if data and _has_sign_off(session_id, data):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Cannot delete this audit: a gate has been approved or the "
+                    "audit is completed, so its work and approval trail are kept."
+                ),
+            )
         delete_session(session_id)
         remove_flow(session_id)
 
@@ -361,7 +453,12 @@ def _summary(
         phase=_phase_from_status(status),
         needs_input=needs_input,
         created_at=data.get("created_at", ""),
+        prepared_by=_prepared_by(data, get_flow(session_id)),
     )
+
+
+def _blocked(action: str, exc: Exception) -> HTTPException:
+    return HTTPException(status_code=409, detail=f"Cannot {action}: {exc}")
 
 
 @router.patch("/{session_id}/approve", response_model=SessionSummary)
@@ -389,12 +486,14 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             approve(req.human_id)
         except InvalidTransitionError as exc:
             raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
+        except (ReviewBlockedError, PhaseArtifactMissingError) as exc:
+            raise _blocked(f"approve gate {req.gate_number}", exc) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+        # Persist the sign-off before any crew runs.
+        _repo.save(session_id, flow)
         if req.gate_number == 3:
-            # No further crew phase — persist the sign-off synchronously.
-            _repo.save(session_id, flow)
             next_status = flow.state.status
         else:
             _submit_phase(session_id, req.gate_number + 1)
@@ -419,6 +518,7 @@ def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
             raise _conflict(f"retry phase {req.phase}", flow, exc) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _repo.save(session_id, flow)
         _submit_phase(session_id, req.phase)
         next_status = flow.state.status
 
@@ -442,9 +542,55 @@ def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSum
             raise _conflict(
                 f"override QA rejection for phase {req.phase}", flow, exc
             ) from exc
+        except ReviewBlockedError as exc:
+            raise _blocked(f"override QA rejection for phase {req.phase}", exc) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         _repo.save(session_id, flow)
         next_status = flow.state.status
 
     return _summary(session_id, data, next_status, needs_input=True)
+
+
+@router.post("/{session_id}/return", response_model=SessionSummary)
+def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSummary:
+    """Reviewer returns a phase waiting at its gate for rework.
+
+    WAITING_HUMAN_GATE_n → RUNNING_PHASE_n: the phase crew re-runs with the
+    review notes as feedback, and the return (reviewer, notes) is recorded in
+    the approval trail. 409 if the session is not waiting at that gate or the
+    reviewer is the preparer; 422 for blank notes.
+    """
+    data = _require_session(session_id)
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        try:
+            flow.return_for_rework(req.phase, req.human_id, req.notes)
+        except InvalidTransitionError as exc:
+            raise _conflict(f"return phase {req.phase}", flow, exc) from exc
+        except ReviewBlockedError as exc:
+            raise _blocked(f"return phase {req.phase}", exc) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _repo.save(session_id, flow)
+        _submit_phase(session_id, req.phase)
+        next_status = flow.state.status
+
+    return _summary(session_id, data, next_status)
+
+
+@router.get("/{session_id}/trail/verify", response_model=TrailVerification)
+def verify_session_trail(session_id: str) -> TrailVerification:
+    """Recompute the persisted approval trail's hash chain.
+
+    Verifies the trail as stored on disk (the record), against the separately
+    stored anchor; falls back to the in-memory flow if nothing is persisted.
+    """
+    data = _require_session(session_id)
+    snapshot = data.get("state_snapshot") or {}
+    if snapshot:
+        return _snapshot_verification(session_id, snapshot)
+    flow = get_flow(session_id)
+    if flow is None:
+        return TrailVerification(**verify_trail([], get_trail_anchor(session_id)))
+    return TrailVerification(**flow.verify_trail(anchor=get_trail_anchor(session_id)))
