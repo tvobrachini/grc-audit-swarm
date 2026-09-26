@@ -171,8 +171,10 @@ def run_phase2(flow, skip_aws: bool) -> bool:
                     control_id="CTRL-01",
                     vault_id_reference=mock_vault_id,
                     exact_quote_from_evidence="MinimumPasswordLength: 14",
+                    tod_conclusion="Effective",
+                    toe_conclusion="Not tested",
+                    toe_basis="Point-in-time configuration read (design only).",
                     test_conclusion="IAM password policy meets CIS baseline.",
-                    severity="Pass",
                 )
             ],
         )
@@ -212,7 +214,8 @@ def run_phase2(flow, skip_aws: bool) -> bool:
     print(f"\n  ✅ Working Papers generated — {len(findings)} finding(s)")
     for f in findings:
         print(
-            f"     {f.control_id}  [{f.severity}]  vault={f.vault_id_reference[:16]}…"
+            f"     {f.control_id}  [{f.result}: ToD {f.tod_conclusion}, "
+            f"ToE {f.toe_conclusion}]  vault={f.vault_id_reference[:16]}…"
         )
         quote = f.exact_quote_from_evidence
         print(f'       Quote: "{quote[:80]}{"…" if len(quote) > 80 else ""}"')

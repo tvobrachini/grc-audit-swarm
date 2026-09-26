@@ -64,14 +64,19 @@ class FieldworkCrew:
             name="execution_evaluation_task",
             agent=auditor,
             output_pydantic=WorkingPaperSchema,
-            context=[collection_task],  # only the collected evidence
+            # The collector's output carries the raw tool responses and their
+            # vault IDs; the RACM test steps arrive via the {test_plan} input.
+            context=[collection_task],
         )
         qa_task = Task(
             **self.tasks_config["eval_qa_gate_task"],
             name="eval_qa_gate_task",
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
-            context=[evaluation_task],  # only the working papers
+            # QA checks the working papers against the evidence actually
+            # collected (verbatim quotes, 'Not tested' where no tool applied)
+            # and, via {test_plan}, against the RACM test steps.
+            context=[collection_task, evaluation_task],
         )
 
         return Crew(

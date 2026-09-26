@@ -14,6 +14,7 @@ from swarm.schema import (
     ControlTestStep,
     ControlTesting,
     FinalReportSchema,
+    Population,
     QA_PushbackSchema,
     Risk,
     RiskControlMatrixSchema,
@@ -34,10 +35,23 @@ def make_racm() -> RiskControlMatrixSchema:
                     Control(
                         control_id="CTRL-01",
                         description="Block public access enabled account-wide",
+                        control_owner="Cloud Platform Lead",
+                        frequency="Continuous",
+                        nature="Automated",
+                        control_type="Preventive",
+                        key_control=True,
+                        assertions=["Confidentiality"],
                         testing_procedures=ControlTesting(
                             test_of_design=[step],
                             test_of_effectiveness=[step],
                             substantive_testing=[step],
+                            population=Population(
+                                source="All S3 buckets",
+                                completeness_procedure="Agree to console count",
+                            ),
+                            sample_size=1,
+                            sampling_method="Test of one",
+                            period_of_reliance="FY2026",
                         ),
                     )
                 ],
@@ -54,8 +68,10 @@ def make_papers() -> WorkingPaperSchema:
                 control_id="CTRL-01",
                 vault_id_reference="vault-abc123",
                 exact_quote_from_evidence="BlockPublicAcls: true",
+                tod_conclusion="Effective",
+                toe_conclusion="Effective",
+                toe_basis="Test of one; relies on change-management ITGCs.",
                 test_conclusion="Control operating effectively.",
-                severity="Pass",
             )
         ],
     )

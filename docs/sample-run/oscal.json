@@ -17,7 +17,7 @@
       "observations": [
         {
           "observation_id": "demo-obs-1",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] The sample password policy meets the length requirement in the test step.",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] Design and implementation: at the time of the read, the sample password policy meets the length requirement in the test step. Operating effectiveness over the period was not tested.",
           "methods": [
             "test"
           ],
@@ -25,12 +25,23 @@
             "CTRL-01"
           ],
           "relevant_evidence": [
-            "628f6dd1-eccb-4e61-8a0a-74523f3e3cd1"
+            "94c05e48-0fca-4892-be7b-8c01c058bde1"
           ]
         },
         {
           "observation_id": "demo-obs-2",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] One sample bucket does not block public ACLs; remediation would be needed.",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. This is a scope limitation, not a deficiency.",
+          "methods": [
+            "examine"
+          ],
+          "subjects": [
+            "CTRL-03"
+          ],
+          "relevant_evidence": []
+        },
+        {
+          "observation_id": "demo-obs-3",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] One of three sample buckets does not block public ACLs; the control is not implemented as designed.",
           "methods": [
             "test"
           ],
@@ -38,7 +49,7 @@
             "CTRL-02"
           ],
           "relevant_evidence": [
-            "9a2dd38b-f30a-4fbd-a48e-f99142c0a8d8"
+            "8b12663a-1eba-4cd7-8c57-325a88fac320"
           ]
         }
       ]
