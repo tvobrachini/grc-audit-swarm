@@ -1,77 +1,80 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, ShieldX } from "lucide-react";
-import type { AuditEvent } from "@/api/client";
-import { api } from "@/api/client";
+import { api, type SessionDetail } from "@/api/client";
 
-interface Props {
-  events: AuditEvent[];
+interface VaultFinding {
+  control_id: string;
+  vault_id_reference: string;
+  exact_quote_from_evidence: string;
 }
 
-export function EvidenceVaultPane({ events }: Props) {
-  const vaultEvents = events.filter((e) => e.type === "vault_entry");
-  const [verifying, setVerifying] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, boolean>>({});
+interface Props {
+  session: SessionDetail;
+}
 
-  const mutation = useMutation({
-    mutationFn: ({ vault_id, exact_quote }: { vault_id: string; exact_quote: string }) =>
-      api.evidence.verify(vault_id, exact_quote),
-    onSuccess: (data) => {
-      setResults((prev) => ({ ...prev, [data.vault_id]: data.verified }));
-      setVerifying(null);
-    },
-  });
+/** Lists the evidence records the working papers cite, each checked against
+ * the vault: the quote must appear verbatim in the stored, digest-verified
+ * record (POST /api/evidence/verify). Shares its query cache with the
+ * findings board badges. */
+export function EvidenceVaultPane({ session }: Props) {
+  const findings = (
+    (session.working_papers as { findings?: VaultFinding[] } | null)?.findings ?? []
+  ).filter((f) => f.vault_id_reference);
+
+  if (findings.length === 0) {
+    return (
+      <p className="text-xs text-[var(--color-text-muted)] opacity-50">
+        Evidence records appear here once fieldwork has produced working papers.
+      </p>
+    );
+  }
 
   return (
     <div className="space-y-2">
-      {vaultEvents.length === 0 && (
-        <p className="text-xs text-[var(--color-text-muted)] opacity-50">
-          Evidence will appear here as fieldwork runs...
-        </p>
+      {findings.map((f) => (
+        <VaultRecord key={`${f.control_id}-${f.vault_id_reference}`} finding={f} />
+      ))}
+    </div>
+  );
+}
+
+function VaultRecord({ finding }: { finding: VaultFinding }) {
+  const { vault_id_reference: vaultId, exact_quote_from_evidence: quote } = finding;
+  const { data, isError, isPending } = useQuery({
+    queryKey: ["verify", vaultId, quote],
+    queryFn: () => api.evidence.verify(vaultId, quote),
+    enabled: !!vaultId && !!quote,
+    staleTime: Infinity,
+  });
+
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[10px] text-violet-400">{finding.control_id}</span>
+        {data?.verified === true && (
+          <ShieldCheck size={12} className="ml-auto text-green-400" aria-label="verified" />
+        )}
+        {data?.verified === false && (
+          <ShieldX size={12} className="ml-auto text-red-400" aria-label="not verified" />
+        )}
+      </div>
+      <p className="mt-1 break-all font-mono text-[10px] text-[var(--color-text-muted)]">
+        {vaultId}
+      </p>
+      {quote && (
+        <p className="mt-1 text-[11px] italic text-[var(--color-text-muted)]">"{quote}"</p>
       )}
-      {vaultEvents.map((e, i) => {
-        const verified = results[e.vault_id!];
-        return (
-          <div
-            key={i}
-            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] text-violet-400">
-                {e.vault_id}
-              </span>
-              {verified === true && (
-                <ShieldCheck size={12} className="ml-auto text-green-400" />
-              )}
-              {verified === false && (
-                <ShieldX size={12} className="ml-auto text-red-400" />
-              )}
-            </div>
-            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-              {e.source}
-            </p>
-            {verified === undefined && verifying !== e.vault_id && (
-              <button
-                onClick={() => {
-                  setVerifying(e.vault_id!);
-                  mutation.mutate({
-                    vault_id: e.vault_id!,
-                    exact_quote: e.source ?? "",
-                  });
-                }}
-                className="mt-1.5 text-[10px] text-violet-400 hover:underline"
-              >
-                Verify
-              </button>
-            )}
-            {verifying === e.vault_id && (
-              <span className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
-                Verifying...
-              </span>
-            )}
-          </div>
-        );
-      })}
+      <p className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
+        {!quote
+          ? "No quote cited"
+          : isError
+            ? "Verification unavailable"
+            : isPending
+              ? "Verifying..."
+              : data?.verified
+                ? "Quote found verbatim in the stored record"
+                : "Quote not found in the stored record"}
+      </p>
     </div>
   );
 }
