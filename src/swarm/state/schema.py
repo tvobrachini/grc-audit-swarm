@@ -33,5 +33,12 @@ class AuditState(BaseModel):
     # Skill system (used by specialist + worker)
     active_skill_ids: List[str] = Field(default_factory=list)
 
-    # Audit trail log (see Standard 12.3, formerly IIA 2340)
+    # Declared identity of the person who prepared (created) the audit. The
+    # preparer may not review their own work (swarm.review_policy). Empty for
+    # sessions created before this field existed.
+    prepared_by: str = ""
+
+    # Audit trail log (see Standard 12.3, formerly IIA 2340). Append-only and
+    # hash-chained: only swarm.trail.append_entry (via AuditFlow._stamp_trail)
+    # may add entries; swarm.trail.verify_trail checks the chain.
     approval_trail: List[Dict[str, str]] = Field(default_factory=list)

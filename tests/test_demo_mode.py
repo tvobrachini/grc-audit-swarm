@@ -178,7 +178,7 @@ class TestFlow:
         flow.begin_phase_3("alice")
         flow.generate_reporting(event_callback=events.append)
         assert flow.state.status == "WAITING_HUMAN_GATE_3"
-        flow.finalize_audit("alice")
+        flow.finalize_audit("bob")
         assert flow.state.status == "COMPLETED"
         assert [e["gate"] for e in flow.state.approval_trail] == [
             "Gate 1 (Planning)",
@@ -264,10 +264,15 @@ def test_api_demo_run_end_to_end(client):
     r = client.post(
         "/api/sessions",
         headers=AUTH,
-        json={"theme": "S3 exposure", "business_context": "Fintech"},
+        json={
+            "theme": "S3 exposure",
+            "business_context": "Fintech",
+            "prepared_by": "Pat Preparer",
+        },
     )
     assert r.status_code == 201
     sid = r.json()["session_id"]
+    assert r.json()["prepared_by"] == "Pat Preparer"
     try:
         detail = client.get(f"/api/sessions/{sid}", headers=AUTH).json()
         assert detail["status"] == "WAITING_HUMAN_GATE_1"
@@ -278,25 +283,39 @@ def test_api_demo_run_end_to_end(client):
         assert types.count("agent_step") == 5
         assert types[-1] == "complete"
 
-        for gate, expected in (
-            (1, "WAITING_HUMAN_GATE_2"),
-            (2, "WAITING_HUMAN_GATE_3"),
-            (3, "COMPLETED"),
+        for gate, approver, expected in (
+            (1, "alice", "WAITING_HUMAN_GATE_2"),
+            (2, "bob", "WAITING_HUMAN_GATE_3"),
+            (3, "carol", "COMPLETED"),
         ):
             r = client.patch(
                 f"/api/sessions/{sid}/approve",
                 headers=AUTH,
-                json={"gate_number": gate, "human_id": "alice"},
+                json={"gate_number": gate, "human_id": approver},
             )
             assert r.status_code == 200, r.text
             detail = client.get(f"/api/sessions/{sid}", headers=AUTH).json()
             assert detail["status"] == expected
 
-        assert len(detail["approval_trail"]) == 3
+        assert [e["action"] for e in detail["approval_trail"]] == [
+            "audit_created",
+            "gate_approval",
+            "gate_approval",
+            "gate_approval",
+        ]
         assert detail["final_report"]["oscal_sar"] is not None
+        assert detail["trail_verification"]["ok"] is True
         # Persisted: a reload from disk sees the completed audit.
         remove_flow(sid)
         detail = client.get(f"/api/sessions/{sid}", headers=AUTH).json()
         assert detail["status"] == "COMPLETED"
+        assert detail["prepared_by"] == "Pat Preparer"
+        verify = client.get(f"/api/sessions/{sid}/trail/verify", headers=AUTH).json()
+        assert verify["ok"] is True, verify
+        assert verify["status"] == "ok"
+        assert verify["entries"] == 4
+        assert verify["anchored"] is True
+        # A completed audit cannot be deleted.
+        assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
     finally:
-        client.delete(f"/api/sessions/{sid}", headers=AUTH)
+        remove_flow(sid)

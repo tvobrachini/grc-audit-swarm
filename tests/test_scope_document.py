@@ -169,6 +169,7 @@ def test_create_with_pdf(client):
             "theme": "S3 exposure",
             "business_context": "Fintech",
             "frameworks": ["COSO", "SOC 2"],
+            "prepared_by": "preparer",
         },
         files={
             "document": (
@@ -194,7 +195,7 @@ def test_create_with_text_and_default_frameworks(client):
     r = client.post(
         "/api/sessions/with-document",
         headers=AUTH,
-        data={"theme": "IAM"},
+        data={"theme": "IAM", "prepared_by": "preparer"},
         files={"document": ("scope.txt", b"IAM users and roles", "text/plain")},
     )
     assert r.status_code == 201, r.text
@@ -206,7 +207,7 @@ def test_unsupported_document_is_415_and_creates_nothing(client):
     r = client.post(
         "/api/sessions/with-document",
         headers=AUTH,
-        data={"theme": "IAM"},
+        data={"theme": "IAM", "prepared_by": "preparer"},
         files={"document": ("scope.exe", b"MZ\x90\x00", "application/octet-stream")},
     )
     assert r.status_code == 415
@@ -225,7 +226,7 @@ def test_declared_oversize_rejected_before_parsing(client):
 def test_upload_requires_auth(client):
     r = client.post(
         "/api/sessions/with-document",
-        data={"theme": "IAM"},
+        data={"theme": "IAM", "prepared_by": "preparer"},
         files={"document": ("scope.txt", b"x", "text/plain")},
     )
     assert r.status_code == 401

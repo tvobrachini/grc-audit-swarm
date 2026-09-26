@@ -14,7 +14,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from flow_builders import make_papers, make_racm, make_report  # type: ignore[import-not-found]
+from flow_builders import (  # type: ignore[import-not-found]
+    make_racm,
+    make_report,
+    make_verified_papers,
+)
 from swarm.audit_flow import AuditFlow
 
 
@@ -62,7 +66,7 @@ def test_full_run_prints_model_artifacts(run_monitor, capsys):
             flow,
             "generate_fieldwork",
             side_effect=lambda *a, **k: _complete(
-                flow, 2, "working_papers", make_papers()
+                flow, 2, "working_papers", make_verified_papers()
             ),
         ),
         patch(
@@ -89,7 +93,10 @@ def test_full_run_prints_model_artifacts(run_monitor, capsys):
 def test_skip_aws_injects_papers_via_state_machine(run_monitor):
     flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
     flow.state.theme = "AWS S3"
+    flow.state.racm_plan = make_racm()
     assert run_monitor.run_phase2(flow, skip_aws=True) is True
+    # The injected mock evidence is in the vault, so Gate 2 can be approved.
+    assert flow.unverified_evidence() == []
     assert flow.state.status == "WAITING_HUMAN_GATE_2"
     assert flow.machine.status.value == "WAITING_HUMAN_GATE_2"
     assert flow.state.working_papers is not None

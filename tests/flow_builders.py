@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.audit_flow import AuditFlow
+from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
     AuditFindingSchema,
     Control,
@@ -60,6 +61,21 @@ def make_papers() -> WorkingPaperSchema:
     )
 
 
+def make_verified_papers() -> WorkingPaperSchema:
+    """make_papers() with its quote registered in the (test) evidence vault.
+
+    Fieldwork runs verify every quote against the vault; the tests' vault is
+    a per-test temp dir (conftest.py), so call this inside the test.
+    """
+    papers = make_papers()
+    quote = papers.findings[0].exact_quote_from_evidence
+    record = EvidenceAssuranceProtocol.register_evidence(
+        f"PublicAccessBlockConfiguration: {quote}", "test_fixture"
+    )
+    papers.findings[0].vault_id_reference = record["vault_id"]
+    return papers
+
+
 def make_report() -> FinalReportSchema:
     return FinalReportSchema(
         executive_summary="No exceptions.",
@@ -95,7 +111,7 @@ PHASES = {
         "qa": "eval_qa_gate_task",
         "artifact": "execution_evaluation_task",
         "field": "working_papers",
-        "make": make_papers,
+        "make": make_verified_papers,
         "start": "RUNNING_PHASE_2",
         "run": "generate_fieldwork",
     },
