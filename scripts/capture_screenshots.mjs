@@ -49,10 +49,25 @@ async function shot(page, name) {
   console.log(`captured ${file}`);
 }
 
-async function newAudit(page, theme, context) {
+// Real people, real supervision: these are the declared identities used
+// throughout the recaptured demo run (see runNormal below).
+const PREPARER = "J. Rivera, IT Auditor";
+const GATE_1_APPROVER = "M. Alvarez, IT Audit Manager";
+const GATE_2_APPROVER = "M. Alvarez, IT Audit Manager";
+const GATE_3_APPROVER = "S. Chen, Audit Director"; // must differ from the Gate 2 approver
+
+/** Pause between recorded actions so approval-trail timestamps are seconds
+ * apart, not milliseconds — a screenshot of the trail should read as a real
+ * review, not a scripted burst. */
+async function settle(page, ms = 2000) {
+  await page.waitForTimeout(ms);
+}
+
+async function newAudit(page, theme, context, preparedBy = PREPARER) {
   await page.getByRole("button", { name: /new/i }).first().click();
   await page.getByPlaceholder(/e\.g\. S3 Exposure Assessment/i).fill(theme);
   await page.getByPlaceholder(/Describe the environment/i).fill(context);
+  await page.getByPlaceholder(/J\. Rivera/i).fill(preparedBy);
   await page.getByRole("button", { name: /launch audit/i }).click();
   await page.getByRole("dialog").waitFor({ state: "detached" }).catch(() => {});
 }
@@ -65,9 +80,21 @@ async function waitForStatusText(page, pattern, timeout = 60_000) {
   );
 }
 
-async function approveGate(page, name = "J. Rivera, IT Audit Manager") {
+async function approveGate(page, name) {
   await page.getByPlaceholder("Your name / ID").fill(name);
   await page.getByRole("button", { name: /approve & proceed/i }).click();
+}
+
+/** Return the phase for rework with reviewer notes, as a real reviewer would
+ * before ultimately approving — demonstrates real supervision in the trail. */
+async function returnForRework(page, name, notes) {
+  await page.getByPlaceholder("Your name / ID").fill(name);
+  await page.getByRole("button", { name: /return for rework/i }).click();
+  await page.getByPlaceholder(/what must change/i).fill(notes);
+}
+
+async function submitReturnForRework(page) {
+  await page.getByRole("button", { name: /return for rework/i }).click();
 }
 
 async function runNormal(browser) {
@@ -90,7 +117,32 @@ async function runNormal(browser) {
   await page.waitForLoadState("networkidle");
   await shot(page, "gate-1-planning-review-racm");
 
-  await approveGate(page);
+  // Expand the first control to show its attributes and test design.
+  await page
+    .locator("button")
+    .filter({ hasText: /^CTRL-/ })
+    .first()
+    .click();
+  await page.waitForTimeout(300);
+  await shot(page, "racm-control-attributes");
+
+  // A real reviewer returns Gate 1 for rework once, with notes, before
+  // approving — the trail should show real supervision, not a rubber stamp.
+  await returnForRework(
+    page,
+    GATE_1_APPROVER,
+    "Please add a completeness procedure for the IAM credential report " +
+      "population before I can approve the RACM."
+  );
+  await shot(page, "return-for-rework");
+  await submitReturnForRework(page);
+  await settle(page);
+
+  // Planning re-runs; wait for Gate 1 again, then approve for real.
+  await waitForStatusText(page, /Gate 1/);
+  await page.waitForLoadState("networkidle");
+  await approveGate(page, GATE_1_APPROVER);
+  await settle(page);
 
   // Gate 2: fieldwork review (findings board + vault verification badges)
   await waitForStatusText(page, /Gate 2/);
@@ -102,19 +154,26 @@ async function runNormal(browser) {
     .catch(() => {});
   await shot(page, "gate-2-findings-board-vault-verification");
 
-  await approveGate(page);
+  await approveGate(page, GATE_2_APPROVER);
+  await settle(page);
 
   // Gate 3: report review
   await waitForStatusText(page, /Gate 3/);
   await page.waitForLoadState("networkidle");
   await shot(page, "gate-3-report-review");
 
-  await approveGate(page);
+  await approveGate(page, GATE_3_APPROVER);
+  await settle(page);
 
-  // Completed: approval trail + export buttons
+  // Completed: approval trail (with the verification badge) + export buttons
   await waitForStatusText(page, /Audit Complete/);
   await page.waitForLoadState("networkidle");
   await page.getByText("Export").first().waitFor();
+  await page
+    .getByText(/trail intact|legacy trail/i)
+    .first()
+    .waitFor({ timeout: 15_000 })
+    .catch(() => {});
   await shot(page, "completed-approval-trail-and-exports");
 
   await ctx.close();

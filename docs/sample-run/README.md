@@ -8,7 +8,10 @@ for the same reason inside the app itself. They exist so a reader can see the
 exact shape of the export files without installing or running anything.
 
 The session went through all three human approval gates before these were
-exported, so each file also carries a real (demo) approval trail.
+exported, so each file also carries a real (demo) approval trail — including
+one **Return for rework** at Gate 1 with reviewer notes, so the trail shows
+genuine supervision rather than a rubber stamp, and a Gate 3 approval by a
+different person than the Gate 2 approver (segregation of duties).
 
 ## Files
 
@@ -27,12 +30,16 @@ exported, so each file also carries a real (demo) approval trail.
    ```bash
    API_AUTH_TOKEN=dev-token DEMO_MODE=1 DEMO_STEP_DELAY=0 \
      SESSIONS_PATH=/tmp/grc-demo/s.json EVIDENCE_VAULT_PATH=/tmp/grc-demo/vault \
+     TRAIL_ANCHORS_PATH=/tmp/grc-demo/anchors.json \
      PYTHONPATH=src uv run uvicorn api.main:app --port 8000
    ```
 
-2. Create an audit and approve it through all three gates (via the UI, or
+2. Create an audit (with a "Prepared by" identity) and approve it through
+   all three gates — using a different declared identity for each of the
+   preparer, the Gate 1/2 approver and the Gate 3 approver, and returning at
+   least one gate for rework with notes — via the UI, or
    `scripts/capture_screenshots.mjs`, which does this as a side effect while
-   taking screenshots).
+   taking screenshots.
 
 3. Download each export (replace `<session-id>` and `<token>`):
 
