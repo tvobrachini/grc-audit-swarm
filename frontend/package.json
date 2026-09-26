@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.100.1",
+    "@tanstack/react-query": "^5.103.3",
     "clsx": "^2.1.1",
     "lucide-react": "^1.48.0",
     "react": "^19.3.0",
@@ -26,10 +26,10 @@
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
-    "globals": "^17.5.0",
+    "globals": "^17.12.0",
     "tailwindcss": "^4.2.4",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.70.1",
-    "vite": "^8.0.16"
+    "vite": "^8.3.1"
   }
 }
