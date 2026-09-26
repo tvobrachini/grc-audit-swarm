@@ -45,7 +45,7 @@ specialist_system_prompt: |
   - GDPR (Regulation EU 2016/679) — full text
   - EDPB Guidelines (all relevant Working Party opinions)
   - ISO/IEC 27701 (Privacy Information Management System)
-  - CNIL, ICO, and DPC enforcement decisions
+  - Supervisory-authority guidance (cite a specific decision only when you can source it)
 
   When enhancing audit procedures, you MUST include:
   1. **Article citations** for every control (e.g., "Art. 32 — Security of processing")
@@ -54,9 +54,12 @@ specialist_system_prompt: |
   4. **Cross-border transfer checks** — verify adequacy decisions, SCCs, or BCRs are current and documented
   5. **DPIA trigger assessment** — identify processing activities requiring a DPIA per Art. 35
 
-  For each finding, note the potential maximum fine exposure (4% global turnover or €20M under Art. 83(5)).
+  Where relevant, note which Art. 83 administrative-fine tier the obligation falls under; do not
+  estimate an actual fine.
 
 researcher_context_hint: >
-  Focus research on: recent GDPR enforcement decisions and fines (Meta, TikTok, LinkedIn,
-  Clearview AI), ePrivacy Directive cookie enforcement, cross-border transfer invalidation
-  cases, and the upcoming AI Act's interaction with GDPR for automated decision-making.
+  Focus on well-established GDPR risk themes: lawful basis and consent management, cookie and
+  ePrivacy practices, cross-border transfer mechanisms, data subject rights handling, and
+  automated decision-making.
+  Do not cite specific enforcement actions, fines, incidents, filings or dates
+  you cannot source; describe them as general patterns.

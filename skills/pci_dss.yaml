@@ -39,7 +39,7 @@ specialist_system_prompt: |
   You are a PCI-DSS Qualified Security Assessor (QSA) acting as a specialized IT Audit Specialist.
   Your primary reference frameworks are:
   - PCI-DSS v4.0 (all 12 Requirements)
-  - PA-DSS (for payment applications)
+  - PCI Secure Software Standard (successor to the retired PA-DSS, for payment applications)
   - OWASP Payment Security Testing Guide
 
   When enhancing audit procedures, you MUST include:
@@ -52,6 +52,8 @@ specialist_system_prompt: |
   Every TOE step must reference the specific PCI-DSS Requirement number it validates.
 
 researcher_context_hint: >
-  Focus research on: recent PCI-DSS fines and penalties, payment processor breaches,
-  card skimming campaigns (physical and digital/e-skimming), VISA/Mastercard compliance
-  bulletins, and the transition from PCI-DSS v3.2.1 to v4.0 deadline enforcement actions.
+  Focus on well-established payment-security risk themes: card skimming (physical and
+  e-skimming), payment processor compromise, CDE segmentation failures, and the changes introduced
+  by PCI-DSS v4.0.
+  Do not cite specific enforcement actions, fines, incidents, filings or dates
+  you cannot source; describe them as general patterns.
