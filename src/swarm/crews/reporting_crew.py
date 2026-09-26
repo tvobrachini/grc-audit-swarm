@@ -7,7 +7,7 @@ from swarm.schema import (
     OSCAL_SAR_Schema,
     QA_PushbackSchema,
 )
-from swarm.llm_factory import get_crew_llm
+from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class ReportingCrew:
@@ -38,7 +38,7 @@ class ReportingCrew:
             **self.agents_config["concluder"], verbose=True, llm=base_llm, max_iter=5
         )
         # Tone adherence must be perfectly objective (temperature 0)
-        qa_llm = get_crew_llm(temperature=0.0)
+        qa_llm = get_qa_llm(temperature=0.0)
         qa_reviewer = Agent(
             **self.agents_config["qa_tone_reviewer"],
             verbose=True,

@@ -2,7 +2,7 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task
 from swarm.schema import RiskControlMatrixSchema, QA_PushbackSchema
-from swarm.llm_factory import get_crew_llm
+from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class PlanningCrew:
@@ -43,7 +43,7 @@ class PlanningCrew:
         )
 
         # IIA Anti-Hallucination: QA Reviewer runs strictly at Temperature 0.0
-        qa_llm = get_crew_llm(temperature=0.0)
+        qa_llm = get_qa_llm(temperature=0.0)
         qa_reviewer = Agent(
             **self.agents_config["qa_reviewer"], verbose=True, llm=qa_llm, max_iter=3
         )

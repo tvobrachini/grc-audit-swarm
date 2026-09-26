@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -46,7 +47,10 @@ from swarm.session_manager import (
     save_session,
 )
 from swarm.trail import verify_trail
+from swarm.schema import FinalReportSchema, RiskControlMatrixSchema, WorkingPaperSchema
 from swarm.state.repository import FlowRepository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 _repo = FlowRepository()
@@ -97,6 +101,25 @@ def _get_or_load_flow(session_id: str) -> AuditFlow | None:
         )
     set_flow(session_id, result.flow)
     return result.flow
+
+
+def _migrated_snapshot_artifact(schema: type, raw: Any) -> dict[str, Any] | None:
+    """Pass a stored artifact through its schema, as FlowRepository.load does.
+
+    Older snapshots hold previous-schema artifacts (e.g. a free-text
+    ``severity``); validating maps them to the current fields. If an artifact
+    no longer validates at all, it is returned unchanged rather than dropped,
+    so the reviewer still sees what was stored.
+    """
+    if raw is None:
+        return None
+    try:
+        return schema.model_validate(raw).model_dump()
+    except Exception:
+        logger.warning(
+            "Stored %s did not validate; returning it as stored", schema.__name__
+        )
+        return raw
 
 
 def _artifact_dict(artifact) -> dict[str, Any] | None:
@@ -185,9 +208,15 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
         business_context=snapshot.get("business_context", ""),
         frameworks=snapshot.get("frameworks", []),
         current_human_dossier=snapshot.get("current_human_dossier", ""),
-        racm_plan=snapshot.get("racm_plan"),
-        working_papers=snapshot.get("working_papers"),
-        final_report=snapshot.get("final_report"),
+        racm_plan=_migrated_snapshot_artifact(
+            RiskControlMatrixSchema, snapshot.get("racm_plan")
+        ),
+        working_papers=_migrated_snapshot_artifact(
+            WorkingPaperSchema, snapshot.get("working_papers")
+        ),
+        final_report=_migrated_snapshot_artifact(
+            FinalReportSchema, snapshot.get("final_report")
+        ),
         approval_trail=snapshot.get("approval_trail", []),
         qa_rejection_reason=snapshot.get("qa_rejection_reason"),
         prepared_by=_prepared_by(data, None),

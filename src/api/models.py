@@ -2,7 +2,9 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-DEFAULT_FRAMEWORKS = ("COSO", "PCAOB", "IIA")
+# Control frameworks the RACM maps to. Auditing standards (PCAOB, IIA) are not
+# control frameworks, so they are not defaults here.
+DEFAULT_FRAMEWORKS = ("COSO 2013", "NIST SP 800-53", "CIS Controls")
 
 
 _MAX_IDENTITY = 200

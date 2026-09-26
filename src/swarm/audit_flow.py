@@ -64,8 +64,8 @@ _QA_FEEDBACK = {
     ),
     2: (
         "qa_feedback",
-        " IMPORTANT: A previous evaluation was rejected — fix all "
-        "severity and evidence issues: {reason}",
+        " IMPORTANT: A previous evaluation was rejected — fix the ToD/ToE "
+        "conclusions and evidence issues: {reason}",
     ),
     3: (
         "tone_qa_feedback",
@@ -978,10 +978,10 @@ class AuditFlow:
         papers = self.state.working_papers
         count = len(getattr(papers, "findings", None) or [])
         self.state.current_human_dossier = (
-            "Execution Fieldwork complete with substantive evidence evaluated; "
-            f"every evidence quote in the {count} finding(s) was verified against "
-            "the evidence vault. Please review Findings for final Standard 12.3 "
-            "(formerly IIA 2340) approval."
+            f"Fieldwork complete: ToD/ToE conclusions recorded for {count} "
+            "finding(s), and every cited evidence quote was verified against the "
+            "evidence vault. Review the working papers before approving Gate 2 "
+            "(supervision step inspired by IIA Standard 12.3, formerly 2340)."
         )
 
     def generate_reporting(self, event_callback=None):
@@ -1027,6 +1027,8 @@ class AuditFlow:
         self._commit_status()
         self.state.current_human_dossier = (
             "Reporting complete: the final report passed the tone QA review. "
-            "Please review the report and approve Gate 3 to complete the audit. "
-            "Gate 3 must be approved by someone other than the Gate 2 approver."
+            "Review the report and the proposed deficiency classifications (a "
+            "draft for your judgement), then approve Gate 3 to complete the "
+            "audit. Gate 3 must be approved by someone other than the Gate 2 "
+            "approver."
         )
