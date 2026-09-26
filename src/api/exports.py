@@ -118,15 +118,38 @@ def _steps(steps: Optional[list[Any]]) -> str:
     )
 
 
+def _yes_no(value: Optional[bool]) -> str:
+    return "" if value is None else ("Yes" if value else "No")
+
+
+def _text(value: Any) -> str:
+    return "" if value is None else str(value)
+
+
 RACM_HEADERS = [
     "Risk ID",
     "Risk Description",
+    "Likelihood",
+    "Impact",
+    "Rating Rationale",
     "Regulatory Mapping",
     "Control ID",
     "Control Description",
+    "Control Owner",
+    "Frequency",
+    "Nature",
+    "Type",
+    "Key Control",
+    "Assertions / Objectives",
+    "IPE",
     "ToD Steps",
     "ToE Steps",
     "Substantive Steps",
+    "Population Source",
+    "Population Completeness",
+    "Sample Size",
+    "Sampling Method",
+    "Period of Reliance",
 ]
 
 
@@ -138,16 +161,32 @@ def racm_xlsx(racm: RiskControlMatrixSchema, ctx: ExportContext) -> bytes:
         mapping = ", ".join(risk.regulatory_mapping)
         for c in risk.controls:
             tp = c.testing_procedures
+            pop = tp.population
             rows.append(
                 [
                     risk.risk_id,
                     risk.description,
+                    _text(risk.likelihood),
+                    _text(risk.impact),
+                    _text(risk.rating_rationale),
                     mapping,
                     c.control_id,
                     c.description,
+                    _text(c.control_owner),
+                    _text(c.frequency),
+                    _text(c.nature),
+                    _text(c.control_type),
+                    _yes_no(c.key_control),
+                    "; ".join(c.assertions),
+                    "; ".join(c.ipe),
                     _steps(tp.test_of_design),
                     _steps(tp.test_of_effectiveness),
                     _steps(tp.substantive_testing),
+                    pop.source if pop else "",
+                    pop.completeness_procedure if pop else "",
+                    _text(tp.sample_size),
+                    _text(tp.sampling_method),
+                    _text(tp.period_of_reliance),
                 ]
             )
     _write_sheet(wb, "Controls", RACM_HEADERS, rows)
@@ -162,11 +201,18 @@ def racm_xlsx(racm: RiskControlMatrixSchema, ctx: ExportContext) -> bytes:
 
 WORKING_PAPER_HEADERS = [
     "Control ID",
-    "Severity",
+    "ToD Conclusion",
+    "ToE Conclusion",
+    "ToE Basis",
+    "Items Tested",
+    "Exceptions Noted",
+    "Result",
+    "Preliminary Deficiency",
     "Conclusion",
     "Evidence Quote",
     "Vault ID",
     "Quote Verified in Vault",
+    "Legacy Severity",
 ]
 
 
@@ -177,40 +223,103 @@ def working_papers_xlsx(papers: WorkingPaperSchema, ctx: ExportContext) -> bytes
     wb.remove(wb.active)  # type: ignore[arg-type]
     rows = []
     for f in papers.findings:
-        verified = EvidenceAssuranceProtocol.verify_exact_quote(
-            f.vault_id_reference, f.exact_quote_from_evidence
-        )
+        if f.vault_id_reference and f.exact_quote_from_evidence:
+            verified = EvidenceAssuranceProtocol.verify_exact_quote(
+                f.vault_id_reference, f.exact_quote_from_evidence
+            )
+            verified_text = "Yes" if verified else "No"
+        else:
+            verified_text = "n/a (no evidence)"
         rows.append(
             [
                 f.control_id,
-                f.severity,
+                _text(f.tod_conclusion),
+                _text(f.toe_conclusion),
+                _text(f.toe_basis),
+                _text(f.items_tested),
+                _text(f.exceptions_noted),
+                _text(f.result),
+                _yes_no(f.preliminary_deficiency),
                 f.test_conclusion,
                 f.exact_quote_from_evidence,
                 f.vault_id_reference,
-                "Yes" if verified else "No",
+                verified_text,
+                _text(f.legacy_severity),
             ]
+        )
+    notes = [
+        f"Theme: {papers.theme}",
+        "Quote Verified in Vault is re-checked at export time: the quote "
+        "must appear verbatim in the stored evidence and the record's "
+        "digest must match.",
+        "Preliminary Deficiency is a fieldwork flag only. Deficiencies are "
+        "classified at engagement level in the report's deficiency evaluation.",
+    ]
+    if any(f.legacy_severity for f in papers.findings):
+        notes.append(
+            "Legacy Severity: these findings were recorded before ToD/ToE "
+            "conclusions existed; their conclusions were derived from the old "
+            "severity label on load."
         )
     _write_sheet(wb, "Findings", WORKING_PAPER_HEADERS, rows)
     _write_sheet(
         wb,
         "Export Info",
         ["Field", "Value"],
-        _info_rows(
-            ctx,
-            2,
-            [
-                f"Theme: {papers.theme}",
-                "Quote Verified in Vault is re-checked at export time: the quote "
-                "must appear verbatim in the stored evidence and the record's "
-                "digest must match.",
-            ],
-        ),
+        _info_rows(ctx, 2, notes),
     )
     return _to_bytes(wb)
 
 
 def _one_line(value: Any) -> str:
     return " ".join(str(value or "").split())
+
+
+def _md_cell(value: Any) -> str:
+    return sanitize_report(_one_line(value).replace("|", "\\|"))
+
+
+def _deficiency_section(report: FinalReportSchema, ctx: ExportContext) -> list[str]:
+    scale = _one_line(report.deficiency_scale) or "not stated"
+    if ctx.status == "COMPLETED":
+        note = (
+            "Engagement-level evaluation proposed by the reporting crew; the "
+            "report containing it was approved at Gate 3 (see Approval Trail)."
+        )
+    else:
+        note = (
+            "Draft engagement-level evaluation proposed by the reporting crew, "
+            "for the auditor's judgement at Gate 3."
+        )
+    lines = [
+        "## Deficiency Evaluation (proposed)",
+        "",
+        f"> {note} Scale: {scale}.",
+        "",
+    ]
+    if not report.deficiency_evaluations:
+        lines += ["No deficiencies were proposed.", ""]
+        return lines
+    lines += [
+        "| ID | Title | Findings | Risks | Likelihood | Magnitude "
+        "| Classification | Compensating controls | Rationale |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for e in report.deficiency_evaluations:
+        cells = [
+            e.deficiency_id,
+            e.title,
+            ", ".join(e.related_findings),
+            ", ".join(e.related_risks),
+            e.likelihood,
+            e.magnitude,
+            e.classification,
+            e.compensating_controls,
+            e.rationale,
+        ]
+        lines.append("| " + " | ".join(_md_cell(c) for c in cells) + " |")
+    lines.append("")
+    return lines
 
 
 def report_markdown(
@@ -229,6 +338,7 @@ def report_markdown(
         "",
         sanitize_report(report.detailed_report),
         "",
+        *_deficiency_section(report, ctx),
         "## Approval Trail",
         "",
     ]

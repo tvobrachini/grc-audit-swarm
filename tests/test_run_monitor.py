@@ -81,7 +81,7 @@ def test_full_run_prints_model_artifacts(run_monitor, capsys):
 
     out = capsys.readouterr().out
     assert "Risk RISK-01: 1 control(s)" in out
-    assert "CTRL-01  [Pass]" in out
+    assert "CTRL-01  [No exception: ToD Effective, ToE Effective]" in out
     assert "No exceptions." in out
     assert flow.state.status == "COMPLETED"
 

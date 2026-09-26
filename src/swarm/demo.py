@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
@@ -29,17 +30,29 @@ from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
     AuditFindingSchema,
     Control,
+    ControlFrequency,
+    ControlNature,
     ControlTestStep,
     ControlTesting,
+    ControlType,
+    DeficiencyClassification,
+    DeficiencyEvaluationSchema,
+    DeficiencyScale,
+    DesignConclusion,
     FinalReportSchema,
     OSCAL_SAR_ImportAP,
     OSCAL_SAR_Metadata,
     OSCAL_SAR_Observation,
     OSCAL_SAR_Result,
     OSCAL_SAR_Schema,
+    OperatingConclusion,
+    Population,
     QA_PushbackSchema,
     Risk,
     RiskControlMatrixSchema,
+    RiskRating,
+    SamplingMethod,
+    FindingResult,
     WorkingPaperSchema,
 )
 
@@ -93,108 +106,275 @@ def _step_delay() -> float:
 
 # ── Fixed artifacts ──────────────────────────────────────────────────────────
 
+# Assumed period of reliance for the sample engagement.
+_DEMO_PERIOD = f"[{DEMO_LABEL}] 2026-01-01 to 2026-12-31 (assumed)"
+
 
 def _step(description: str, expected: str) -> ControlTestStep:
     return ControlTestStep(step_description=description, expected_result=expected)
 
 
+def _password_policy_control() -> Control:
+    return Control(
+        control_id="CTRL-01",
+        description=(
+            "The IAM account password policy enforces the organisation's "
+            "minimum length and complexity."
+        ),
+        control_owner="Cloud Platform Engineering Lead",
+        frequency=ControlFrequency.CONTINUOUS,
+        nature=ControlNature.AUTOMATED,
+        control_type=ControlType.PREVENTIVE,
+        key_control=True,
+        assertions=["Access to programs and data", "Confidentiality"],
+        testing_procedures=ControlTesting(
+            test_of_design=[
+                _step(
+                    "Run the get_iam_password_policy tool and compare each "
+                    "setting with the organisation's standard.",
+                    "Minimum length of at least 14 and the complexity rules are "
+                    "configured (design and implementation).",
+                )
+            ],
+            test_of_effectiveness=[
+                _step(
+                    "Test of one: the configuration read, plus reliance on "
+                    "change-management ITGCs over IAM configuration or AWS Config "
+                    "history covering the period.",
+                    "No change weakened the policy during the period of reliance.",
+                )
+            ],
+            substantive_testing=[
+                _step(
+                    "If the policy was weaker at any time, list console users "
+                    "whose password was last set before the policy took effect.",
+                    "Affected users are identified for follow-up.",
+                )
+            ],
+            sample_size=1,
+            sampling_method=SamplingMethod.TEST_OF_ONE,
+            period_of_reliance=_DEMO_PERIOD,
+        ),
+    )
+
+
+def _access_review_control() -> Control:
+    return Control(
+        control_id="CTRL-03",
+        description=(
+            "Quarterly review of IAM users with console access: the reviewer "
+            "signs off and inappropriate access is removed."
+        ),
+        control_owner="Security Operations Manager",
+        frequency=ControlFrequency.QUARTERLY,
+        nature=ControlNature.IT_DEPENDENT_MANUAL,
+        control_type=ControlType.DETECTIVE,
+        key_control=True,
+        assertions=["Access to programs and data"],
+        ipe=["IAM credential report used as the review listing"],
+        testing_procedures=ControlTesting(
+            test_of_design=[
+                _step(
+                    "Walk through one review: listing source, reviewer, sign-off "
+                    "and removal of access.",
+                    "The review covers all console users and removals are "
+                    "tracked to completion.",
+                )
+            ],
+            test_of_effectiveness=[
+                _step(
+                    "For each sampled quarter, inspect the signed review and the "
+                    "tickets for access removed.",
+                    "Each review is signed off on time and every flagged user "
+                    "was removed.",
+                )
+            ],
+            substantive_testing=[
+                _step(
+                    "Compare leavers reported by HR for the period with active "
+                    "IAM users.",
+                    "No leaver retains console access.",
+                )
+            ],
+            population=Population(
+                source="Quarterly access reviews performed in the period",
+                completeness_procedure=(
+                    "Agree the IAM credential report used by each review to a "
+                    "report re-run by the auditor for the same date (IPE "
+                    "completeness and accuracy)."
+                ),
+            ),
+            sample_size=2,
+            sampling_method=SamplingMethod.RANDOM,
+            period_of_reliance=_DEMO_PERIOD,
+        ),
+    )
+
+
+def _block_public_access_control() -> Control:
+    return Control(
+        control_id="CTRL-02",
+        description=(
+            "S3 Block Public Access is enabled at account level and on every bucket."
+        ),
+        control_owner="Cloud Platform Engineering Lead",
+        frequency=ControlFrequency.CONTINUOUS,
+        nature=ControlNature.AUTOMATED,
+        control_type=ControlType.PREVENTIVE,
+        key_control=True,
+        assertions=["Confidentiality"],
+        testing_procedures=ControlTesting(
+            test_of_design=[
+                _step(
+                    "Run the list_public_s3_buckets tool and inspect account- and "
+                    "bucket-level Block Public Access.",
+                    "All four Block Public Access settings are on for the account "
+                    "and each bucket.",
+                )
+            ],
+            test_of_effectiveness=[
+                _step(
+                    "Inspect AWS Config history for Block Public Access changes "
+                    "on each bucket during the period.",
+                    "No bucket allowed public ACLs or policies at any time in the "
+                    "period.",
+                )
+            ],
+            substantive_testing=[
+                _step(
+                    "For any bucket found public, list its objects and access "
+                    "logs for the exposure window.",
+                    "The data exposed and any external access are identified.",
+                )
+            ],
+            population=Population(
+                source="All S3 buckets in the account (ListBuckets)",
+                completeness_procedure=(
+                    "Agree the bucket count to the S3 console inventory for the "
+                    "account."
+                ),
+            ),
+            sampling_method=SamplingMethod.FULL_POPULATION,
+            period_of_reliance=_DEMO_PERIOD,
+        ),
+    )
+
+
 def demo_racm(theme: str = "") -> RiskControlMatrixSchema:
+    """A small RACM that satisfies the planning QA rules: every control has
+    its attributes, ToD / ToE / substantive steps and a test design."""
     return RiskControlMatrixSchema(
         theme=f"[{DEMO_LABEL}] {theme or 'AWS Cloud Security'}",
         risks=[
             Risk(
                 risk_id="RISK-01",
                 description=(
-                    f"[{DEMO_LABEL}] Unauthorized access to IAM or S3 resources."
+                    f"[{DEMO_LABEL}] Unauthorised access to AWS resources through "
+                    "weak or unreviewed IAM credentials."
                 ),
-                regulatory_mapping=["CIS AWS Foundations (demo mapping)"],
-                controls=[
-                    Control(
-                        control_id="CTRL-01",
-                        description="Enforce a strict IAM password policy.",
-                        testing_procedures=ControlTesting(
-                            test_of_design=[
-                                _step(
-                                    "Verify that a password policy is defined in IAM.",
-                                    "Password policy exists and is configured.",
-                                )
-                            ],
-                            test_of_effectiveness=[
-                                _step(
-                                    "Run the get_iam_password_policy tool.",
-                                    "Minimum length and complexity match the "
-                                    "organisation's standard.",
-                                )
-                            ],
-                            substantive_testing=[
-                                _step(
-                                    "Compare the policy values with the benchmark.",
-                                    "Each value meets or exceeds the benchmark.",
-                                )
-                            ],
-                        ),
-                    ),
-                    Control(
-                        control_id="CTRL-02",
-                        description="Block public access on S3 buckets.",
-                        testing_procedures=ControlTesting(
-                            test_of_design=[
-                                _step(
-                                    "Confirm account-level S3 Block Public Access "
-                                    "is configured.",
-                                    "All four Block Public Access settings are on.",
-                                )
-                            ],
-                            test_of_effectiveness=[
-                                _step(
-                                    "List buckets and inspect each bucket's "
-                                    "public access block.",
-                                    "No bucket allows public ACLs or policies.",
-                                )
-                            ],
-                            substantive_testing=None,
-                        ),
-                    ),
+                likelihood=RiskRating.MEDIUM,
+                impact=RiskRating.HIGH,
+                rating_rationale=(
+                    "Console credentials are reachable from the internet; misuse "
+                    "would expose customer data and infrastructure."
+                ),
+                regulatory_mapping=[
+                    "NIST SP 800-53 IA-5 (demo mapping)",
+                    "NIST SP 800-53 AC-2 (demo mapping)",
+                    "ISO/IEC 27001:2022 A.5.17 (demo mapping)",
                 ],
-            )
+                controls=[_password_policy_control(), _access_review_control()],
+            ),
+            Risk(
+                risk_id="RISK-02",
+                description=f"[{DEMO_LABEL}] Customer data in S3 is exposed publicly.",
+                likelihood=RiskRating.MEDIUM,
+                impact=RiskRating.HIGH,
+                rating_rationale=(
+                    "A single public ACL exposes a bucket to the internet, and "
+                    "the buckets hold customer data."
+                ),
+                regulatory_mapping=[
+                    "CIS AWS Foundations Benchmark, S3 section (demo mapping)",
+                    "NIST SP 800-53 AC-3 (demo mapping)",
+                ],
+                controls=[_block_public_access_control()],
+            ),
         ],
     )
 
 
-def _controls_from_racm_json(racm_json: str) -> list[str]:
-    try:
-        racm = RiskControlMatrixSchema.model_validate_json(racm_json)
-    except Exception:
-        racm = demo_racm()
-    return [c.control_id for r in racm.risks for c in r.controls]
+# Header line of each control block in the fieldwork test plan
+# (see swarm.audit_flow.racm_test_plan).
+_TEST_PLAN_CONTROL = re.compile(r"^Control (\S+) \(risk ", re.MULTILINE)
 
 
-_DEMO_FINDINGS = [
-    (
-        "Pass",
-        "PasswordPolicy: MinimumPasswordLength=14",
-        "The sample password policy meets the length requirement in the test step.",
-    ),
-    (
-        "Control Deficiency",
-        "BlockPublicAcls: false",
-        "One sample bucket does not block public ACLs; remediation would be needed.",
-    ),
-]
+def _controls_from_test_plan(test_plan: str) -> list[str]:
+    ids = _TEST_PLAN_CONTROL.findall(test_plan or "")
+    return ids or [c.control_id for r in demo_racm().risks for c in r.controls]
 
 
-def _register_demo_evidence(control_id: str, quote: str) -> str:
+# Synthetic evidence and conclusions per demo control. A control not listed
+# here has no demo evidence and is concluded "Not tested".
+_DEMO_FINDINGS: dict[str, dict[str, Any]] = {
+    "CTRL-01": {
+        "evidence": (
+            "PasswordPolicy: MinimumPasswordLength=14, RequireSymbols=true, "
+            "RequireNumbers=true, RequireUppercaseCharacters=true"
+        ),
+        "quote": "MinimumPasswordLength=14",
+        "tod": DesignConclusion.EFFECTIVE,
+        "toe": OperatingConclusion.NOT_TESTED,
+        "toe_basis": (
+            "Single point-in-time configuration read: design and implementation "
+            "evidence only. Operating effectiveness for the period would rely on "
+            "change-management ITGCs over IAM configuration or on AWS Config "
+            "history; neither was tested in this demo."
+        ),
+        "items_tested": 1,
+        "exceptions": 0,
+        "conclusion": (
+            "Design and implementation: at the time of the read, the sample "
+            "password policy meets the length requirement in the test step. "
+            "Operating effectiveness over the period was not tested."
+        ),
+    },
+    "CTRL-02": {
+        "evidence": (
+            "Bucket demo-analytics-exports: BlockPublicAcls: false, "
+            "BlockPublicPolicy: true; Bucket demo-app-logs: BlockPublicAcls: "
+            "true, BlockPublicPolicy: true; Bucket demo-backups: "
+            "BlockPublicAcls: true, BlockPublicPolicy: true"
+        ),
+        "quote": "Bucket demo-analytics-exports: BlockPublicAcls: false",
+        "tod": DesignConclusion.INEFFECTIVE,
+        "toe": OperatingConclusion.NOT_TESTED,
+        "toe_basis": (
+            "Not performed: the control is not implemented on one bucket, so "
+            "operating effectiveness was not tested."
+        ),
+        "items_tested": 3,
+        "exceptions": 1,
+        "conclusion": (
+            "One of three sample buckets does not block public ACLs; the "
+            "control is not implemented as designed."
+        ),
+    },
+}
+
+
+def _register_demo_evidence(control_id: str, evidence: str) -> str:
     """Store a synthetic evidence record in the vault and return its vault ID.
 
-    The payload is labelled as demo data and contains the quote verbatim, so
-    the vault's hashing and quote verification run for real on it.
+    The payload is labelled as demo data and contains the quoted evidence
+    verbatim, so the vault's hashing and quote verification run for real on it.
     """
     payload = json.dumps(
         {
             "label": f"{DEMO_LABEL} - synthetic evidence, not collected from "
             "any AWS account",
             "control_id": control_id,
-            "evidence": quote,
+            "evidence": evidence,
         },
         indent=2,
     )
@@ -204,47 +384,139 @@ def _register_demo_evidence(control_id: str, quote: str) -> str:
     return record["vault_id"]
 
 
-def demo_working_papers(theme: str = "", racm_json: str = "") -> WorkingPaperSchema:
-    controls = _controls_from_racm_json(racm_json) if racm_json else ["CTRL-01"]
-    findings = []
-    for i, control_id in enumerate(controls):
-        severity, quote, conclusion = _DEMO_FINDINGS[i % len(_DEMO_FINDINGS)]
-        findings.append(
-            AuditFindingSchema(
-                control_id=control_id,
-                vault_id_reference=_register_demo_evidence(control_id, quote),
-                exact_quote_from_evidence=quote,
-                test_conclusion=f"[{DEMO_LABEL} — synthetic evidence] {conclusion}",
-                severity=severity,
-            )
+def _demo_finding(control_id: str) -> AuditFindingSchema:
+    spec = _DEMO_FINDINGS.get(control_id)
+    if spec is None:
+        return AuditFindingSchema(
+            control_id=control_id,
+            tod_conclusion=DesignConclusion.NOT_TESTED,
+            toe_conclusion=OperatingConclusion.NOT_TESTED,
+            toe_basis="No evidence tool covers this control.",
+            test_conclusion=(
+                f"[{DEMO_LABEL} — no evidence] No available evidence tool covers "
+                "this control (review sign-offs are held outside AWS), so it was "
+                "not tested. This is a scope limitation, not a deficiency."
+            ),
         )
-    return WorkingPaperSchema(
-        theme=f"[{DEMO_LABEL}] {theme or 'AWS Cloud Security'}", findings=findings
+    return AuditFindingSchema(
+        control_id=control_id,
+        vault_id_reference=_register_demo_evidence(control_id, spec["evidence"]),
+        exact_quote_from_evidence=spec["quote"],
+        tod_conclusion=spec["tod"],
+        toe_conclusion=spec["toe"],
+        toe_basis=spec["toe_basis"],
+        items_tested=spec["items_tested"],
+        exceptions_noted=spec["exceptions"],
+        test_conclusion=f"[{DEMO_LABEL} — synthetic evidence] {spec['conclusion']}",
     )
 
 
-def demo_final_report(theme: str = "", papers_json: str = "") -> FinalReportSchema:
+def demo_working_papers(theme: str = "", test_plan: str = "") -> WorkingPaperSchema:
+    return WorkingPaperSchema(
+        theme=f"[{DEMO_LABEL}] {theme or 'AWS Cloud Security'}",
+        findings=[_demo_finding(c) for c in _controls_from_test_plan(test_plan)],
+    )
+
+
+def _demo_evaluation(
+    index: int, finding: AuditFindingSchema, scale: DeficiencyScale
+) -> DeficiencyEvaluationSchema:
+    risks = [
+        r.risk_id
+        for r in demo_racm().risks
+        if any(c.control_id == finding.control_id for c in r.controls)
+    ]
+    common: dict[str, Any] = {
+        "deficiency_id": f"DEF-{index:02d}",
+        "title": f"[{DEMO_LABEL}] {finding.control_id} not implemented as designed",
+        "related_findings": [finding.control_id],
+        "related_risks": risks,
+        "compensating_controls": (
+            "None identified in the RACM: no other control prevents public bucket ACLs."
+        ),
+    }
+    if scale == DeficiencyScale.ICFR:
+        return DeficiencyEvaluationSchema(
+            **common,
+            likelihood=RiskRating.LOW,
+            magnitude=RiskRating.LOW,
+            classification=DeficiencyClassification.CONTROL_DEFICIENCY,
+            rationale=(
+                f"[{DEMO_LABEL}] The exception affects data confidentiality and "
+                "no path to a misstatement of the financial statements was "
+                "identified, so a misstatement is remote. Proposed as a control "
+                "deficiency: a draft for the auditor's judgement at Gate 3."
+            ),
+        )
+    return DeficiencyEvaluationSchema(
+        **common,
+        likelihood=RiskRating.MEDIUM,
+        magnitude=RiskRating.HIGH,
+        classification=DeficiencyClassification.HIGH,
+        rationale=(
+            f"[{DEMO_LABEL}] One of three buckets accepts public ACLs, no "
+            "compensating control was identified, and the buckets hold customer "
+            "data. Proposed rating High: a draft for the auditor's judgement at "
+            "Gate 3."
+        ),
+    )
+
+
+def _scale_from_guidance(guidance: str) -> DeficiencyScale:
+    if DeficiencyScale.ICFR.value in (guidance or ""):
+        return DeficiencyScale.ICFR
+    return DeficiencyScale.RISK_RATING
+
+
+def demo_final_report(
+    theme: str = "",
+    papers_json: str = "",
+    scale: DeficiencyScale = DeficiencyScale.RISK_RATING,
+) -> FinalReportSchema:
     try:
         papers = WorkingPaperSchema.model_validate_json(papers_json)
     except Exception:
         papers = demo_working_papers(theme)
     counts: dict[str, int] = {}
     for f in papers.findings:
-        counts[f.severity] = counts.get(f.severity, 0) + 1
-    tally = ", ".join(f"{n} × {sev}" for sev, n in sorted(counts.items())) or "none"
+        counts[str(f.result)] = counts.get(str(f.result), 0) + 1
+    tally = ", ".join(f"{n} × {res}" for res, n in sorted(counts.items())) or "none"
+    flagged = [f for f in papers.findings if f.preliminary_deficiency]
+    evaluations = [_demo_evaluation(i, f, scale) for i, f in enumerate(flagged, 1)]
     lines = [
-        f"- {f.control_id} ({f.severity}): {f.test_conclusion} "
-        f"[evidence ref {f.vault_id_reference}]"
+        f"- {f.control_id} (ToD {f.tod_conclusion}; ToE {f.toe_conclusion}; "
+        f"result {f.result}): {f.test_conclusion} "
+        f"[evidence ref {f.vault_id_reference or 'none'}]"
         for f in papers.findings
+    ]
+    deficiency_lines = [
+        f"- {e.deficiency_id} ({', '.join(e.related_findings)}): proposed "
+        f"{e.classification}. {e.rationale}"
+        for e in evaluations
+    ] or ["- None proposed."]
+    not_tested = [
+        f.control_id for f in papers.findings if f.result == FindingResult.NOT_TESTED
     ]
     now = "2026-01-01T00:00:00+00:00"  # fixed: demo output is deterministic
     return FinalReportSchema(
         executive_summary=(
             f"{DEMO_NOTICE}\n\nThe demo walk-through evaluated "
-            f"{len(papers.findings)} sample control(s): {tally}."
+            f"{len(papers.findings)} sample control(s): {tally}. "
+            f"{len(evaluations)} deficiency evaluation(s) proposed on the "
+            f"'{scale}' scale, subject to the auditor's judgement at Gate 3."
         ),
-        detailed_report=(f"{DEMO_NOTICE}\n\nSample findings:\n" + "\n".join(lines)),
+        detailed_report=(
+            f"{DEMO_NOTICE}\n\nSample findings:\n"
+            + "\n".join(lines)
+            + "\n\nProposed deficiency evaluation (draft for Gate 3):\n"
+            + "\n".join(deficiency_lines)
+            + "\n\nScope limitations (not tested): "
+            + (", ".join(not_tested) or "none")
+            + "."
+        ),
         compliance_tone_approved=True,
+        deficiency_scale=scale,
+        deficiency_evaluations=evaluations,
         oscal_sar=OSCAL_SAR_Schema(
             metadata=OSCAL_SAR_Metadata(
                 title=f"[{DEMO_LABEL}] {theme or 'Demo audit'} — sample results",
@@ -264,9 +536,11 @@ def demo_final_report(theme: str = "", papers_json: str = "") -> FinalReportSche
                         OSCAL_SAR_Observation(
                             observation_id=f"demo-obs-{i + 1}",
                             description=f"[{DEMO_LABEL}] {f.test_conclusion}",
-                            methods=["test"],
+                            methods=["test"] if f.vault_id_reference else ["examine"],
                             subjects=[f.control_id],
-                            relevant_evidence=[f.vault_id_reference],
+                            relevant_evidence=(
+                                [f.vault_id_reference] if f.vault_id_reference else []
+                            ),
                         )
                         for i, f in enumerate(papers.findings)
                     ],
@@ -293,6 +567,7 @@ _PHASE_TASKS: dict[int, list[tuple[str, str]]] = {
         ("eval_qa_gate_task", "Execution QA & Pushback Reviewer"),
     ],
     3: [
+        ("deficiency_evaluation_task", "Audit Engagement Manager"),
         ("drafting_task", "Lead Report Writer"),
         ("executive_summary_task", "Chief Audit Executive (CAE)"),
         ("tone_qa_task", "Reporting Tone & QA Reviewer"),
@@ -330,8 +605,12 @@ class DemoCrew:
         if self.phase == 1:
             return demo_racm(theme)
         if self.phase == 2:
-            return demo_working_papers(theme, str(inputs.get("racm_string", "")))
-        return demo_final_report(theme, str(inputs.get("working_papers_string", "")))
+            return demo_working_papers(theme, str(inputs.get("test_plan", "")))
+        return demo_final_report(
+            theme,
+            str(inputs.get("working_papers_string", "")),
+            _scale_from_guidance(str(inputs.get("deficiency_scale_guidance", ""))),
+        )
 
     def _qa(self) -> QA_PushbackSchema:
         if self._reject:
