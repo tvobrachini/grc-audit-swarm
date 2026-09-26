@@ -15,7 +15,7 @@ Design notes: [CASE_STUDY.md](CASE_STUDY.md) (the audit reasoning behind the des
 
 ## Try it in 2 minutes (no API keys)
 
-`DEMO_MODE=1` makes the API replace the agent crews with fixed, clearly labelled demo artifacts. No language model or AWS account is called. The state machine, QA bookkeeping, human gates, approval trail and exports all run for real, and the UI shows a DEMO MODE badge.
+`DEMO_MODE=1` makes the API replace the agent crews with fixed, clearly labeled demo artifacts. No language model or AWS account is called. The state machine, QA bookkeeping, human gates, approval trail and exports all run for real, and the UI shows a DEMO MODE badge.
 
 **With Docker Compose**
 
@@ -272,7 +272,7 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behaviour and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 371 tests, 90% line coverage of `src/`.
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 371 tests, 90% line coverage of `src/`.
 
 ### Evidence-layer evaluation
 
@@ -330,7 +330,7 @@ src/
     tools/aws_tools.py   # Read-only boto3 evidence tools
     evidence.py          # Evidence vault, redaction, quote check, migrate-digests
     schema.py            # RACM, working paper, final report and OSCAL-inspired models
-    demo.py              # DEMO_MODE stand-in crews and labelled demo artifacts
+    demo.py              # DEMO_MODE stand-in crews and labeled demo artifacts
     llm_factory.py       # LLM provider selection
     mcp_server.py        # Standalone MCP server exposing the AWS reads (no redaction or vault)
     session_manager.py   # Session file persistence
@@ -364,7 +364,7 @@ Dockerfile, docker-compose.yml
   - The password-policy evidence is the policy as returned. "No policy set" is reported as a finding; judging whether a policy is strong enough is left to the auditor and the agents.
 - **Standalone MCP server.** `src/swarm/mcp_server.py` uses the same evidence logic as the CrewAI tools, but it does not register evidence in the vault or redact its final output (AWS error messages are redacted).
 - **OSCAL.** The results model is OSCAL-inspired, uses Python-style field names and is not validated against the official NIST OSCAL schema.
-- **Demo data.** DEMO_MODE output is fixed sample content, labelled as demo data in every artifact. It is not evidence and not a finding about any system.
+- **Demo data.** DEMO_MODE output is fixed sample content, labeled as demo data in every artifact. It is not evidence and not a finding about any system.
 - **Standards.** References to IIA Global Internal Audit Standards 12.3 (formerly 2340) and 14.6 (formerly 2330), PCAOB AS 1215 and NIST OSCAL are design inspiration. The project makes no compliance claim against any of them.
 
 ---
