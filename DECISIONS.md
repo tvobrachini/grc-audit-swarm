@@ -30,7 +30,7 @@ Standards such as IIA Standards 12.3 (formerly 2340) and 14.6 (formerly 2330) an
 
 **Status:** Accepted
 
-**Decision.** `EvidenceAssuranceProtocol.register_evidence` (`src/swarm/evidence.py`) redacts 12-digit AWS account IDs (bare, or in the `1234-5678-9012` form), assigns a UUID, computes a SHA-256 hash of the redacted payload and writes the record as one JSON file. Optional Fernet encryption at rest is available through `VAULT_ENCRYPTION_KEY`; when it is on, the record stores an HMAC-SHA256 keyed from that key (via a labelled derivation, so the Fernet key is not reused directly) instead of the bare SHA-256. `verify_exact_quote()` checks that a quote cited by the field auditor appears verbatim in the stored payload, and the UI shows a verified or unverified badge for it.
+**Decision.** `EvidenceAssuranceProtocol.register_evidence` (`src/swarm/evidence.py`) redacts 12-digit AWS account IDs (bare, or in the `1234-5678-9012` form), assigns a UUID, computes a SHA-256 hash of the redacted payload and writes the record as one JSON file. Optional Fernet encryption at rest is available through `VAULT_ENCRYPTION_KEY`; when it is on, the record stores an HMAC-SHA256 keyed from that key (via a labeled derivation, so the Fernet key is not reused directly) instead of the bare SHA-256. `verify_exact_quote()` checks that a quote cited by the field auditor appears verbatim in the stored payload, and the UI shows a verified or unverified badge for it.
 
 **Consequences.**
 - A quote that does not appear in the collected evidence is flagged.
@@ -96,7 +96,7 @@ From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the reject
 
 **Status:** Accepted
 
-**Decision.** In Phase 3 an agent turns the narrative findings into a Pydantic model modelled on NIST OSCAL Security Assessment Results (`src/swarm/schema.py`, including an `import-ap` link and an OSCAL version field).
+**Decision.** In Phase 3 an agent turns the narrative findings into a Pydantic model modeled on NIST OSCAL Security Assessment Results (`src/swarm/schema.py`, including an `import-ap` link and an OSCAL version field).
 
 **Consequences.**
 - Findings exist as structured data next to the narrative report.
@@ -120,7 +120,7 @@ From `QA_REJECTED_PHASE_n` a reviewer can retry the phase or override the reject
 
 **Status:** Accepted
 
-**Context.** The project had two front ends: a Streamlit app (`app.py`, `src/ui/`) and a React app backed by FastAPI. Each reached the audit workflow through its own code, and their behaviour differed. Pull request #135 lists the gaps it closed: Gate 3 could not be approved in the React UI, its error panel checked for a status that does not exist, demo mode and most exports existed only in Streamlit, and Streamlit only warned (instead of refusing) when demo mode was on in production.
+**Context.** The project had two front ends: a Streamlit app (`app.py`, `src/ui/`) and a React app backed by FastAPI. Each reached the audit workflow through its own code, and their behavior differed. Pull request #135 lists the gaps it closed: Gate 3 could not be approved in the React UI, its error panel checked for a status that does not exist, demo mode and most exports existed only in Streamlit, and Streamlit only warned (instead of refusing) when demo mode was on in production.
 
 **Decision.** FastAPI (`src/api/`) plus React (`frontend/`) is the only UI. Streamlit was removed in commit `d17d878`, after the features worth keeping were moved to the API and React: API-level `DEMO_MODE`, exports, retry and QA override, scope-document upload and per-finding vault checks. The lab-files picker (which browsed the server's filesystem) and a "request changes" box were dropped rather than ported. Removing Streamlit also removed the `streamlit` and `pandas` dependencies.
 
