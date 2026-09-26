@@ -5,7 +5,9 @@ No crew class may be constructed in demo mode — the real crews are patched to
 fail loudly if they are.
 """
 
+import json
 import os
+import re
 import sys
 from unittest.mock import patch
 
@@ -17,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from api.job_store import get_queue, remove_flow
 from swarm import session_manager
 from swarm.audit_flow import AuditFlow
+from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.demo import (
     DEMO_LABEL,
     DemoCrew,
@@ -116,10 +119,14 @@ class TestArtifacts:
 
         assert DEMO_LABEL in racm.theme
         assert all(DEMO_LABEL in f.test_conclusion for f in papers.findings)
-        assert all(
-            f.vault_id_reference.startswith("DEMO-NOT-IN-VAULT")
-            for f in papers.findings
-        )
+        # Demo evidence is really in the vault, labelled, and verifies.
+        for f in papers.findings:
+            assert EvidenceAssuranceProtocol.verify_exact_quote(
+                f.vault_id_reference, f.exact_quote_from_evidence
+            )
+            vault = os.environ["EVIDENCE_VAULT_PATH"]
+            with open(os.path.join(vault, f"{f.vault_id_reference}.json")) as fh:
+                assert DEMO_LABEL in json.load(fh)["raw_payload"]
         assert report.executive_summary.startswith("DEMO DATA")
         assert "no AWS account was examined" in report.detailed_report
         assert report.oscal_sar is not None
@@ -136,9 +143,16 @@ class TestArtifacts:
             assert claim not in text
 
     def test_deterministic(self):
-        assert (
-            demo_final_report("x").model_dump() == demo_final_report("x").model_dump()
+        # Content is fixed; only the vault IDs (fresh UUIDs per registration)
+        # differ between runs.
+        uuid_re = re.compile(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
         )
+
+        def normalised():
+            return uuid_re.sub("<vault-id>", demo_final_report("x").model_dump_json())
+
+        assert normalised() == normalised()
 
     def test_emits_step_events(self):
         steps = []

@@ -44,7 +44,7 @@ cd frontend && npm ci && VITE_API_AUTH_TOKEN=dev-token npm run dev
 
 Open http://localhost:5173. `VITE_API_AUTH_TOKEN` is built into the JavaScript bundle, so use it only for a throwaway local dev server. In this mode the live agent-activity feed returns 401, because the browser's `EventSource` cannot send an `Authorization` header. The audit status, gates and artifacts still refresh through polling. Use Compose for the full experience.
 
-Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer reject that phase until a person retries it, so the retry and override paths can be tried. `DEMO_STEP_DELAY` sets the pause between demo steps in seconds (default 0.4, capped at 5). Demo evidence is synthetic and is not written to the evidence vault, so demo findings show "Quote not verified".
+Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer reject that phase until a person retries it, so the retry and override paths can be tried. `DEMO_STEP_DELAY` sets the pause between demo steps in seconds (default 0.4, capped at 5). Demo evidence is synthetic. It is written to the evidence vault under a DEMO DATA label, so hashing and quote verification run for real on it and demo findings show "Quote verified in vault".
 
 To run a real audit, set one LLM provider (see [Configuration](#configuration)) and, for live evidence, AWS credentials with the read-only policy below. Leave `DEMO_MODE` unset.
 
