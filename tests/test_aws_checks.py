@@ -307,6 +307,16 @@ class TestUnknowns:
         )
         assert r["Verdict"] == "NOT_PUBLIC"
 
+    def test_failed_read_is_surfaced_even_when_verdict_is_decided(self):
+        r = _evaluate(
+            NOT_CONFIGURED,
+            bpa=_bpa(RestrictPublicBuckets=True),
+            policy_error="AccessDenied",
+            acl=_acl(),
+        )
+        assert r["Verdict"] == "NOT_PUBLIC"
+        assert r["Unknowns"] == ["bucket policy status unknown (AccessDenied)"]
+
     def test_acl_access_denied_is_unknown(self):
         r = _evaluate(
             NOT_CONFIGURED, bpa_error=NO_BPA, policy=False, acl_error="AccessDenied"

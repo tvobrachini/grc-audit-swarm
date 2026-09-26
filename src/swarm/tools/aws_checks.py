@@ -286,8 +286,19 @@ def check_bucket_public_access(s3, name: str, account_bpa: dict) -> dict:
     ignore_acls = effective["IgnorePublicAcls"]
 
     reasons: list[str] = []
-    unknowns: list[str] = []
     notes: list[str] = []
+    # Every failed read is surfaced, even when the other inputs still decide
+    # the verdict.
+    unknowns: list[str] = []
+    if policy_error is not None:
+        unknowns.append(f"bucket policy status unknown ({policy_error})")
+    if acl_error is not None:
+        unknowns.append(f"bucket ACL unknown ({acl_error})")
+    for layer_name, layer in (("account", account_bpa), ("bucket", bucket_bpa)):
+        if layer["status"] == "unknown":
+            unknowns.append(
+                f"{layer_name}-level Block Public Access unknown ({layer['error']})"
+            )
 
     # Policy path.
     if policy_public is False:
@@ -306,9 +317,7 @@ def check_bucket_public_access(s3, name: str, account_bpa: dict) -> dict:
         reasons.append("public bucket policy")
     else:
         policy_effective = None
-        if policy_public is None:
-            unknowns.append(f"bucket policy status unknown ({policy_error})")
-        else:
+        if policy_public is True:
             unknowns.append(
                 "bucket policy is public but RestrictPublicBuckets could not be "
                 "determined"
@@ -331,18 +340,10 @@ def check_bucket_public_access(s3, name: str, account_bpa: dict) -> dict:
         reasons.extend(f"ACL grants {g}" for g in acl_grants)
     else:
         acl_effective = None
-        if acl_grants is None:
-            unknowns.append(f"bucket ACL unknown ({acl_error})")
-        else:
+        if acl_grants:
             unknowns.append(
                 f"ACL has public grants ({', '.join(acl_grants)}) but "
                 "IgnorePublicAcls could not be determined"
-            )
-
-    for layer_name, layer in (("account", account_bpa), ("bucket", bucket_bpa)):
-        if layer["status"] == "unknown":
-            unknowns.append(
-                f"{layer_name}-level Block Public Access unknown ({layer['error']})"
             )
 
     effective_public = _either(policy_effective, acl_effective)
