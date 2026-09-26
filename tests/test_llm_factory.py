@@ -117,3 +117,55 @@ class TestLlmFactoryPriority:
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
         result = _call_factory({})
         assert not result["model"].startswith("gemini/")
+
+
+class TestQaLlm:
+    @pytest.fixture(autouse=True)
+    def _clear_qa(self, monkeypatch):
+        for key in ("QA_LLM_MODEL", "QA_LLM_API_KEY", "QA_LLM_BASE_URL"):
+            monkeypatch.delenv(key, raising=False)
+
+    def _call(self):
+        import swarm.llm_factory as factory
+
+        captured = {}
+
+        class FakeLLM:
+            def __init__(self, model, temperature, **kwargs):
+                captured.update(model=model, temperature=temperature, **kwargs)
+
+        with patch.object(factory, "LLM", FakeLLM):
+            factory.get_qa_llm()
+        return captured
+
+    def test_default_is_the_preparer_model_at_temperature_zero(self, monkeypatch):
+        import swarm.llm_factory as factory
+
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        assert factory.qa_llm_configured() is False
+        result = self._call()
+        assert result["model"].startswith("gemini/")
+        assert result["temperature"] == 0.0
+
+    def test_separate_qa_model(self, monkeypatch):
+        import swarm.llm_factory as factory
+
+        monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+        monkeypatch.setenv("QA_LLM_MODEL", "openai/gpt-4o-mini")
+        monkeypatch.setenv("QA_LLM_API_KEY", "qa-key")
+        monkeypatch.setenv("QA_LLM_BASE_URL", "https://qa.example")
+        assert factory.qa_llm_configured() is True
+        result = self._call()
+        assert result["model"] == "openai/gpt-4o-mini"
+        assert result["api_key"] == "qa-key"  # pragma: allowlist secret
+        assert result["base_url"] == "https://qa.example"
+        assert "OPENAI_API_KEY" not in os.environ
+
+    def test_qa_model_needs_no_preparer_provider(self, monkeypatch):
+        # QA_LLM_MODEL alone is enough for the QA client itself; optional
+        # key / base URL are not passed when unset.
+        monkeypatch.setenv("QA_LLM_MODEL", "ollama/qwen2.5")
+        result = self._call()
+        assert result["model"] == "ollama/qwen2.5"
+        assert "api_key" not in result
+        assert "base_url" not in result
