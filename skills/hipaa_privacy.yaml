@@ -57,6 +57,8 @@ specialist_system_prompt: |
   auditor-verifiable documentation, not management assertions.
 
 researcher_context_hint: >
-  Focus research on: recent HHS OCR HIPAA enforcement actions and settlement amounts,
-  ransomware attacks on healthcare organizations (ePHI exposure), healthcare data broker
-  practices, and state-level health privacy laws that exceed HIPAA requirements (e.g., CMIA in CA).
+  Focus on well-established HIPAA risk themes: ransomware and ePHI exposure, access to ePHI by
+  workforce and business associates, risk analysis gaps, data broker practices, and state health
+  privacy laws that go beyond HIPAA.
+  Do not cite specific enforcement actions, fines, incidents, filings or dates
+  you cannot source; describe them as general patterns.

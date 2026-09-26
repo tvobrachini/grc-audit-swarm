@@ -138,7 +138,9 @@ class TestReportingSeesFieldwork:
 
     def test_oscal_gets_findings_index(self):
         inputs = self._inputs()
-        assert inputs["findings_index"] == "CTRL-01 | Pass | vault-abc123"
+        assert inputs["findings_index"] == (
+            "CTRL-01 | No exception (ToD Effective; ToE Effective) | vault-abc123"
+        )
         assert inputs["theme"] == "AWS S3"
 
     def test_rendered_drafting_prompt_contains_fieldwork(self):
@@ -151,7 +153,7 @@ class TestReportingSeesFieldwork:
         oscal = interpolate_only(
             tasks["generate_oscal_sar_task"]["description"], inputs
         )
-        assert "CTRL-01 | Pass | vault-abc123" in oscal
+        assert "CTRL-01 | No exception (ToD Effective; ToE Effective)" in oscal
 
     def test_working_papers_serialised_once_and_compact(self):
         inputs = self._inputs()
@@ -160,14 +162,115 @@ class TestReportingSeesFieldwork:
         assert "null" not in inputs["working_papers_string"]
 
 
-def test_fieldwork_gets_full_racm_without_nulls():
-    racm = make_racm()
-    racm.risks[0].controls[0].testing_procedures.substantive_testing = None
-    flow = make_flow(2)
-    flow.state.racm_plan = racm
-    inputs = flow._fieldwork_inputs()
-    assert "Inspect policy" in inputs["racm_string"]
-    assert "null" not in inputs["racm_string"]
+class TestFieldworkTestPlan:
+    def test_test_plan_carries_steps_attributes_and_design(self):
+        plan = make_flow(2)._fieldwork_inputs()["test_plan"]
+        for text in (
+            "Control CTRL-01 (risk RISK-01): Block public access",
+            "ToD: 1. Inspect policy -> expect: OK",
+            "ToE: 1. Inspect policy -> expect: OK",
+            "Substantive: 1. Inspect policy",
+            "key; Automated; Preventive; Continuous; owner Cloud Platform Lead",
+            "objectives: Confidentiality",
+            "population: All S3 buckets (completeness: Agree to console count)",
+            "sample: 1, Test of one",
+            "period: FY2026",
+        ):
+            assert text in plan
+        # Compact text, not JSON: no nulls, keys or Python reprs.
+        for noise in ("null", "None", '"step_description"', "SamplingMethod."):
+            assert noise not in plan
+
+    def test_optional_parts_are_omitted(self):
+        racm = make_racm()
+        control = racm.risks[0].controls[0]
+        control.key_control = None
+        control.nature = control.control_type = control.frequency = None
+        control.control_owner = None
+        control.assertions = []
+        tp = control.testing_procedures
+        tp.substantive_testing = None
+        tp.population = tp.sample_size = tp.sampling_method = None
+        tp.period_of_reliance = None
+        flow = make_flow(2)
+        flow.state.racm_plan = racm
+        plan = flow._fieldwork_inputs()["test_plan"]
+        assert "Attributes" not in plan
+        assert "Substantive" not in plan
+        assert "population" not in plan
+        assert plan.splitlines()[2] == "  ToE: 1. Inspect policy -> expect: OK"
+
+    def test_demo_crew_reads_control_ids_from_test_plan(self):
+        from swarm.demo import _controls_from_test_plan, demo_racm
+
+        flow = make_flow(2)
+        flow.state.racm_plan = demo_racm()
+        plan = flow._fieldwork_inputs()["test_plan"]
+        assert _controls_from_test_plan(plan) == ["CTRL-01", "CTRL-03", "CTRL-02"]
+
+    def test_rendered_prompts_contain_test_plan(self):
+        inputs = _captured_inputs(2)[0]
+        with open(CONFIG_DIR / "fieldwork_tasks.yaml", encoding="utf-8") as f:
+            tasks = yaml.safe_load(f)
+        for name in (
+            "evidence_collection_task",
+            "execution_evaluation_task",
+            "eval_qa_gate_task",
+        ):
+            rendered = interpolate_only(tasks[name]["description"], inputs)
+            assert "ToD: 1. Inspect policy" in rendered, name
+
+
+class TestDeficiencyScale:
+    @pytest.mark.parametrize(
+        "theme, context, frameworks",
+        [
+            ("SOX ITGC audit", "", []),
+            ("Access review", "Controls relevant to financial reporting", []),
+            ("ERP", "", ["COSO 2013", "ICFR"]),
+            ("Change management", "Sarbanes-Oxley scope", []),
+        ],
+    )
+    def test_icfr_scopes(self, theme, context, frameworks):
+        from swarm.audit_flow import deficiency_scale_for_scope
+        from swarm.schema import DeficiencyScale
+
+        assert (
+            deficiency_scale_for_scope(theme, context, frameworks)
+            == DeficiencyScale.ICFR
+        )
+
+    @pytest.mark.parametrize(
+        "theme, context, frameworks",
+        [
+            ("AWS S3", "Fintech storing customer data", ["CIS AWS"]),
+            ("HIPAA", "Hospital EHR", ["NIST SP 800-66"]),
+            ("SOC 2 readiness", "SaaS", ["ISO 27001"]),
+            # The API's default framework list must not force the ICFR scale.
+            ("AWS S3", "Fintech", ["COSO", "PCAOB", "IIA"]),
+        ],
+    )
+    def test_other_scopes_use_risk_rating(self, theme, context, frameworks):
+        from swarm.audit_flow import deficiency_scale_for_scope
+        from swarm.schema import DeficiencyScale
+
+        assert (
+            deficiency_scale_for_scope(theme, context, frameworks)
+            == DeficiencyScale.RISK_RATING
+        )
+
+    def test_reporting_inputs_carry_scale_guidance(self):
+        inputs = _captured_inputs(3)[0]
+        guidance = inputs["deficiency_scale_guidance"]
+        assert "Risk rating" in guidance
+        assert "Do NOT use SOX terms" in guidance
+
+    def test_icfr_guidance(self):
+        flow = make_flow(3)
+        flow.state.frameworks = ["SOX 404"]
+        guidance = flow._reporting_inputs()["deficiency_scale_guidance"]
+        assert "Material Weakness" in guidance
+        assert "ICFR deficiency scale" in guidance
 
 
 def test_reporting_without_working_papers_is_an_error():
@@ -223,3 +326,62 @@ class TestPlanningContextWiring:
 def test_report_fixture_is_valid():
     # Guard: shared builders used above stay schema-valid.
     assert make_report().compliance_tone_approved is True
+
+
+def _build_crew(module_name: str, crew_cls: str) -> dict[str, MagicMock]:
+    import importlib
+
+    module = importlib.import_module(f"swarm.crews.{module_name}")
+    tasks: dict[str, MagicMock] = {}
+
+    def fake_task(**kwargs):
+        t = MagicMock(name=kwargs["name"])
+        t.kwargs = kwargs
+        tasks[kwargs["name"]] = t
+        return t
+
+    with (
+        patch.object(module, "get_crew_llm"),
+        patch.object(module, "Agent"),
+        patch.object(module, "Crew"),
+        patch.object(module, "Task", side_effect=fake_task),
+    ):
+        getattr(module, crew_cls)().crew()
+    return tasks
+
+
+class TestFieldworkContextWiring:
+    def test_evaluation_sees_collected_evidence(self):
+        tasks = _build_crew("fieldwork_crew", "FieldworkCrew")
+        assert tasks["execution_evaluation_task"].kwargs["context"] == [
+            tasks["evidence_collection_task"]
+        ]
+
+    def test_qa_sees_evidence_and_working_papers(self):
+        tasks = _build_crew("fieldwork_crew", "FieldworkCrew")
+        assert tasks["eval_qa_gate_task"].kwargs["context"] == [
+            tasks["evidence_collection_task"],
+            tasks["execution_evaluation_task"],
+        ]
+
+    def test_evaluation_and_qa_get_the_test_plan(self):
+        tasks = _build_crew("fieldwork_crew", "FieldworkCrew")
+        for name in ("execution_evaluation_task", "eval_qa_gate_task"):
+            assert "{test_plan}" in tasks[name].kwargs["description"]
+
+
+class TestReportingContextWiring:
+    def test_deficiency_evaluation_runs_first_with_its_schema(self):
+        from swarm.schema import DeficiencyEvaluationSetSchema
+
+        tasks = _build_crew("reporting_crew", "ReportingCrew")
+        evaluation = tasks["deficiency_evaluation_task"]
+        assert evaluation.kwargs["output_pydantic"] is DeficiencyEvaluationSetSchema
+        assert list(tasks)[0] == "deficiency_evaluation_task"
+
+    def test_downstream_tasks_see_the_evaluation(self):
+        tasks = _build_crew("reporting_crew", "ReportingCrew")
+        evaluation = tasks["deficiency_evaluation_task"]
+        assert tasks["drafting_task"].kwargs["context"] == [evaluation]
+        assert evaluation in tasks["tone_qa_task"].kwargs["context"]
+        assert evaluation in tasks["final_report_assembly_task"].kwargs["context"]

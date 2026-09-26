@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, UTC
 from typing import Any, Callable, Optional
 
@@ -13,6 +14,7 @@ from swarm.crews.fieldwork_crew import FieldworkCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
 from swarm.demo import DemoCrew, demo_mode_enabled, demo_reject_phase
+from swarm.schema import DeficiencyScale
 
 logger = logging.getLogger(__name__)
 
@@ -94,26 +96,148 @@ def _require_text(value: str, what: str) -> str:
     return value.strip()
 
 
+def _control_attributes(control: Any) -> str:
+    """Compact ``key; Automated; Preventive; Daily; owner …`` tag for a control."""
+    parts: list[str] = []
+    if control.key_control is not None:
+        parts.append("key" if control.key_control else "non-key")
+    for value in (control.nature, control.control_type, control.frequency):
+        if value is not None:
+            parts.append(str(value))
+    if control.control_owner:
+        parts.append(f"owner {control.control_owner}")
+    return "; ".join(parts)
+
+
 def racm_summary(racm: Any) -> str:
-    """One line per risk and control — IDs, descriptions and mappings only."""
+    """One line per risk and control — IDs, ratings, attributes and mappings;
+    no test procedures."""
     if racm is None:
         return "(no RACM available)"
     lines: list[str] = []
     for risk in racm.risks:
         mapping = ", ".join(risk.regulatory_mapping)
-        lines.append(f"{risk.risk_id}: {risk.description} [{mapping}]")
+        rating = ""
+        if risk.likelihood or risk.impact:
+            rating = (
+                f" (likelihood {risk.likelihood or '?'}, impact {risk.impact or '?'})"
+            )
+        lines.append(f"{risk.risk_id}: {risk.description}{rating} [{mapping}]")
         for control in risk.controls:
-            lines.append(f"  - {control.control_id}: {control.description}")
+            attrs = _control_attributes(control)
+            tag = f" [{attrs}]" if attrs else ""
+            lines.append(f"  - {control.control_id}{tag}: {control.description}")
     return "\n".join(lines) or "(RACM contains no risks)"
 
 
+def _numbered_steps(steps: Any) -> str:
+    return " ".join(
+        f"{i}. {s.step_description} -> expect: {s.expected_result}"
+        for i, s in enumerate(steps or [], 1)
+    )
+
+
+def racm_test_plan(racm: Any) -> str:
+    """Compact per-control test plan for Fieldwork: attributes, ToD / ToE /
+    substantive steps and the ToE test design (population, sample, period).
+
+    Plain text rather than the RACM JSON: every fieldwork agent needs it, and
+    JSON keys and nulls would roughly double its size in each prompt.
+    """
+    if racm is None:
+        return "(no RACM available)"
+    lines: list[str] = []
+    for risk in racm.risks:
+        for c in risk.controls:
+            tp = c.testing_procedures
+            lines.append(
+                f"Control {c.control_id} (risk {risk.risk_id}): {c.description}"
+            )
+            attrs = _control_attributes(c)
+            extra = []
+            if c.assertions:
+                extra.append("objectives: " + ", ".join(c.assertions))
+            if c.ipe:
+                extra.append("IPE: " + ", ".join(c.ipe))
+            detail = "; ".join(x for x in [attrs, *extra] if x)
+            if detail:
+                lines.append(f"  Attributes: {detail}")
+            lines.append(f"  ToD: {_numbered_steps(tp.test_of_design) or '(none)'}")
+            design: list[str] = []
+            if tp.population is not None:
+                design.append(
+                    f"population: {tp.population.source} "
+                    f"(completeness: {tp.population.completeness_procedure})"
+                )
+            if tp.sample_size is not None or tp.sampling_method is not None:
+                size = tp.sample_size if tp.sample_size is not None else "?"
+                method = f", {tp.sampling_method}" if tp.sampling_method else ""
+                design.append(f"sample: {size}{method}")
+            if tp.period_of_reliance:
+                design.append(f"period: {tp.period_of_reliance}")
+            toe = _numbered_steps(tp.test_of_effectiveness) or "(none)"
+            lines.append(
+                f"  ToE: {toe}" + (f" | {'; '.join(design)}" if design else "")
+            )
+            if tp.substantive_testing:
+                lines.append(
+                    f"  Substantive: {_numbered_steps(tp.substantive_testing)}"
+                )
+    return "\n".join(lines) or "(RACM contains no controls)"
+
+
 def findings_index(papers: Any) -> str:
-    """``control_id | severity | vault_id`` per finding, for OSCAL mapping."""
+    """``control_id | result (ToD …; ToE …) | vault_id`` per finding, for OSCAL
+    mapping."""
     if papers is None or not papers.findings:
         return "(no findings)"
     return "\n".join(
-        f"{f.control_id} | {f.severity} | {f.vault_id_reference}"
+        f"{f.control_id} | {f.result} (ToD {f.tod_conclusion}; ToE "
+        f"{f.toe_conclusion}) | {f.vault_id_reference or '(no evidence)'}"
         for f in papers.findings
+    )
+
+
+# Scope terms that make an engagement an ICFR / SOX one, so deficiencies are
+# classified on the control deficiency / significant deficiency / material
+# weakness scale instead of a risk rating. Deliberately not matched: "PCAOB"
+# and "COSO" (in the API's default framework list for every session) and
+# SOC 1 / ISAE 3402 (service-auditor reports, which use a different model).
+_ICFR_SCOPE = re.compile(
+    r"\b(sox|sarbanes|icfr|internal control over financial reporting"
+    r"|financial reporting|financial statements?|section 404)\b",
+    re.IGNORECASE,
+)
+
+
+def deficiency_scale_for_scope(
+    theme: str, business_context: str, frameworks: list[str]
+) -> DeficiencyScale:
+    """ICFR scale for SOX / financial-reporting scopes, else a risk rating."""
+    text = " ".join([theme or "", business_context or "", *frameworks])
+    if _ICFR_SCOPE.search(text):
+        return DeficiencyScale.ICFR
+    return DeficiencyScale.RISK_RATING
+
+
+def deficiency_scale_guidance(scale: DeficiencyScale) -> str:
+    """Prompt text telling the deficiency evaluator which scale to use."""
+    if scale == DeficiencyScale.ICFR:
+        return (
+            f"deficiency_scale = '{scale}' (the scope is ICFR / SOX). Classify "
+            "each deficiency as 'Control Deficiency', 'Significant Deficiency' "
+            "or 'Material Weakness' (or 'Not a deficiency'). A Material Weakness "
+            "needs a reasonable possibility (likelihood Medium/High) that a "
+            "material misstatement (magnitude High) is not prevented or detected "
+            "on a timely basis; a Significant Deficiency is less severe but "
+            "merits the attention of those charged with governance; otherwise "
+            "it is a Control Deficiency."
+        )
+    return (
+        f"deficiency_scale = '{scale}' (the scope is not ICFR). Rate each "
+        "deficiency 'Low', 'Medium' or 'High' from likelihood x magnitude (or "
+        "'Not a deficiency'). Do NOT use SOX terms (significant deficiency, "
+        "material weakness) for this scope."
     )
 
 
@@ -469,10 +593,12 @@ class AuditFlow:
         }
 
     def _fieldwork_inputs(self) -> dict[str, Any]:
-        racm = self.state.racm_plan
         return {
-            # Fieldwork needs the full test procedures, but not null fields.
-            "racm_string": racm.model_dump_json(exclude_none=True) if racm else "",
+            # The working papers' theme field.
+            "theme": self.state.theme,
+            # Compact per-control test plan (attributes, steps, population,
+            # sample, period) shared by the collector, evaluator and QA.
+            "test_plan": racm_test_plan(self.state.racm_plan),
             "qa_feedback": "",
         }
 
@@ -491,6 +617,15 @@ class AuditFlow:
             # Small control_id → vault_id index for the OSCAL mapper, which
             # otherwise only sees the narrative draft via task context.
             "findings_index": findings_index(papers),
+            # Which classification scale the engagement-level deficiency
+            # evaluation uses (ICFR vs risk rating), decided from the scope.
+            "deficiency_scale_guidance": deficiency_scale_guidance(
+                deficiency_scale_for_scope(
+                    self.state.theme,
+                    self.state.business_context,
+                    self.state.frameworks,
+                )
+            ),
             "tone_qa_feedback": "",
         }
 

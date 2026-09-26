@@ -1,7 +1,12 @@
 import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task
-from swarm.schema import FinalReportSchema, QA_PushbackSchema, OSCAL_SAR_Schema
+from swarm.schema import (
+    DeficiencyEvaluationSetSchema,
+    FinalReportSchema,
+    OSCAL_SAR_Schema,
+    QA_PushbackSchema,
+)
 from swarm.llm_factory import get_crew_llm
 
 
@@ -47,8 +52,30 @@ class ReportingCrew:
             max_iter=5,
         )
 
+        evaluator = Agent(
+            **self.agents_config["deficiency_evaluator"],
+            verbose=True,
+            llm=base_llm,
+            max_iter=5,
+        )
+
+        # Engagement-level deficiency evaluation (aggregation, compensating
+        # controls, likelihood x magnitude, classification) runs first, so the
+        # narrative is written from its proposed classifications instead of
+        # the writer classifying findings on its own. Its inputs (scope, RACM
+        # summary, working papers, scale guidance) arrive via kickoff inputs.
+        evaluation = Task(
+            **self.tasks_config["deficiency_evaluation_task"],
+            name="deficiency_evaluation_task",
+            agent=evaluator,
+            output_pydantic=DeficiencyEvaluationSetSchema,
+            context=[],
+        )
         drafting = Task(
-            **self.tasks_config["drafting_task"], name="drafting_task", agent=writer
+            **self.tasks_config["drafting_task"],
+            name="drafting_task",
+            agent=writer,
+            context=[evaluation],
         )
         summary = Task(
             **self.tasks_config["executive_summary_task"],
@@ -61,7 +88,8 @@ class ReportingCrew:
             name="tone_qa_task",
             agent=qa_reviewer,
             output_pydantic=QA_PushbackSchema,
-            context=[drafting, summary],  # review both sections
+            # Review both sections against the proposed classifications.
+            context=[drafting, summary, evaluation],
         )
         oscal = Task(
             **self.tasks_config["generate_oscal_sar_task"],
@@ -75,12 +103,13 @@ class ReportingCrew:
             name="final_report_assembly_task",
             agent=writer,
             output_pydantic=FinalReportSchema,
-            context=[drafting, summary, oscal],  # assemble from text and OSCAL sections
+            # Assemble from the text, OSCAL and deficiency-evaluation sections.
+            context=[drafting, summary, oscal, evaluation],
         )
 
         return Crew(
-            agents=[writer, concluder, qa_reviewer, oscal_engineer],
-            tasks=[drafting, summary, qa, oscal, assembly],
+            agents=[evaluator, writer, concluder, qa_reviewer, oscal_engineer],
+            tasks=[evaluation, drafting, summary, qa, oscal, assembly],
             process=Process.sequential,
             verbose=True,
             max_rpm=20,
