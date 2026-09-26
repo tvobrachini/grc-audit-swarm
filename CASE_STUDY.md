@@ -52,7 +52,7 @@ The test suite covers these paths with mocked crews. `DEMO_MODE` lets anyone wal
 
 - that the agents' RACMs, findings or reports are correct. The QA reviewer is also a model, and nothing here has been measured against auditor-prepared work;
 - that the vault is tamper-proof. The digest sits in the same writable file as the evidence, and deleting a record is not detected;
-- broad evidence coverage. Live collection is limited to the IAM password policy, IAM user MFA, and S3 bucket Public Access Block settings and ACLs. S3 bucket policies and account-level settings are not read;
+- broad evidence coverage. Live collection is limited to the IAM password policy, IAM user MFA, and S3 public access (bucket policy status, ACLs, and bucket- and account-level Block Public Access). Access points, object ACLs and the root user are not covered;
 - authenticated reviewer identity. The trail records the name the reviewer typed, behind a single shared API token;
 - time or cost savings. None have been measured.
 
