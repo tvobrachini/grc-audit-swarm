@@ -1,161 +1,73 @@
-import concurrent.futures
+"""CrewAI tools for read-only AWS evidence collection.
+
+The collection logic lives in ``swarm.tools.aws_checks`` (shared with the MCP
+server). These wrappers add what the audit path needs: every raw result is
+registered in the evidence vault (which redacts account IDs before storing)
+and the text returned to the agent is redacted the same way.
+"""
+
 import json
 
 import boto3
-from botocore.exceptions import (
-    ClientError,
-    NoCredentialsError,
-    OperationNotPageableError,
-)
+from botocore.exceptions import BotoCoreError, ClientError
 from crewai.tools import tool
 
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
+from swarm.tools.aws_checks import (
+    collect_iam_users_mfa,
+    collect_password_policy,
+    collect_s3_public_access,
+    describe_error,
+)
 
 
 def _boto_client(service: str):
     return boto3.client(service)
 
 
+def _register_and_format(raw_output: str, source: str) -> str:
+    vault_record = EvidenceAssuranceProtocol.register_evidence(raw_output, source)
+    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
+
+
 @tool("Get IAM Password Policy")
 def get_iam_password_policy(context: str = "") -> str:
-    """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance."""
+    """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance. If no policy is set, returns a finding saying so."""
     try:
         client = _boto_client("iam")
-    except (ClientError, NoCredentialsError) as e:
-        raw_output = f"Error fetching password policy: {e}"
+    except (ClientError, BotoCoreError) as e:
+        raw_output = f"Error fetching password policy: {describe_error(e)}"
     else:
-        try:
-            response = client.get_account_password_policy()
-            raw_output = json.dumps(
-                response.get("PasswordPolicy", {}), indent=2, default=str
-            )
-        except client.exceptions.NoSuchEntityException:
-            raw_output = "Finding: No IAM password policy is defined for this account."
-        except (ClientError, NoCredentialsError) as e:
-            raw_output = f"Error fetching password policy: {e}"
-
-    vault_record = EvidenceAssuranceProtocol.register_evidence(
-        raw_output, "aws.iam.get_account_password_policy"
-    )
-    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
+        raw_output = collect_password_policy(client)
+    return _register_and_format(raw_output, "aws.iam.get_account_password_policy")
 
 
 @tool("List AWS IAM Users with MFA")
 def list_iam_users_with_mfa(context: str = "") -> str:
-    """Lists IAM users and indicates if MFA is enabled. Essential for AC-02 access compliance."""
+    """Lists every IAM user and whether an MFA device is assigned. Essential for AC-02 access compliance. The account root user is not included (iam:ListUsers does not return it)."""
     try:
         client = _boto_client("iam")
-        paginator = client.get_paginator("list_users")
-
-        users = []
-        for page in paginator.paginate():
-            for user in page.get("Users", []):
-                users.append(user["UserName"])
-
-        def check_mfa(name):
-            try:
-                mfa_resp = client.list_mfa_devices(UserName=name)
-                has_mfa = "Yes" if mfa_resp.get("MFADevices") else "No"
-            except ClientError as e:
-                has_mfa = f"Error: MFA check failed ({e})"
-            return {"UserName": name, "MFA_Enabled": has_mfa}
-
-        report = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            report = list(executor.map(check_mfa, users))
-
-        raw_output = json.dumps(report, indent=2)
-    except (ClientError, NoCredentialsError) as e:
-        raw_output = f"Error listing IAM users: {e}"
-
-    vault_record = EvidenceAssuranceProtocol.register_evidence(
-        raw_output, "aws.iam.list_users_mfa"
-    )
-    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
-
-
-def _check_bucket_public_access(s3, name: str) -> dict:
-    entry: dict = {
-        "Bucket": name,
-        "PublicAccessBlockEnabled": None,
-        "ACL": None,
-        "IsPublic": False,
-    }
-
-    # Check bucket-level Public Access Block settings.
-    try:
-        pab = s3.get_public_access_block(Bucket=name)["PublicAccessBlockConfiguration"]
-        all_blocked = all(
-            [
-                pab.get("BlockPublicAcls", False),
-                pab.get("IgnorePublicAcls", False),
-                pab.get("BlockPublicPolicy", False),
-                pab.get("RestrictPublicBuckets", False),
-            ]
-        )
-        entry["PublicAccessBlockEnabled"] = all_blocked
-        if not all_blocked:
-            entry["IsPublic"] = True
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "NoSuchPublicAccessBlockConfiguration":
-            # No block config means public access controls are not restricted at bucket level.
-            entry["PublicAccessBlockEnabled"] = False
-            entry["IsPublic"] = True
-        else:
-            entry["PublicAccessBlockEnabled"] = f"Error: {e}"
-
-    # Check bucket ACL for any public grants.
-    try:
-        acl = s3.get_bucket_acl(Bucket=name)
-        public_grantees = [
-            g["Grantee"].get("URI", "")
-            for g in acl.get("Grants", [])
-            if "URI" in g.get("Grantee", {})
-            and "AllUsers" in g["Grantee"].get("URI", "")
-        ]
-        entry["ACL"] = "Public" if public_grantees else "Private"
-        if public_grantees:
-            entry["IsPublic"] = True
-    except ClientError as e:
-        entry["ACL"] = f"Error: {e}"
-
-    return entry
+        raw_output = json.dumps(collect_iam_users_mfa(client), indent=2, default=str)
+    except (ClientError, BotoCoreError) as e:
+        raw_output = f"Error listing IAM users: {describe_error(e)}"
+    return _register_and_format(raw_output, "aws.iam.list_users_mfa")
 
 
 @tool("List Public S3 Buckets")
 def list_public_s3_buckets(context: str = "") -> str:
     """
-    Checks each S3 bucket for public access by inspecting the bucket-level
-    PublicAccessBlock configuration and bucket ACL. Essential for data security audit.
+    Evaluates every S3 bucket for effective public access: bucket policy status,
+    bucket ACL grants to AllUsers/AuthenticatedUsers, and account- and
+    bucket-level Block Public Access. Each bucket gets a Verdict of PUBLIC,
+    NOT_PUBLIC or UNKNOWN (a read was denied), with reasons. Essential for data
+    security audit.
     """
     try:
         s3 = _boto_client("s3")
-        buckets = []
-        try:
-            paginator = s3.get_paginator("list_buckets")
-            for page in paginator.paginate():
-                buckets.extend(page.get("Buckets", []))
-        except OperationNotPageableError:
-            # Older botocore versions don't support ListBuckets pagination.
-            buckets = s3.list_buckets().get("Buckets", [])
-
-        results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [
-                executor.submit(_check_bucket_public_access, s3, bucket["Name"])
-                for bucket in buckets
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
-
-        # Sort results to maintain deterministic output
-        results.sort(key=lambda x: x["Bucket"])
-
-        raw_output = json.dumps(results, indent=2, default=str)
-    except (ClientError, NoCredentialsError) as e:
-        raw_output = f"Error listing S3 buckets: {e}"
-
-    vault_record = EvidenceAssuranceProtocol.register_evidence(
-        raw_output, "aws.s3.list_public_buckets"
-    )
-    return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
+        s3control = _boto_client("s3control")
+        sts = _boto_client("sts")
+        result = collect_s3_public_access(s3, s3control, sts)
+        raw_output = json.dumps(result, indent=2, default=str)
+    except (ClientError, BotoCoreError) as e:
+        raw_output = f"Error listing S3 buckets: {describe_error(e)}"
+    return _register_and_format(raw_output, "aws.s3.list_public_buckets")
