@@ -15,9 +15,9 @@ exported, so each file also carries a real (demo) approval trail.
 | File | What it is |
 | --- | --- |
 | `racm.xlsx` | The Risk and Control Matrix from Gate 1 (Planning): risks, mapped controls, and the test-of-design / test-of-operation / substantive-testing steps for each control. |
-| `working-papers.xlsx` | The fieldwork findings from Gate 2: one row per control tested, its severity, conclusion, the evidence quote, and whether that quote is verified against the evidence vault (`Quote Verified in Vault`). In demo mode this is always "No" — demo evidence is synthetic and is intentionally never written to the vault, so there is nothing to verify against. |
+| `working-papers.xlsx` | The fieldwork findings from Gate 2: one row per control tested, its severity, conclusion, the evidence quote, and whether that quote is verified against the evidence vault (`Quote Verified in Vault`). Demo evidence is synthetic but is written to the vault under a DEMO DATA label, so this column shows the real verification result ("Yes" in this sample). |
 | `report.md` | The final report from Gate 3: executive summary, detailed findings, and the full approval trail (who approved which gate, and when). |
-| `oscal.json` | The same findings expressed as an [OSCAL](https://pages.nist.gov/OSCAL/) Assessment Results document (`observations` keyed to control IDs), for interoperability with GRC tooling that consumes OSCAL. |
+| `oscal.json` | The same findings in the project's OSCAL-inspired structure, modelled on [OSCAL](https://pages.nist.gov/OSCAL/) Assessment Results (`observations` keyed to control IDs and vault references). It is not validated against the official OSCAL schema and may need conversion before an OSCAL tool will load it. |
 
 ## How to regenerate these
 
