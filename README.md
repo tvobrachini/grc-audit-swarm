@@ -241,7 +241,7 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `/app/data/evidence_vault` in the `app-data` volume). |
 | `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
 | `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. `run_monitor.py`'s environment check also accepts `AWS_REGION` in place of `AWS_DEFAULT_REGION`. |
 
 Generate a vault key:
 
