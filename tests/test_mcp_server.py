@@ -46,24 +46,31 @@ class TestGetIamPasswordPolicy:
         with patch("boto3.client", return_value=mock_client):
             result = get_iam_password_policy()
 
-        assert "Finding: No account password policy defined." in result
+        assert result.startswith("Finding: No IAM account password policy is set")
 
 
 # ─── list_iam_users_with_mfa ─────────────────────────────────────────────────
 
 
 class TestListIamUsersWithMfa:
-    def _make_client(self, users, mfa_map):
+    def _make_client(self, users, mfa_map, mfa_error=None):
         mock_client = MagicMock()
-        paginator = MagicMock()
-        paginator.paginate.return_value = [{"Users": users}]
-        mock_client.get_paginator.return_value = paginator
 
-        def list_mfa(UserName):
-            devices = mfa_map.get(UserName, [])
-            return {"MFADevices": devices}
+        def get_paginator(name):
+            paginator = MagicMock()
+            if name == "list_users":
+                paginator.paginate.return_value = [{"Users": users}]
+            else:
 
-        mock_client.list_mfa_devices.side_effect = list_mfa
+                def paginate(UserName):
+                    if mfa_error:
+                        raise mfa_error
+                    return [{"MFADevices": mfa_map.get(UserName, [])}]
+
+                paginator.paginate.side_effect = paginate
+            return paginator
+
+        mock_client.get_paginator.side_effect = get_paginator
         return mock_client
 
     def test_user_with_mfa_marked_yes(self):
@@ -73,7 +80,7 @@ class TestListIamUsersWithMfa:
         with patch("boto3.client", return_value=client):
             result = list_iam_users_with_mfa()
 
-        data = json.loads(result)
+        data = json.loads(result)["Users"]
         assert data[0]["UserName"] == "alice"
         assert data[0]["MFA_Enabled"] == "Yes"
 
@@ -84,25 +91,20 @@ class TestListIamUsersWithMfa:
         with patch("boto3.client", return_value=client):
             result = list_iam_users_with_mfa()
 
-        data = json.loads(result)
+        data = json.loads(result)["Users"]
         assert data[0]["UserName"] == "bob"
         assert data[0]["MFA_Enabled"] == "No"
 
     def test_client_error_marked_unknown(self):
-        users = [{"UserName": "carol"}]
-        client = MagicMock()
-        paginator = MagicMock()
-        paginator.paginate.return_value = [{"Users": users}]
-        client.get_paginator.return_value = paginator
-        client.list_mfa_devices.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": ""}},
-            "ListMFADevices",
+        err = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": ""}}, "ListMFADevices"
         )
+        client = self._make_client([{"UserName": "carol"}], {}, mfa_error=err)
 
         with patch("boto3.client", return_value=client):
             result = list_iam_users_with_mfa()
 
-        data = json.loads(result)
+        data = json.loads(result)["Users"]
         assert data[0]["UserName"] == "carol"
         assert data[0]["MFA_Enabled"] == "Unknown"
 
@@ -111,96 +113,33 @@ class TestListIamUsersWithMfa:
 
 
 class TestListPublicS3Buckets:
-    def _make_s3_client(self, buckets, pab_configs, acl_grants=None):
-        mock_client = MagicMock()
-        mock_client.list_buckets.return_value = {"Buckets": buckets}
+    """The MCP server reuses swarm.tools.aws_checks; these tests only check the
+    wiring. The decision logic is tested in test_aws_checks.py and tests/eval/."""
 
-        def get_pab(Bucket):
-            cfg = pab_configs.get(Bucket)
-            if isinstance(cfg, Exception):
-                raise cfg
-            return {"PublicAccessBlockConfiguration": cfg}
-
-        def get_acl(Bucket):
-            grants = (acl_grants or {}).get(Bucket)
-            if isinstance(grants, Exception):
-                raise grants
-            return {"Grants": grants or []}
-
-        mock_client.get_public_access_block.side_effect = get_pab
-        mock_client.get_bucket_acl.side_effect = get_acl
-        return mock_client
-
-    def _fully_blocked_pab(self):
-        return {
-            "BlockPublicAcls": True,
-            "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True,
-            "RestrictPublicBuckets": True,
-        }
-
-    def test_fully_blocked_bucket_not_flagged_public(self):
-        client = self._make_s3_client(
-            [{"Name": "private-bucket"}],
-            {"private-bucket": self._fully_blocked_pab()},
-        )
-        with patch("boto3.client", return_value=client):
+    def test_uses_shared_s3_logic(self):
+        client = MagicMock()
+        with (
+            patch("boto3.client", return_value=client),
+            patch(
+                "swarm.mcp_server.collect_s3_public_access",
+                return_value={"Buckets": [], "Summary": {"buckets": 0}},
+            ) as collect,
+        ):
             result = list_public_s3_buckets()
 
-        data = json.loads(result)
-        assert data[0]["Bucket"] == "private-bucket"
-        assert data[0]["IsPublic"] is False
+        collect.assert_called_once_with(client, client, client)
+        assert json.loads(result)["Summary"] == {"buckets": 0}
 
-    def test_no_pab_config_flags_bucket_public(self):
-        no_pab_error = ClientError(
-            {"Error": {"Code": "NoSuchPublicAccessBlockConfiguration", "Message": ""}},
-            "GetPublicAccessBlock",
-        )
-        client = self._make_s3_client(
-            [{"Name": "exposed-bucket"}],
-            {"exposed-bucket": no_pab_error},
-        )
-        with patch("boto3.client", return_value=client):
+    def test_list_error_is_reported(self):
+        with (
+            patch("boto3.client", return_value=MagicMock()),
+            patch(
+                "swarm.mcp_server.collect_s3_public_access",
+                side_effect=ClientError(
+                    {"Error": {"Code": "AccessDenied", "Message": ""}}, "ListBuckets"
+                ),
+            ),
+        ):
             result = list_public_s3_buckets()
 
-        data = json.loads(result)
-        assert data[0]["IsPublic"] is True
-
-    def test_public_acl_grant_flags_bucket_public(self):
-        acl_grants = {
-            "acl-bucket": [
-                {
-                    "Grantee": {
-                        "Type": "Group",
-                        "URI": "http://acs.amazonaws.com/groups/global/AllUsers",
-                    },
-                }
-            ]
-        }
-        client = self._make_s3_client(
-            [{"Name": "acl-bucket"}],
-            {"acl-bucket": self._fully_blocked_pab()},
-            acl_grants=acl_grants,
-        )
-        with patch("boto3.client", return_value=client):
-            result = list_public_s3_buckets()
-
-        data = json.loads(result)
-        assert data[0]["IsPublic"] is True
-
-    def test_acl_client_error_silently_ignored(self):
-        acl_error = ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": ""}},
-            "GetBucketAcl",
-        )
-        client = self._make_s3_client(
-            [{"Name": "restricted-bucket"}],
-            {"restricted-bucket": self._fully_blocked_pab()},
-            acl_grants={"restricted-bucket": acl_error},
-        )
-        with patch("boto3.client", return_value=client):
-            result = list_public_s3_buckets()
-
-        data = json.loads(result)
-        assert data[0]["Bucket"] == "restricted-bucket"
-        assert data[0]["IsPublic"] is False
+        assert result == "Error listing S3 buckets: AccessDenied"

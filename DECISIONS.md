@@ -47,13 +47,25 @@ Standards such as IIA Standards 12.3 (formerly 2340) and 14.6 (formerly 2330) an
 
 **Status:** Accepted
 
-**Decision.** Live evidence comes from a small set of boto3 calls (`src/swarm/tools/aws_tools.py`): `iam:GetAccountPasswordPolicy`, `iam:ListUsers`, `iam:ListMFADevices`, `s3:ListBuckets`, `s3:GetPublicAccessBlock` and `s3:GetBucketAcl`. Every call is a read. The tools do not shell out to the AWS CLI.
+**Decision.** Live evidence comes from a small set of boto3 calls in `src/swarm/tools/aws_checks.py`: `iam:GetAccountPasswordPolicy`, `iam:ListUsers`, `iam:ListMFADevices`, `s3:ListAllMyBuckets` (ListBuckets), `s3:GetAccountPublicAccessBlock` (S3 Control GetPublicAccessBlock), `s3:GetBucketPublicAccessBlock`, `s3:GetBucketPolicyStatus` and `s3:GetBucketAcl`, plus `sts:GetCallerIdentity`, which needs no IAM permission. Every call is a read. The tools do not shell out to the AWS CLI. The CrewAI tools (`aws_tools.py`) and the standalone MCP server both call this module, so they share one implementation.
+
+The S3 check follows AWS's own semantics rather than a heuristic:
+
+- Block Public Access is read at the account level (the account ID comes from `GetCallerIdentity` and is not output or logged) and the bucket level. Each flag's effective value is account OR bucket.
+- A bucket policy is public if `GetBucketPolicyStatus` says so (AWS's evaluation; no policy means not public by policy). It makes the bucket public only if `RestrictPublicBuckets` is off at both levels.
+- An ACL grant to `AllUsers` or `AuthenticatedUsers` is public. It makes the bucket public only if `IgnorePublicAcls` is off at both levels.
+- `BlockPublicAcls` and `BlockPublicPolicy` only reject new public ACLs and policies, so they do not change the verdict for what is already in place.
+- A read that fails (for example AccessDenied) makes that input unknown. The verdict is PUBLIC, NOT_PUBLIC or UNKNOWN; it is UNKNOWN whenever the known inputs do not decide it, and the output says which read failed.
+
+The IAM tools paginate `ListUsers` and `ListMFADevices`. A missing password policy (`NoSuchEntity`) is reported as a finding, not as a collection error.
 
 **Consequences.**
 - The required IAM permissions are short and listed in the README.
-- The S3 check reads each bucket's Public Access Block settings and ACL only. It does not read bucket policies or account-level Block Public Access, so it can miss a bucket made public by its policy and can flag a bucket that account-level settings already protect.
+- A partial Block Public Access configuration is no longer reported as public on its own, and a bucket made public by its policy or by an `AuthenticatedUsers` grant is no longer missed.
+- Still not covered: access points and their policies, object-level ACLs, and cross-account access through a policy AWS does not classify as public. The root user is not returned by `ListUsers`, so root MFA is not covered.
+- `tests/eval/` checks the tools against planted misconfigurations in a moto account; where moto is not faithful to AWS (notably `GetBucketPolicyStatus`), the branch is covered with botocore Stubber instead.
 - Supporting another AWS service means writing another tool function.
-- Account-ID redaction and the evidence vault apply on the CrewAI tool path. The standalone MCP server (`src/swarm/mcp_server.py`) makes the same reads but does not redact or register evidence, so do not use it where that matters.
+- Account-ID redaction of the full output and the evidence vault apply on the CrewAI tool path only. The standalone MCP server (`src/swarm/mcp_server.py`) makes the same reads and redacts AWS error messages, but does not redact its final output or register evidence, so do not use it where that matters.
 
 ---
 
