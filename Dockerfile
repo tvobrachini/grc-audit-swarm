@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir uv
 # Copy project definition files first for better layer caching.
 COPY pyproject.toml uv.lock ./
 
-# Every dependency in uv.lock ships a manylinux wheel for cp312, so no C
+# Every dependency in uv.lock ships a manylinux wheel for cp313, so no C
 # toolchain (build-essential) or sqlite3 CLI is required to build the venv.
 RUN uv sync --frozen --no-dev --no-install-project
 
