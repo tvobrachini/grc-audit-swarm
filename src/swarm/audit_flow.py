@@ -330,6 +330,10 @@ class AuditFlow:
         self.machine.error_phase(phase)
         self._commit_status()
         self.state.qa_rejection_reason = reason
+        self.state.current_human_dossier = (
+            f"{_PHASE_LABELS[phase]} stopped with an error: {reason} "
+            "Retry the phase once the cause is fixed."
+        )
 
     def _run_crew_with_qa(
         self,
@@ -396,6 +400,11 @@ class AuditFlow:
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection
+            self.state.current_human_dossier = (
+                f"{label} draft rejected by the QA reviewer after one automatic "
+                f"retry: {rejection} Review the draft, then retry the phase or "
+                "approve it with a written justification."
+            )
             return False
 
         if artifact is None:

@@ -56,6 +56,10 @@ class TestQaGatesFailClosed:
         assert flow.state.qa_rejection_reason == QA_UNPARSEABLE_REASON
         # Rejected draft is kept so a supervisor can review / override it.
         assert getattr(flow.state, PHASES[phase]["field"]) == artifact
+        # The status text describes this rejection, not a previous phase's
+        # success message.
+        assert "rejected by the QA reviewer" in flow.state.current_human_dossier
+        assert "complete" not in flow.state.current_human_dossier.lower()
 
     def test_unparseable_qa_then_approval_advances(self, phase):
         flow = make_flow(phase)
@@ -102,6 +106,7 @@ class TestQaGatesFailClosed:
         assert flow.machine.status.value == f"ERROR_PHASE_{phase}"
         assert "could not be parsed" in flow.state.qa_rejection_reason
         assert getattr(flow.state, field) == before
+        assert "stopped with an error" in flow.state.current_human_dossier
 
     def test_missing_task_output_is_phase_error(self, phase):
         flow = make_flow(phase)
