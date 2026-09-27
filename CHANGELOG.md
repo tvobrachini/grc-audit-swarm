@@ -13,6 +13,7 @@ First tagged version. Summary of what the project does at this point:
 - Segregation of duties: the preparer of an audit cannot approve a gate, return work or override a QA rejection on it; the Gate 3 approver must differ from the Gate 2 approver.
 - Hash-chained approval trail: every action (creation, approval, return, retry, override) is appended with a reviewer name, UTC timestamp and a SHA-256 digest of the artifact acted on, each entry chained to the one before it. `GET /api/sessions/{id}/trail/verify` recomputes the chain and reports whether it is intact; a separate anchor file (`TRAIL_ANCHORS_PATH`) also records the entry count and last hash to help detect entries cut from the end.
 - Deleting an audit (`DELETE /api/sessions/{id}`) only works on drafts; anything past the first approved gate is kept.
+- Generation provenance: each phase run records the provider/model, QA model, temperatures, CrewAI/app versions, a prompt fingerprint and outcome (`generation_runs` on `GET /api/sessions/{id}`), and gate approvals, retries, returns and overrides reference the run they acted on; this does not make LLM output replayable (see DECISIONS.md ADR-010).
 
 **Audit methodology model**
 - RACM schema with risks (likelihood/impact), controls (owner, frequency, nature, type, key-control flag, assertions/IT objectives, IPE), and test-of-design / test-of-effectiveness / substantive steps with population, sample size, sampling method and period of reliance.
