@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import { ApprovalGate } from "./ApprovalGate";
 import { AuditTrailPane } from "@/components/inspector/AuditTrailPane";
 import { DeficiencyDecisions } from "./decisions/DeficiencyDecisions";
+import { FindingDecisions } from "./decisions/FindingDecisions";
 import { EngagementConclusion } from "./decisions/EngagementConclusion";
 
 interface Props {
@@ -104,8 +105,11 @@ export function ReportView({ session }: Props) {
   const evaluations = (report?.deficiency_evaluations ?? []) as DeficiencyEvaluation[];
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="flex items-center gap-2">
+    // The column scrolls as a whole and nothing in it shrinks: an overflow-auto
+    // flex item here used to collapse to zero height once the approval trail
+    // and gate panel outgrew a laptop-height viewport.
+    <div className="flex h-full flex-col gap-4 overflow-y-auto">
+      <div className="flex shrink-0 items-center gap-2">
         {completed ? (
           <CheckCircle size={16} className="text-green-400" />
         ) : (
@@ -122,7 +126,7 @@ export function ReportView({ session }: Props) {
         </h3>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)]">
+      <div className="shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)]">
         {report ? (
           <div className="space-y-4 p-4">
             <section>
@@ -159,19 +163,20 @@ export function ReportView({ session }: Props) {
                     <DeficiencyCard key={e.deficiency_id} evaluation={e} session={session} />
                   ))}
                 </div>
-                <EngagementConclusion session={session} />
               </section>
             )}
+            <ScopeLimitations session={session} />
+            <EngagementConclusion session={session} />
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
+          <div className="flex items-center justify-center p-8 text-sm text-[var(--color-text-muted)]">
             Report not available
           </div>
         )}
       </div>
 
       {session.approval_trail.length > 0 && (
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3">
+        <div className="max-h-64 shrink-0 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
             Approval Trail
           </p>
@@ -180,6 +185,29 @@ export function ReportView({ session }: Props) {
       )}
 
       <ApprovalGate session={session} />
+    </div>
+  );
+}
+
+/** Untested controls, where Gate 3 asks for a scope limitation decision
+ * (always for a key control). Shown here because the findings board is only
+ * on screen at Gate 2. */
+function ScopeLimitations({ session }: { session: SessionDetail }) {
+  const untested = (session.effective?.findings ?? []).filter(
+    (f) => f.effective.result === "Not tested"
+  );
+  if (untested.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        Untested controls — scope limitations
+      </p>
+      {untested.map((f) => (
+        <div key={f.control_id} id={`decision-finding-${f.control_id}`} className="space-y-1">
+          <p className="font-mono text-[11px] text-violet-400">{f.control_id}</p>
+          <FindingDecisions session={session} controlId={f.control_id} />
+        </div>
+      ))}
     </div>
   );
 }

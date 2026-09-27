@@ -61,7 +61,7 @@ export function EngagementConclusion({ session }: { session: SessionDetail }) {
         )}
       </div>
 
-      {!open ? (
+      {session.status !== "WAITING_HUMAN_GATE_3" ? null : !open ? (
         <button
           onClick={() => setOpen(true)}
           className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20"

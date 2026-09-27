@@ -13,7 +13,12 @@ import { ReviewerFields } from "./ReviewerFields";
 
 // Mirrors swarm.schema.DesignConclusion / OperatingConclusion.
 const TOD_OPTIONS = ["Effective", "Ineffective", "Not tested"];
-const TOE_OPTIONS = ["Effective", "Exceptions noted", "Ineffective", "Not tested"];
+const TOE_OPTIONS = [
+  "Effective",
+  "Exceptions noted",
+  "Ineffective",
+  "Not tested",
+];
 
 interface Props {
   session: SessionDetail;
@@ -37,7 +42,8 @@ export function FindingDecisions({ session, controlId }: Props) {
   const [rationale, setRationale] = useState("");
 
   const record = useMutation({
-    mutationFn: (body: RecordDecisionBody) => api.sessions.decisions.record(session.session_id, body),
+    mutationFn: (body: RecordDecisionBody) =>
+      api.sessions.decisions.record(session.session_id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["session", session.session_id] });
       qc.invalidateQueries({ queryKey: ["sessions"] });
@@ -50,7 +56,9 @@ export function FindingDecisions({ session, controlId }: Props) {
 
   if (!effective || !view) return null;
 
-  const isStale = view.review ? effective.stale_decision_ids.includes(view.review.decision_id) : false;
+  const isStale = view.review
+    ? effective.stale_decision_ids.includes(view.review.decision_id)
+    : false;
   const scopeIsStale = view.scope_limitation
     ? effective.stale_decision_ids.includes(view.scope_limitation.decision_id)
     : false;
@@ -58,7 +66,9 @@ export function FindingDecisions({ session, controlId }: Props) {
   const openChallenge = () => {
     setTod(view.review?.values.tod_conclusion ?? view.draft.tod_conclusion);
     setToe(view.review?.values.toe_conclusion ?? view.draft.toe_conclusion);
-    setRationale(view.review?.decision_type === "challenge" ? view.review.rationale : "");
+    setRationale(
+      view.review?.decision_type === "challenge" ? view.review.rationale : "",
+    );
     setDialog("challenge");
   };
 
@@ -67,7 +77,9 @@ export function FindingDecisions({ session, controlId }: Props) {
       decision_type: "sign_off",
       subject_id: controlId,
       decided_by: name.trim(),
-      ...(view.review && !isStale ? { supersedes: view.review.decision_id } : {}),
+      ...(view.review && !isStale
+        ? { supersedes: view.review.decision_id }
+        : {}),
     };
     record.mutate(body);
   };
@@ -82,7 +94,9 @@ export function FindingDecisions({ session, controlId }: Props) {
       decided_by: name.trim(),
       values,
       rationale: rationale.trim(),
-      ...(view.review && !isStale ? { supersedes: view.review.decision_id } : {}),
+      ...(view.review && !isStale
+        ? { supersedes: view.review.decision_id }
+        : {}),
     });
   };
 
@@ -99,6 +113,11 @@ export function FindingDecisions({ session, controlId }: Props) {
   };
 
   const canSubmitName = !!name.trim();
+  // Sign-off and challenge belong to Gate 2, scope limitations to Gate 3
+  // (review_policy.DECISION_RECORDABLE_STATUSES); after that it is read-only.
+  const atGate2 = session.status === "WAITING_HUMAN_GATE_2";
+  const atGate3 = session.status === "WAITING_HUMAN_GATE_3";
+  const canScopeLimit = atGate3 && view.effective.result === "Not tested";
   const statusLabel =
     view.review_status === "signed_off"
       ? `Signed off by ${view.review?.decided_by ?? ""}`
@@ -113,13 +132,13 @@ export function FindingDecisions({ session, controlId }: Props) {
           Conclusion of record:
         </span>
         <span className="text-[var(--color-text-secondary)]">
-          ToD {view.effective.tod_conclusion} / ToE {view.effective.toe_conclusion} /{" "}
-          {view.effective.result}
+          ToD {view.effective.tod_conclusion} / ToE{" "}
+          {view.effective.toe_conclusion} / {view.effective.result}
         </span>
         {view.differs_from_draft && (
           <span className="italic text-[var(--color-text-muted)]">
-            AI draft: ToD {view.draft.tod_conclusion} / ToE {view.draft.toe_conclusion} /{" "}
-            {view.draft.result}
+            AI draft: ToD {view.draft.tod_conclusion} / ToE{" "}
+            {view.draft.toe_conclusion} / {view.draft.result}
           </span>
         )}
         <span
@@ -127,7 +146,7 @@ export function FindingDecisions({ session, controlId }: Props) {
             "rounded px-2 py-0.5 font-medium",
             view.review_status === "not_reviewed"
               ? "bg-amber-900/30 text-amber-400"
-              : "bg-green-900/30 text-green-400"
+              : "bg-green-900/30 text-green-400",
           )}
         >
           {statusLabel}
@@ -141,7 +160,9 @@ export function FindingDecisions({ session, controlId }: Props) {
           <span
             className={clsx(
               "rounded px-2 py-0.5 font-medium",
-              scopeIsStale ? "bg-red-900/30 text-red-400" : "bg-sky-900/30 text-sky-400"
+              scopeIsStale
+                ? "bg-red-900/30 text-red-400"
+                : "bg-sky-900/30 text-sky-400",
             )}
           >
             {scopeIsStale
@@ -151,26 +172,30 @@ export function FindingDecisions({ session, controlId }: Props) {
         )}
       </div>
 
-      <ReviewerFields />
+      {(atGate2 || canScopeLimit) && <ReviewerFields />}
 
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={signOff}
-          disabled={!canSubmitName || record.isPending}
-          className="flex items-center gap-1.5 rounded-lg border border-green-700/40 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/20 disabled:opacity-50"
-        >
-          <CheckCircle2 size={12} />
-          {view.review && !isStale ? "Re-sign off" : "Sign off"}
-        </button>
-        <button
-          onClick={openChallenge}
-          disabled={!canSubmitName || record.isPending}
-          className="flex items-center gap-1.5 rounded-lg border border-amber-700/40 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-900/20 disabled:opacity-50"
-        >
-          <MessageSquareWarning size={12} />
-          Challenge
-        </button>
-        {view.effective.result === "Not tested" && (
+        {atGate2 && (
+          <>
+            <button
+              onClick={signOff}
+              disabled={!canSubmitName || record.isPending}
+              className="flex items-center gap-1.5 rounded-lg border border-green-700/40 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/20 disabled:opacity-50"
+            >
+              <CheckCircle2 size={12} />
+              {view.review && !isStale ? "Re-sign off" : "Sign off"}
+            </button>
+            <button
+              onClick={openChallenge}
+              disabled={!canSubmitName || record.isPending}
+              className="flex items-center gap-1.5 rounded-lg border border-amber-700/40 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-900/20 disabled:opacity-50"
+            >
+              <MessageSquareWarning size={12} />
+              Challenge
+            </button>
+          </>
+        )}
+        {canScopeLimit && (
           <button
             onClick={() => {
               setRationale(view.scope_limitation?.rationale ?? "");
@@ -195,8 +220,8 @@ export function FindingDecisions({ session, controlId }: Props) {
         <div className="space-y-2 rounded-lg border border-amber-700/40 bg-amber-900/10 p-3">
           <p className="text-xs font-medium text-amber-300">
             Challenge {controlId} — change ToD/ToE only to withdraw a positive
-            conclusion to "Not tested" without rework; any other change needs the
-            phase returned for rework.
+            conclusion to "Not tested" without rework; any other change needs
+            the phase returned for rework.
           </p>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[11px] text-[var(--color-text-secondary)]">

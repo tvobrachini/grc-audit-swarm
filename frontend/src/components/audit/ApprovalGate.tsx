@@ -124,16 +124,16 @@ export function ApprovalGate({ session }: Props) {
             {missing.map((m) => (
               <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
                 <a
-                  href={`#decision-${m.subject_type}-${m.subject_id}`}
+                  href={`#${anchorId(m)}`}
                   onClick={(e) => {
                     e.preventDefault();
                     document
-                      .getElementById(`decision-${m.subject_type}-${m.subject_id}`)
+                      .getElementById(anchorId(m))
                       ?.scrollIntoView({ behavior: "smooth", block: "center" });
                   }}
                   className="text-sky-400 underline hover:text-sky-300"
                 >
-                  {m.subject_type} {m.subject_id}
+                  {subjectLabel(m)}
                 </a>
                 <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
               </li>
@@ -219,16 +219,16 @@ export function ApprovalGate({ session }: Props) {
             {error.missingDecisions.map((m) => (
               <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
                 <a
-                  href={`#decision-${m.subject_type}-${m.subject_id}`}
+                  href={`#${anchorId(m)}`}
                   onClick={(e) => {
                     e.preventDefault();
                     document
-                      .getElementById(`decision-${m.subject_type}-${m.subject_id}`)
+                      .getElementById(anchorId(m))
                       ?.scrollIntoView({ behavior: "smooth", block: "center" });
                   }}
                   className="text-sky-400 underline hover:text-sky-300"
                 >
-                  {m.subject_type} {m.subject_id}
+                  {subjectLabel(m)}
                 </a>
                 <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
               </li>
@@ -244,4 +244,16 @@ export function ApprovalGate({ session }: Props) {
       )}
     </div>
   );
+}
+
+/** "finding CTRL-03", "deficiency DEF-01"; the engagement is its own subject. */
+function subjectLabel(m: { subject_type: string; subject_id: string }): string {
+  return m.subject_type === m.subject_id ? m.subject_type : `${m.subject_type} ${m.subject_id}`;
+}
+
+/** Matches the element ids the finding, deficiency and engagement panels set. */
+function anchorId(m: { subject_type: string; subject_id: string }): string {
+  return m.subject_type === m.subject_id
+    ? `decision-${m.subject_type}`
+    : `decision-${m.subject_type}-${m.subject_id}`;
 }

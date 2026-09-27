@@ -210,3 +210,54 @@ describe("FindingDecisions", () => {
     expect(screen.getByText(/Stale — draft reworked after this decision/)).toBeInTheDocument();
   });
 });
+
+describe("FindingDecisions actions follow the gate", () => {
+  const notTested = {
+    tod_conclusion: "Not tested",
+    toe_conclusion: "Not tested",
+    result: "Not tested",
+    preliminary_deficiency: false,
+  };
+
+  it("offers sign-off and challenge at Gate 2 but not scope limitation", () => {
+    renderWithClient(
+      <FindingDecisions
+        session={session(effectiveWith({ draft: notTested, effective: notTested }))}
+        controlId="CTRL-001"
+      />
+    );
+    expect(screen.getByRole("button", { name: /Sign off/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Challenge/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /scope limitation/ })).not.toBeInTheDocument();
+  });
+
+  it("offers only scope limitation for an untested control at Gate 3", () => {
+    renderWithClient(
+      <FindingDecisions
+        session={makeSession({
+          status: "WAITING_HUMAN_GATE_3",
+          phase: 3,
+          effective: effectiveWith({ draft: notTested, effective: notTested }),
+        })}
+        controlId="CTRL-001"
+      />
+    );
+    expect(screen.getByRole("button", { name: /Record scope limitation/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign off/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Challenge/ })).not.toBeInTheDocument();
+  });
+
+  it("is read-only once the audit is completed", () => {
+    renderWithClient(
+      <FindingDecisions
+        session={makeSession({
+          status: "COMPLETED",
+          phase: 3,
+          effective: effectiveWith({ draft: notTested, effective: notTested }),
+        })}
+        controlId="CTRL-001"
+      />
+    );
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+});

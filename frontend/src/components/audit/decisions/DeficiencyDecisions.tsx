@@ -36,7 +36,7 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
   const { name } = useReviewerIdentity();
   const effective = session.effective;
   const view: DeficiencyView | undefined = effective?.deficiencies.find(
-    (d) => d.deficiency_id === deficiencyId
+    (d) => d.deficiency_id === deficiencyId,
   );
   const [dialog, setDialog] = useState<Dialog>(null);
 
@@ -56,6 +56,9 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
     ref ? effective.stale_decision_ids.includes(ref.decision_id) : false;
 
   const canSubmitName = !!name.trim();
+  // Classification and write-up belong to Gate 3; management responses may
+  // still be transcribed after completion (review_policy.py).
+  const atGate3 = session.status === "WAITING_HUMAN_GATE_3";
   const scale = effective.deficiency_scale ?? "ICFR deficiency scale";
   const classifyStale = isStale(view.classification_decision);
 
@@ -70,8 +73,8 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
         </span>
         {view.differs_from_draft && (
           <span className="italic text-[var(--color-text-muted)]">
-            AI draft: {view.draft.classification} (likelihood {view.draft.likelihood},
-            magnitude {view.draft.magnitude})
+            AI draft: {view.draft.classification} (likelihood{" "}
+            {view.draft.likelihood}, magnitude {view.draft.magnitude})
           </span>
         )}
         <span
@@ -79,7 +82,7 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
             "rounded px-2 py-0.5 font-medium",
             view.classification_source === "reviewer"
               ? "bg-green-900/30 text-green-400"
-              : "bg-amber-900/30 text-amber-400"
+              : "bg-amber-900/30 text-amber-400",
           )}
         >
           {view.classification_source === "reviewer"
@@ -96,26 +99,32 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
       <ReviewerFields />
 
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setDialog("classify")}
-          disabled={!canSubmitName || record.isPending}
-          className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
-        >
-          Classify
-        </button>
-        <button
-          onClick={() => setDialog("writeup")}
-          disabled={!canSubmitName || record.isPending}
-          className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
-        >
-          {view.writeup ? "Edit write-up" : "Write-up"}
-        </button>
+        {atGate3 && (
+          <>
+            <button
+              onClick={() => setDialog("classify")}
+              disabled={!canSubmitName || record.isPending}
+              className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
+            >
+              Classify
+            </button>
+            <button
+              onClick={() => setDialog("writeup")}
+              disabled={!canSubmitName || record.isPending}
+              className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
+            >
+              {view.writeup ? "Edit write-up" : "Write-up"}
+            </button>
+          </>
+        )}
         <button
           onClick={() => setDialog("management_response")}
           disabled={!canSubmitName || record.isPending}
           className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
         >
-          {view.management_response ? "Edit management response" : "Management response"}
+          {view.management_response
+            ? "Edit management response"
+            : "Management response"}
         </button>
       </div>
 
@@ -177,8 +186,12 @@ function ClassifyForm({
   onSubmit: (body: RecordDecisionBody) => void;
   pending: boolean;
 }) {
-  const options = SCALE_CLASSIFICATIONS[scale] ?? SCALE_CLASSIFICATIONS["ICFR deficiency scale"];
-  const [classification, setClassification] = useState(view.effective.classification);
+  const options =
+    SCALE_CLASSIFICATIONS[scale] ??
+    SCALE_CLASSIFICATIONS["ICFR deficiency scale"];
+  const [classification, setClassification] = useState(
+    view.effective.classification,
+  );
   const [likelihood, setLikelihood] = useState(view.effective.likelihood);
   const [magnitude, setMagnitude] = useState(view.effective.magnitude);
   const [rationale, setRationale] = useState("");
@@ -260,7 +273,9 @@ function ClassifyForm({
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={!decidedBy.trim() || (differs && !rationale.trim()) || pending}
+          disabled={
+            !decidedBy.trim() || (differs && !rationale.trim()) || pending
+          }
           className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-600 disabled:opacity-50"
         >
           Record classification
@@ -296,9 +311,13 @@ function WriteupForm({
   const [condition, setCondition] = useState(existing.condition ?? "");
   const [cause, setCause] = useState(existing.cause ?? "");
   const [effect, setEffect] = useState(existing.effect ?? "");
-  const [recommendation, setRecommendation] = useState(existing.recommendation ?? "");
+  const [recommendation, setRecommendation] = useState(
+    existing.recommendation ?? "",
+  );
 
-  const complete = [criteria, condition, cause, effect, recommendation].every((v) => v.trim());
+  const complete = [criteria, condition, cause, effect, recommendation].every(
+    (v) => v.trim(),
+  );
 
   const submit = () =>
     onSubmit({
@@ -306,7 +325,9 @@ function WriteupForm({
       subject_id: view.deficiency_id,
       decided_by: decidedBy.trim(),
       values: { criteria, condition, cause, effect, recommendation },
-      ...(view.writeup && !isStale ? { supersedes: view.writeup.decision_id } : {}),
+      ...(view.writeup && !isStale
+        ? { supersedes: view.writeup.decision_id }
+        : {}),
     });
 
   const fields: [string, string, (v: string) => void][] = [
@@ -320,7 +341,10 @@ function WriteupForm({
   return (
     <div className="space-y-2 rounded-lg border border-violet-700/40 bg-violet-900/10 p-3">
       {fields.map(([label, value, set]) => (
-        <label key={label} className="block text-[11px] text-[var(--color-text-secondary)]">
+        <label
+          key={label}
+          className="block text-[11px] text-[var(--color-text-secondary)]"
+        >
           {label}
           <textarea
             value={value}
@@ -367,11 +391,15 @@ function ManagementResponseForm({
   const existing = view.management_response?.values ?? {};
   const [text, setText] = useState(existing.text ?? "");
   const [agreement, setAgreement] = useState(existing.agreement ?? "agree");
-  const [receivedFrom, setReceivedFrom] = useState(existing.received_from ?? "");
+  const [receivedFrom, setReceivedFrom] = useState(
+    existing.received_from ?? "",
+  );
   const [receivedOn, setReceivedOn] = useState(existing.received_on ?? "");
   const [owner, setOwner] = useState(existing.action_owner_role ?? "");
   const [targetDate, setTargetDate] = useState(existing.target_date ?? "");
-  const [rationale, setRationale] = useState(view.management_response?.rationale ?? "");
+  const [rationale, setRationale] = useState(
+    view.management_response?.rationale ?? "",
+  );
 
   const needsPlan = agreement === "agree" || agreement === "partial";
   const needsRebuttal = agreement === "disagree";
@@ -392,7 +420,9 @@ function ManagementResponseForm({
         agreement,
         received_from: receivedFrom,
         received_on: receivedOn,
-        ...(needsPlan ? { action_owner_role: owner, target_date: targetDate } : {}),
+        ...(needsPlan
+          ? { action_owner_role: owner, target_date: targetDate }
+          : {}),
       },
       rationale: rationale.trim(),
       ...(view.management_response && !isStale
