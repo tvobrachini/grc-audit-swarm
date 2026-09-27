@@ -292,6 +292,8 @@ scenarios:
         RequireNumbers: true
         RequireUppercaseCharacters: true
         RequireLowercaseCharacters: true
+        MaxPasswordAge: 90
+        PasswordReusePrevention: 24
       users: {count: 60, without_mfa: 20}
     areas:
       iam_mfa:
@@ -555,6 +557,8 @@ scenarios:
         RequireNumbers: true
         RequireUppercaseCharacters: true
         RequireLowercaseCharacters: true
+        MaxPasswordAge: 90
+        PasswordReusePrevention: 24
       users: {count: 20, without_mfa: 0}
       buckets:
         - {name: tools-artifacts}

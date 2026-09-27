@@ -18,7 +18,8 @@ repos:
         exclude: |
           (?x)^(
             .env.example|
-            README.md
+            README.md|
+            tests/fixtures/findings/.*\.json
           )$
 
   # ── General hygiene ───────────────────────────────────────────────────────
@@ -29,7 +30,9 @@ repos:
         args: ["--maxkb=500"]
       - id: check-merge-conflict
       - id: end-of-file-fixer
+        exclude: ^tests/fixtures/oscal/.*\.json$  # vendored NIST schema, kept byte for byte
       - id: trailing-whitespace
+        exclude: ^tests/fixtures/oscal/.*\.json$
       - id: check-yaml
       - id: check-toml
 

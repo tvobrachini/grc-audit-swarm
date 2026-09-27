@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Quote } from "lucide-react";
 import { clsx } from "clsx";
 import { api, type SessionDetail } from "@/api/client";
 import { ApprovalGate } from "./ApprovalGate";
+import { FindingDecisions } from "./decisions/FindingDecisions";
 
 interface AuditFinding {
   control_id: string;
@@ -104,14 +105,17 @@ function Field({ label, value }: { label: string; value?: string | number | null
   );
 }
 
-function FindingCard({ finding }: { finding: AuditFinding }) {
+function FindingCard({ finding, session }: { finding: AuditFinding; session: SessionDetail }) {
   const result = finding.result ?? "Not tested";
   const notTested = result === "Not tested";
   const [open, setOpen] = useState(result !== "No exception");
   const cfg = resultConfig(result);
 
   return (
-    <div className={clsx("rounded-xl border overflow-hidden", cfg.border, cfg.bg)}>
+    <div
+      id={`decision-finding-${finding.control_id}`}
+      className={clsx("rounded-xl border overflow-hidden", cfg.border, cfg.bg)}
+    >
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-3 px-4 py-3 text-left"
@@ -188,6 +192,8 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
               </p>
             </div>
           )}
+
+          <FindingDecisions session={session} controlId={finding.control_id} />
 
           {finding.vault_id_reference ? (
             <div className="flex items-center gap-2">
@@ -321,7 +327,7 @@ export function FindingsBoard({ session }: Props) {
                 RESULT_ORDER.indexOf(a.result ?? "Not tested") -
                 RESULT_ORDER.indexOf(b.result ?? "Not tested")
             )
-            .map((f, i) => <FindingCard key={i} finding={f} />)
+            .map((f, i) => <FindingCard key={i} finding={f} session={session} />)
         )}
       </div>
 

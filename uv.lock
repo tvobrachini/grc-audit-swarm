@@ -1005,12 +1005,14 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "bandit" },
+    { name = "jsonschema" },
     { name = "moto", extra = ["s3"] },
     { name = "pre-commit" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-bdd" },
     { name = "pytest-cov" },
+    { name = "regex" },
     { name = "ruff" },
 ]
 
@@ -1035,12 +1037,14 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "bandit", specifier = ">=1.9.4" },
+    { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "moto", extras = ["iam", "s3", "s3control", "sts"], specifier = ">=5.1" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pyright", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-bdd", specifier = ">=8.1.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
+    { name = "regex", specifier = ">=2024.11.6" },
     { name = "ruff", specifier = ">=0.15.5" },
 ]
 

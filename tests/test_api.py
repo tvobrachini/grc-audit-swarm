@@ -277,7 +277,7 @@ class TestApproveGate:
         data = {"name": "Test", "created_at": "2026-01-01T00:00:00"}
         mock_flow = _make_mock_flow("WAITING_HUMAN_GATE_3")
 
-        def _finalize(human_id):
+        def _finalize(human_id, identity_source="declared"):
             mock_flow.state.status = "COMPLETED"
 
         mock_flow.finalize_audit.side_effect = _finalize
@@ -293,7 +293,9 @@ class TestApproveGate:
                 json={"gate_number": 3, "human_id": "alice"},
             )
         assert resp.status_code == 200
-        mock_flow.finalize_audit.assert_called_once_with("alice")
+        mock_flow.finalize_audit.assert_called_once_with(
+            "alice", identity_source="declared"
+        )
         assert resp.json()["status"] == "COMPLETED"
 
     def test_invalid_gate_number_returns_400(self, client):

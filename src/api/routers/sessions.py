@@ -3,8 +3,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 
+from api.auth import ReviewerIdentity, reviewer_identity
 from api.executor import get_executor
 from api.job_store import (
     get_flow,
@@ -18,9 +20,13 @@ from api.models import (
     DEFAULT_FRAMEWORKS,
     ApproveGateRequest,
     CreateSessionRequest,
+    GenerationRunSummary,
     QAOverrideRequest,
+    RecordDecisionRequest,
     RetryPhaseRequest,
     ReturnForReworkRequest,
+    ReviewDecisionRecord,
+    ReviewDecisionsResponse,
     SessionDetail,
     SessionSummary,
     TrailVerification,
@@ -35,9 +41,17 @@ from api.scope_document import (
 )
 from swarm.audit_flow import (
     AuditFlow,
+    DecisionValidationError,
     InvalidTransitionError,
+    MissingReviewDecisionsError,
     PhaseArtifactMissingError,
     ReviewBlockedError,
+)
+from swarm.review_decisions import (
+    DecisionContext,
+    EffectiveView,
+    decision_states,
+    effective_view,
 )
 from swarm.session_manager import (
     delete_session,
@@ -47,7 +61,12 @@ from swarm.session_manager import (
     save_session,
 )
 from swarm.trail import verify_trail
-from swarm.schema import FinalReportSchema, RiskControlMatrixSchema, WorkingPaperSchema
+from swarm.schema import (
+    FinalReportSchema,
+    ReviewDecision,
+    RiskControlMatrixSchema,
+    WorkingPaperSchema,
+)
 from swarm.state.repository import FlowRepository
 
 logger = logging.getLogger(__name__)
@@ -164,8 +183,88 @@ def _snapshot_verification(
                 f: snapshot.get(f)
                 for f in ("racm_plan", "working_papers", "final_report")
             },
+            decisions=snapshot.get("review_decisions") or [],
         )
     )
+
+
+def _decision_records(
+    decisions: list[ReviewDecision], states: dict[str, str]
+) -> list[ReviewDecisionRecord]:
+    return [
+        ReviewDecisionRecord(
+            **d.model_dump(mode="json"), state=states.get(d.decision_id, "active")
+        )
+        for d in decisions
+    ]
+
+
+def _flow_review(
+    flow: AuditFlow,
+) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView]]:
+    return (
+        _decision_records(flow.state.review_decisions, flow.decision_states()),
+        flow.effective_view(),
+    )
+
+
+def _typed(schema: type, raw: Any) -> Any:
+    if raw is None:
+        return None
+    try:
+        return schema.model_validate(raw)
+    except Exception:
+        return None
+
+
+def _snapshot_review(
+    snapshot: dict[str, Any],
+) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView], bool]:
+    """Decisions and effective view from a persisted snapshot.
+
+    Tolerant of a snapshot from before decisions existed (no decisions, an
+    effective view of the drafts). A decision that no longer validates is
+    skipped rather than 500ing the session detail.
+    """
+    decisions: list[ReviewDecision] = []
+    for raw in snapshot.get("review_decisions") or []:
+        try:
+            decisions.append(ReviewDecision.model_validate(raw))
+        except Exception:
+            logger.warning("Skipping unparseable review decision: %r", raw)
+    required = bool(snapshot.get("review_decisions_required")) or any(
+        e.get("action") == "audit_created"
+        and e.get("review_decisions_required") == "true"
+        for e in snapshot.get("approval_trail") or []
+    )
+    ctx = DecisionContext(
+        racm=_typed(RiskControlMatrixSchema, snapshot.get("racm_plan")),
+        papers=_typed(WorkingPaperSchema, snapshot.get("working_papers")),
+        report=_typed(FinalReportSchema, snapshot.get("final_report")),
+    )
+    try:
+        states = dict(decision_states(ctx, decisions))
+        view: Optional[EffectiveView] = effective_view(
+            ctx, decisions, decisions_required=required
+        )
+    except Exception:
+        logger.exception("Effective view could not be built from the snapshot")
+        states, view = {}, None
+    return _decision_records(decisions, states), view, required
+
+
+def _snapshot_generation_runs(snapshot: dict[str, Any]) -> list[GenerationRunSummary]:
+    """Generation-run rows from a persisted snapshot, tolerant of an older
+    snapshot with no such field (empty list) or a row missing a field added
+    since (validated defensively; a row that still fails to validate is
+    skipped rather than 500ing the whole session detail)."""
+    runs: list[GenerationRunSummary] = []
+    for raw in snapshot.get("generation_runs") or []:
+        try:
+            runs.append(GenerationRunSummary(**raw))
+        except Exception:
+            logger.warning("Skipping unparseable generation_runs entry: %r", raw)
+    return runs
 
 
 def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
@@ -173,6 +272,7 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
     if flow:
         s = flow.state
         status = s.status
+        records, view = _flow_review(flow)
         return SessionDetail(
             session_id=session_id,
             name=data.get("name", session_id),
@@ -193,10 +293,17 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
             trail_verification=TrailVerification(
                 **flow.verify_trail(anchor=get_trail_anchor(session_id))
             ),
+            generation_runs=[
+                GenerationRunSummary(**r.model_dump()) for r in s.generation_runs
+            ],
+            review_decisions=records,
+            effective=view,
+            review_decisions_required=flow.review_decisions_required(),
         )
     # flow not in memory — return stored snapshot
     snapshot = data.get("state_snapshot", {})
     status = snapshot.get("status", "WAITING_FOR_SCOPE")
+    records, view, required = _snapshot_review(snapshot)
     return SessionDetail(
         session_id=session_id,
         name=data.get("name", session_id),
@@ -221,6 +328,10 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
         qa_rejection_reason=snapshot.get("qa_rejection_reason"),
         prepared_by=_prepared_by(data, None),
         trail_verification=_snapshot_verification(session_id, snapshot),
+        generation_runs=_snapshot_generation_runs(snapshot),
+        review_decisions=records,
+        effective=view,
+        review_decisions_required=required,
     )
 
 
@@ -293,9 +404,13 @@ def _run_phase_3(session_id: str, job_id: str) -> None:
 
 
 @router.post("", response_model=SessionSummary, status_code=201)
-def create_session(req: CreateSessionRequest) -> SessionSummary:
+def create_session(
+    req: CreateSessionRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
+    prepared_by, source = who.resolve(req.prepared_by, "prepared_by")
     return _create_and_launch(
-        req.theme, req.business_context, req.frameworks, req.name, req.prepared_by
+        req.theme, req.business_context, req.frameworks, req.name, prepared_by, source
     )
 
 
@@ -305,14 +420,16 @@ def create_session_with_document(
     business_context: str = Form(""),
     frameworks: list[str] = Form(default_factory=lambda: list(DEFAULT_FRAMEWORKS)),
     name: Optional[str] = Form(None),
-    prepared_by: str = Form(..., min_length=1, max_length=200),
+    prepared_by: str = Form("", max_length=200),
     document: UploadFile = File(...),
+    who: ReviewerIdentity = Depends(reviewer_identity),
 ) -> SessionSummary:
     """Create an audit with a scope document (PDF, .txt or .md, ≤ 5 MB).
 
     The extracted text is appended to the business context inside delimiters
     that label it as untrusted, user-supplied document content.
     """
+    prepared_by, source = who.resolve(prepared_by, "prepared_by")
     if not prepared_by.strip():
         raise HTTPException(status_code=422, detail="prepared_by must not be blank")
     data = document.file.read(MAX_UPLOAD_BYTES + 1)
@@ -326,6 +443,7 @@ def create_session_with_document(
         [f for f in frameworks if f.strip()],
         name or None,
         prepared_by,
+        source,
     )
 
 
@@ -335,6 +453,7 @@ def _create_and_launch(
     frameworks: list[str],
     name: Optional[str],
     prepared_by: str,
+    identity_source: str = "declared",
 ) -> SessionSummary:
     session_id = str(uuid.uuid4())
     name = name or f"{theme[:40]} audit"
@@ -345,7 +464,13 @@ def _create_and_launch(
     flow.state.business_context = business_context
     flow.state.frameworks = frameworks
     try:
-        flow.record_preparer(prepared_by)
+        # Audits created through the API require reviewer decisions at
+        # Gates 2 and 3 (ADR-011).
+        flow.record_preparer(
+            prepared_by,
+            require_review_decisions=True,
+            identity_source=identity_source,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -491,7 +616,11 @@ def _blocked(action: str, exc: Exception) -> HTTPException:
 
 
 @router.patch("/{session_id}/approve", response_model=SessionSummary)
-def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
+def approve_gate(
+    session_id: str,
+    req: ApproveGateRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Approve human gate 1, 2 or 3.
 
     Gates 1/2 start the next phase crew; gate 3 completes the audit. Returns
@@ -500,6 +629,7 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
     """
     if req.gate_number not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="gate_number must be 1, 2, or 3")
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
 
     # check-transition-submit is atomic per session: a concurrent duplicate
@@ -512,9 +642,41 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             3: flow.finalize_audit,
         }[req.gate_number]
         try:
-            approve(req.human_id)
+            approve(human_id, identity_source=source)
         except InvalidTransitionError as exc:
             raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
+        except MissingReviewDecisionsError as exc:
+            # detail stays a string for existing clients; the structured
+            # list is alongside it. Both are built from the missing list,
+            # not from the exception text.
+            missing = [
+                {
+                    k: m.get(k)
+                    for k in (
+                        "gate",
+                        "subject_type",
+                        "subject_id",
+                        "required",
+                        "reason",
+                    )
+                }
+                for m in exc.missing
+            ]
+            listed = "; ".join(
+                f"{m['subject_type']} {m['subject_id']}: "
+                f"{' or '.join(m['required'] or [])}"
+                for m in missing
+            )
+            return JSONResponse(  # type: ignore[return-value]
+                status_code=409,
+                content={
+                    "detail": (
+                        f"Cannot approve gate {req.gate_number}: reviewer "
+                        f"decisions needed first: {listed}."
+                    ),
+                    "missing_decisions": missing,
+                },
+            )
         except (ReviewBlockedError, PhaseArtifactMissingError) as exc:
             raise _blocked(f"approve gate {req.gate_number}", exc) from exc
         except ValueError as exc:
@@ -532,17 +694,22 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
 
 
 @router.post("/{session_id}/retry", response_model=SessionSummary)
-def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
+def retry_phase(
+    session_id: str,
+    req: RetryPhaseRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Re-run a phase that ended QA_REJECTED_PHASE_n or ERROR_PHASE_n.
 
     The retry is stamped in the approval trail. 409 if the phase is not in a
     retryable state.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.retry_phase(req.phase, req.human_id)
+            flow.retry_phase(req.phase, human_id, identity_source=source)
         except InvalidTransitionError as exc:
             raise _conflict(f"retry phase {req.phase}", flow, exc) from exc
         except ValueError as exc:
@@ -555,18 +722,25 @@ def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
 
 
 @router.post("/{session_id}/qa-override", response_model=SessionSummary)
-def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSummary:
+def override_qa_rejection(
+    session_id: str,
+    req: QAOverrideRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Supervisor override: accept a QA-rejected artifact with a justification.
 
     Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n (the normal gate approval
     still follows) and records approver + reason in the approval trail.
     409 if the phase is not QA-rejected or produced no artifact.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.override_qa_rejection(req.phase, req.human_id, req.reason)
+            flow.override_qa_rejection(
+                req.phase, human_id, req.reason, identity_source=source
+            )
         except (InvalidTransitionError, PhaseArtifactMissingError) as exc:
             raise _conflict(
                 f"override QA rejection for phase {req.phase}", flow, exc
@@ -582,7 +756,11 @@ def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSum
 
 
 @router.post("/{session_id}/return", response_model=SessionSummary)
-def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSummary:
+def return_for_rework(
+    session_id: str,
+    req: ReturnForReworkRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Reviewer returns a phase waiting at its gate for rework.
 
     WAITING_HUMAN_GATE_n → RUNNING_PHASE_n: the phase crew re-runs with the
@@ -590,11 +768,14 @@ def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSu
     the approval trail. 409 if the session is not waiting at that gate or the
     reviewer is the preparer; 422 for blank notes.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.return_for_rework(req.phase, req.human_id, req.notes)
+            flow.return_for_rework(
+                req.phase, human_id, req.notes, identity_source=source
+            )
         except InvalidTransitionError as exc:
             raise _conflict(f"return phase {req.phase}", flow, exc) from exc
         except ReviewBlockedError as exc:
@@ -606,6 +787,63 @@ def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSu
         next_status = flow.state.status
 
     return _summary(session_id, data, next_status)
+
+
+@router.post(
+    "/{session_id}/decisions", response_model=ReviewDecisionRecord, status_code=201
+)
+def record_decision(
+    session_id: str,
+    req: RecordDecisionRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> ReviewDecisionRecord:
+    """Append one reviewer decision (append-only; see DECISIONS.md, ADR-011).
+
+    The AI drafts are not changed: the decision is added to the session's
+    ``review_decisions`` and stamped in the approval trail, and the effective
+    view (``GET /sessions/{id}`` → ``effective``) renders it.
+
+    409: the decision cannot be recorded in the current status, the
+    preparer may not record this type, a conclusion change needs rework, or
+    the subject already has an active decision (correct it with
+    ``supersedes``) / the superseded decision is not the active one.
+    422: unknown decision type or subject, invalid values, a required
+    rationale is missing.
+    """
+    decided_by, source = who.resolve(req.decided_by, "decided_by")
+    _require_session(session_id)
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        try:
+            decision = flow.record_decision(
+                decision_type=req.decision_type,
+                subject_id=req.subject_id,
+                subject_type=req.subject_type,
+                values=req.values,
+                rationale=req.rationale,
+                decided_by=decided_by,
+                supersedes=req.supersedes,
+                identity_source=source,
+            )
+        except DecisionValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ReviewBlockedError as exc:
+            raise _blocked(f"record a {req.decision_type} decision", exc) from exc
+        _repo.save(session_id, flow)
+    return ReviewDecisionRecord(**decision.model_dump(mode="json"), state="active")
+
+
+@router.get("/{session_id}/decisions", response_model=ReviewDecisionsResponse)
+def list_decisions(session_id: str) -> ReviewDecisionsResponse:
+    """Every reviewer decision on the session, oldest first, with its state
+    (active / superseded / stale), and the effective view."""
+    data = _require_session(session_id)
+    flow = get_flow(session_id)
+    if flow is not None:
+        records, view = _flow_review(flow)
+    else:
+        records, view, _ = _snapshot_review(data.get("state_snapshot") or {})
+    return ReviewDecisionsResponse(decisions=records, effective=view)
 
 
 @router.get("/{session_id}/trail/verify", response_model=TrailVerification)

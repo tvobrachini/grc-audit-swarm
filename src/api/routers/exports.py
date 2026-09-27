@@ -75,7 +75,7 @@ def export_working_papers(session_id: str) -> Response:
     if papers is None:
         raise _missing("Working papers")
     return _download(
-        working_papers_xlsx(papers, ctx),
+        working_papers_xlsx(papers, ctx, flow.effective_view()),
         XLSX_MEDIA_TYPE,
         export_filename(ctx, "working-papers", "xlsx"),
     )
@@ -87,7 +87,9 @@ def export_report(session_id: str) -> Response:
     report = flow.state.final_report
     if report is None:
         raise _missing("Final report")
-    body = report_markdown(report, flow.state.approval_trail, ctx).encode("utf-8")
+    body = report_markdown(
+        report, flow.state.approval_trail, ctx, flow.effective_view()
+    ).encode("utf-8")
     return _download(
         body, "text/markdown; charset=utf-8", export_filename(ctx, "report", "md")
     )
@@ -96,10 +98,25 @@ def export_report(session_id: str) -> Response:
 @router.get("/{session_id}/export/oscal.json")
 def export_oscal(session_id: str) -> Response:
     flow, ctx = _load(session_id)
-    report = flow.state.final_report
-    body = oscal_json(report) if report is not None else None
-    if body is None:
-        raise _missing("OSCAL assessment results")
+    state = flow.state
+    if state.final_report is None:
+        raise _missing("Final report")
+    if state.working_papers is None:
+        raise _missing("Working papers")
+    try:
+        body = oscal_json(
+            state.final_report,
+            state.working_papers,
+            state.racm_plan,
+            state.approval_trail,
+            ctx,
+            theme=state.theme,
+            prepared_by=state.prepared_by,
+            view=flow.effective_view(),
+            decisions=state.review_decisions,
+        )
+    except ValueError:
+        raise _missing("OSCAL assessment results") from None
     return _download(
         body, "application/json", export_filename(ctx, "oscal-sar", "json")
     )

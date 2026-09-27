@@ -1,0 +1,33 @@
+[
+  {
+    "CheckID": "iam_password_policy_minimum_length_14",
+    "CheckTitle": "Ensure IAM password policy requires minimum length of 14 or greater",
+    "ServiceName": "iam",
+    "Status": "PASS",
+    "StatusExtended": "IAM password policy requires a minimum length of 14.",
+    "Severity": "medium",
+    "ResourceType": "AwsAccount",
+    "ResourceId": "123456789012",
+    "ResourceArn": "arn:aws:iam::123456789012:root",
+    "Region": "us-east-1",
+    "AccountId": "123456789012",
+    "Compliance": {"CIS-1.4": ["1.8"]}
+  },
+  {
+    "CheckID": "s3_bucket_public_access",
+    "CheckTitle": "Check if S3 buckets have public access",
+    "ServiceName": "s3",
+    "Status": "FAIL",
+    "StatusExtended": "S3 Bucket legacy-public-bucket allows public read access.",
+    "Severity": "critical",
+    "ResourceType": "AwsS3Bucket",
+    "ResourceId": "legacy-public-bucket",
+    "ResourceArn": "arn:aws:s3:::legacy-public-bucket",
+    "Region": "us-west-2",
+    "AccountId": "123456789012",
+    "Compliance": {"CIS-1.4": ["2.1.1"], "SOC2": ["CC6.1", "CC6.6"]}
+  },
+  {
+    "no_check_id_here": true
+  }
+]

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { api, describeError } from "@/api/client";
+import { api, describeError, getReviewerToken, setReviewerToken } from "@/api/client";
 
 interface Props {
   onClose: () => void;
@@ -29,12 +29,14 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
   const [theme, setTheme] = useState("");
   const [context, setContext] = useState("");
   const [preparedBy, setPreparedBy] = useState("");
+  const [reviewerToken, setReviewerTokenInput] = useState(getReviewerToken);
   const [frameworks, setFrameworks] = useState(DEFAULT_FRAMEWORKS);
   const [scopeFile, setScopeFile] = useState<File | null>(null);
   const documentTooLarge = scopeFile !== null && scopeFile.size > MAX_DOCUMENT_BYTES;
 
   const mutation = useMutation({
     mutationFn: () => {
+      setReviewerToken(reviewerToken.trim());
       const body = {
         theme,
         business_context: context,
@@ -120,6 +122,24 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
               preparer cannot approve gates, override a QA rejection, or
               return work for rework on this audit — a different reviewer must
               act at each gate.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+              Reviewer token (optional)
+            </label>
+            <input
+              type="password"
+              value={reviewerToken}
+              onChange={(e) => setReviewerTokenInput(e.target.value)}
+              autoComplete="off"
+              placeholder="Only if this server issues personal reviewer tokens"
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-violet-500"
+            />
+            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              When the server has per-reviewer tokens, the preparer is taken
+              from the token rather than the typed name. Kept for this tab only.
             </p>
           </div>
 

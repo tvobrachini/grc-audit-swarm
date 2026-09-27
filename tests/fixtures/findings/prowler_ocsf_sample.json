@@ -1,0 +1,88 @@
+[
+  {
+    "metadata": {
+      "event_code": "s3_bucket_level_public_access_block",
+      "product": {"name": "Prowler", "vendor_name": "Prowler", "version": "4.6.0"}
+    },
+    "severity": "high",
+    "severity_id": 4,
+    "status_code": "FAIL",
+    "status_detail": "S3 Bucket my-public-bucket does not have Public Access Block enabled.",
+    "time": 1735689600,
+    "finding_info": {
+      "uid": "prowler-aws-s3_bucket_level_public_access_block-123456789012-us-east-1-my-public-bucket",
+      "title": "Check S3 Bucket Level Public Access Block",
+      "created_time_dt": "2026-01-01T00:00:00Z"
+    },
+    "resources": [
+      {"uid": "arn:aws:s3:::my-public-bucket", "region": "us-east-1", "type": "AwsS3Bucket", "name": "my-public-bucket"}
+    ],
+    "cloud": {"account": {"uid": "123456789012"}, "provider": "aws", "region": "us-east-1"},
+    "unmapped": {
+      "compliance": {"CIS-1.4": ["2.1.1"], "SOC2": ["CC6.1"]}
+    }
+  },
+  {
+    "metadata": {
+      "event_code": "s3_bucket_level_public_access_block",
+      "product": {"name": "Prowler", "vendor_name": "Prowler", "version": "4.6.0"}
+    },
+    "severity": "informational",
+    "severity_id": 1,
+    "status_code": "PASS",
+    "status_detail": "S3 Bucket my-private-bucket has Public Access Block enabled.",
+    "time": 1735689650,
+    "finding_info": {
+      "uid": "prowler-aws-s3_bucket_level_public_access_block-123456789012-us-east-1-my-private-bucket",
+      "title": "Check S3 Bucket Level Public Access Block",
+      "created_time_dt": "2026-01-01T00:00:50Z"
+    },
+    "resources": [
+      {"uid": "arn:aws:s3:::my-private-bucket", "region": "us-east-1", "type": "AwsS3Bucket", "name": "my-private-bucket"}
+    ],
+    "cloud": {"account": {"uid": "123456789012"}, "provider": "aws", "region": "us-east-1"},
+    "unmapped": {
+      "compliance": {"CIS-1.4": ["2.1.1"]}
+    }
+  },
+  {
+    "metadata": {
+      "event_code": "iam_root_hardware_mfa_enabled",
+      "product": {"name": "Prowler", "vendor_name": "Prowler", "version": "4.6.0"}
+    },
+    "severity": "critical",
+    "status_code": "MANUAL",
+    "status_detail": "Root MFA cannot be checked automatically in this account.",
+    "time": 1735689700,
+    "finding_info": {
+      "uid": "prowler-aws-iam_root_hardware_mfa_enabled-123456789012--",
+      "title": "Ensure hardware MFA is enabled for the root user"
+    },
+    "resources": [
+      {"uid": "arn:aws:iam::123456789012:root", "region": "us-east-1", "type": "AwsIamUser"}
+    ],
+    "cloud": {"account": {"uid": "123456789012"}, "provider": "aws", "region": "us-east-2"},
+    "unmapped": {}
+  },
+  {
+    "metadata": {
+      "event_code": "iam_password_policy_uppercase",
+      "product": {"name": "Prowler", "vendor_name": "Prowler", "version": "4.6.0"}
+    },
+    "severity": "medium",
+    "status_code": "PASS",
+    "status_detail": "IAM password policy requires at least one uppercase letter.",
+    "time": 1735689720,
+    "finding_info": {
+      "uid": "prowler-aws-iam_password_policy_uppercase-123456789012--"
+    },
+    "resources": [
+      {"uid": "123456789012", "region": "eu-west-1", "type": "AwsAccount"}
+    ],
+    "cloud": {"account": {"uid": "123456789012"}, "provider": "aws", "region": "eu-west-1"},
+    "unmapped": {}
+  },
+  {
+    "this_record": "has no recognizable check id or finding info"
+  }
+]

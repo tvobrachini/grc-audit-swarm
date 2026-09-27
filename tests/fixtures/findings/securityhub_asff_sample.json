@@ -1,0 +1,48 @@
+[
+  {
+    "SchemaVersion": "2018-10-08",
+    "Id": "arn:aws:securityhub:us-east-1:123456789012:subscription/aws-foundational-security-best-practices/v/1.0.0/S3.8/finding/abc-123",
+    "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+    "GeneratorId": "aws-foundational-security-best-practices/v/1.0.0/S3.8",
+    "AwsAccountId": "123456789012",
+    "Types": ["Software and Configuration Checks/Industry and Regulatory Standards"],
+    "Title": "S3 Block Public Access setting should be enabled at the bucket level",
+    "Description": "This control checks whether S3 buckets have block public access settings enabled.",
+    "CreatedAt": "2026-01-01T00:00:00.000Z",
+    "UpdatedAt": "2026-01-02T00:00:00.000Z",
+    "Severity": {"Label": "MEDIUM", "Normalized": 40},
+    "Compliance": {
+      "Status": "FAILED",
+      "RelatedRequirements": ["NIST.800-53.r5 AC-3", "NIST.800-53.r5 AC-4"]
+    },
+    "Workflow": {"Status": "NEW"},
+    "RecordState": "ACTIVE",
+    "Resources": [
+      {"Type": "AwsS3Bucket", "Id": "arn:aws:s3:::my-public-bucket", "Region": "us-east-1"}
+    ],
+    "ProductFields": {"aws/securityhub/ProductName": "Security Hub"}
+  },
+  {
+    "SchemaVersion": "2018-10-08",
+    "Id": "arn:aws:securityhub:us-east-1:123456789012:subscription/aws-foundational-security-best-practices/v/1.0.0/IAM.7/finding/def-456",
+    "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+    "GeneratorId": "aws-foundational-security-best-practices/v/1.0.0/IAM.7",
+    "AwsAccountId": "123456789012",
+    "Types": ["Software and Configuration Checks/Industry and Regulatory Standards"],
+    "Title": "Password policies for IAM users should have strong configurations",
+    "Description": "This control checks whether the account password policy meets minimum requirements.",
+    "CreatedAt": "2026-01-01T00:00:00.000Z",
+    "UpdatedAt": "2026-01-02T00:00:00.000Z",
+    "Severity": {"Label": "LOW", "Normalized": 10},
+    "Compliance": {"Status": "PASSED", "RelatedRequirements": ["NIST.800-53.r5 IA-5"]},
+    "Workflow": {"Status": "RESOLVED"},
+    "RecordState": "ACTIVE",
+    "Resources": [
+      {"Type": "AwsAccount", "Id": "123456789012", "Region": "us-east-1"}
+    ],
+    "ProductFields": {"aws/securityhub/ProductName": "Security Hub"}
+  },
+  {
+    "no_id_here": true
+  }
+]

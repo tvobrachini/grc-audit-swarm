@@ -107,4 +107,68 @@ describe("ApprovalGate", () => {
       ).toBeInTheDocument()
     );
   });
+
+  it("shows the outstanding-decisions checklist from effective.missing_for_gate", () => {
+    renderWithClient(
+      <ApprovalGate
+        session={makeSession({
+          status: "WAITING_HUMAN_GATE_2",
+          effective: {
+            decisions_required: true,
+            deficiency_scale: null,
+            findings: [],
+            deficiencies: [],
+            engagement_conclusion: null,
+            missing_for_gate: {
+              "2": [
+                {
+                  gate: 2,
+                  subject_type: "finding",
+                  subject_id: "CTRL-001",
+                  required: ["sign_off", "challenge"],
+                  reason: "Needs a reviewer sign-off or challenge (result is Exception).",
+                },
+              ],
+            },
+            reviewer_change_rate: {
+              subjects_decided: 0,
+              subjects_changed: 0,
+              rate: null,
+              published: false,
+            },
+            stale_decision_ids: [],
+            superseded_decision_ids: [],
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText(/1 decision still needed/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /finding CTRL-001/i })).toBeInTheDocument();
+    expect(screen.getByText(/Needs a reviewer sign-off or challenge/)).toBeInTheDocument();
+  });
+
+  it("renders a 409's missing_decisions as a list instead of a raw error", async () => {
+    const user = userEvent.setup();
+    mockedApi.sessions.approve.mockRejectedValue(
+      new ApiError(409, "Cannot approve gate 2: reviewer decisions are missing.", [
+        {
+          gate: 2,
+          subject_type: "finding",
+          subject_id: "CTRL-002",
+          required: ["sign_off", "challenge"],
+          reason: "Key control not reviewed.",
+        },
+      ])
+    );
+
+    renderWithClient(<ApprovalGate session={makeSession({ status: "WAITING_HUMAN_GATE_2" })} />);
+    await user.type(screen.getByPlaceholderText("Your name / ID"), "M. Alvarez");
+    await user.click(screen.getByRole("button", { name: /approve & proceed/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /finding CTRL-002/i })).toBeInTheDocument()
+    );
+    expect(screen.getByText(/Key control not reviewed/)).toBeInTheDocument();
+  });
 });
