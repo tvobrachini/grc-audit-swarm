@@ -25,6 +25,7 @@ from swarm.tools.aws_checks import (  # noqa: E402
     collect_s3_public_access,
     describe_error,
     get_account_bpa,
+    get_caller_identity,
 )
 
 ACCOUNT_ID = "111122223333"
@@ -375,10 +376,10 @@ class TestUnknowns:
 # ─── Account-level Block Public Access ───────────────────────────────────────
 
 
-class TestAccountBpa:
-    def test_reads_account_bpa_with_caller_account_id(self):
-        sts, s3control = _client("sts"), _client("s3control")
-        with Stubber(sts) as sts_stub, Stubber(s3control) as ctl_stub:
+class TestGetCallerIdentity:
+    def test_returns_account_id_and_redacted_arn(self):
+        sts = _client("sts")
+        with Stubber(sts) as sts_stub:
             sts_stub.add_response(
                 "get_caller_identity",
                 {
@@ -388,34 +389,61 @@ class TestAccountBpa:
                 },
                 {},
             )
+            account_id, arn = get_caller_identity(sts)
+        assert account_id == ACCOUNT_ID
+        assert arn == "arn:aws:iam::[REDACTED]:user/auditor"
+        assert ACCOUNT_ID not in arn
+
+    def test_no_arn_in_response_returns_none(self):
+        sts = _client("sts")
+        with Stubber(sts) as sts_stub:
+            sts_stub.add_response("get_caller_identity", {"Account": ACCOUNT_ID}, {})
+            account_id, arn = get_caller_identity(sts)
+        assert account_id == ACCOUNT_ID
+        assert arn is None
+
+    def test_failure_returns_none_none_and_is_redacted_in_logs(self, caplog):
+        sts = _client("sts")
+        with Stubber(sts) as sts_stub:
+            sts_stub.add_client_error(
+                "get_caller_identity", service_error_code="ExpiredToken"
+            )
+            with caplog.at_level("WARNING"):
+                account_id, arn = get_caller_identity(sts)
+        assert (account_id, arn) == (None, None)
+        assert "ExpiredToken" in caplog.text
+
+
+class TestAccountBpa:
+    def test_reads_account_bpa_with_caller_account_id(self):
+        s3control = _client("s3control")
+        with Stubber(s3control) as ctl_stub:
             ctl_stub.add_response(
                 "get_public_access_block",
                 _bpa(IgnorePublicAcls=True, RestrictPublicBuckets=True),
                 {"AccountId": ACCOUNT_ID},
             )
-            layer = get_account_bpa(sts, s3control)
+            layer = get_account_bpa(ACCOUNT_ID, s3control)
         assert layer["status"] == "configured"
         assert layer["IgnorePublicAcls"] is True
         assert layer["BlockPublicAcls"] is False
         assert ACCOUNT_ID not in repr(layer)
 
     def test_not_configured(self):
-        sts, s3control = _client("sts"), _client("s3control")
-        with Stubber(sts) as sts_stub, Stubber(s3control) as ctl_stub:
-            sts_stub.add_response("get_caller_identity", {"Account": ACCOUNT_ID}, {})
+        s3control = _client("s3control")
+        with Stubber(s3control) as ctl_stub:
             ctl_stub.add_client_error(
                 "get_public_access_block",
                 service_error_code=NO_BPA,
                 expected_params={"AccountId": ACCOUNT_ID},
             )
-            layer = get_account_bpa(sts, s3control)
+            layer = get_account_bpa(ACCOUNT_ID, s3control)
         assert layer == {"status": "not configured"}
 
     def test_access_denied_is_unknown_and_redacted(self, caplog):
-        sts, s3control = _client("sts"), _client("s3control")
+        s3control = _client("s3control")
         message = f"User: arn:aws:iam::{ACCOUNT_ID}:user/auditor is not authorized"
-        with Stubber(sts) as sts_stub, Stubber(s3control) as ctl_stub:
-            sts_stub.add_response("get_caller_identity", {"Account": ACCOUNT_ID}, {})
+        with Stubber(s3control) as ctl_stub:
             ctl_stub.add_client_error(
                 "get_public_access_block",
                 service_error_code="AccessDenied",
@@ -423,21 +451,17 @@ class TestAccountBpa:
                 expected_params={"AccountId": ACCOUNT_ID},
             )
             with caplog.at_level("WARNING"):
-                layer = get_account_bpa(sts, s3control)
+                layer = get_account_bpa(ACCOUNT_ID, s3control)
         assert layer["status"] == "unknown"
         assert "AccessDenied" in layer["error"]
         assert ACCOUNT_ID not in layer["error"]
         assert ACCOUNT_ID not in caplog.text
 
-    def test_sts_failure_is_unknown(self):
-        sts, s3control = _client("sts"), _client("s3control")
-        with Stubber(sts) as sts_stub:
-            sts_stub.add_client_error(
-                "get_caller_identity", service_error_code="ExpiredToken"
-            )
-            layer = get_account_bpa(sts, s3control)
+    def test_no_account_id_is_unknown(self):
+        s3control = _client("s3control")
+        layer = get_account_bpa(None, s3control)
         assert layer["status"] == "unknown"
-        assert "ExpiredToken" in layer["error"]
+        assert "GetCallerIdentity failed" in layer["error"]
 
 
 class TestCollectS3:

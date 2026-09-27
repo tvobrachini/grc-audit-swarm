@@ -2,6 +2,24 @@
 
 This file summarises what GRC Audit Swarm does at each tagged version. It is not a line-by-line commit log; the full history is in `git log`.
 
+## Unreleased
+
+**Reviewer decisions (ADR-011)**
+- At Gates 2 and 3 a reviewer records decisions beside the AI draft: sign-off or challenge per finding, a scope limitation for untested controls, a classification, five-part write-up and management response per deficiency, and an engagement conclusion. Gates 2 and 3 refuse approval until the required decisions exist, and list what is missing.
+- Each decision is appended to the approval trail; Gate 2 and 3 approvals also record a digest of that phase's decisions, so a decision edited, removed or added afterwards is reported by trail verification.
+- Exports (report, working papers, OSCAL) show the reviewer's conclusion of record, with the AI draft beside it where they differ.
+- The UI has decision controls on the findings board and the report view, and a checklist of missing decisions at each gate.
+
+**Per-reviewer tokens (ADR-012)**
+- Optional `REVIEWER_TOKENS_FILE`: when set, creating an audit, gate actions and decisions need a personal `X-Reviewer-Token`, the token's owner is recorded as the person acting, and trail entries record `identity_source` (declared or authenticated). Only hashes are stored; a CLI issues tokens. Not SSO and no MFA — see docs/SECURITY-AND-DATA.md.
+
+**Evidence imports**
+- Read-only import of Prowler JSON (OCSF and legacy) and AWS Security Hub (ASFF) findings as vault evidence, labelled as point-in-time results rather than operating effectiveness (docs/INTEGRATIONS.md).
+
+**Evaluation**
+- Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
+- The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.
+
 ## v0.1.0 — 2026-09-27
 
 First tagged version. Summary of what the project does at this point:
@@ -13,6 +31,7 @@ First tagged version. Summary of what the project does at this point:
 - Segregation of duties: the preparer of an audit cannot approve a gate, return work or override a QA rejection on it; the Gate 3 approver must differ from the Gate 2 approver.
 - Hash-chained approval trail: every action (creation, approval, return, retry, override) is appended with a reviewer name, UTC timestamp and a SHA-256 digest of the artifact acted on, each entry chained to the one before it. `GET /api/sessions/{id}/trail/verify` recomputes the chain and reports whether it is intact; a separate anchor file (`TRAIL_ANCHORS_PATH`) also records the entry count and last hash to help detect entries cut from the end.
 - Deleting an audit (`DELETE /api/sessions/{id}`) only works on drafts; anything past the first approved gate is kept.
+- Generation provenance: each phase run records the provider/model, QA model, temperatures, CrewAI/app versions, a prompt fingerprint and outcome (`generation_runs` on `GET /api/sessions/{id}`), and gate approvals, retries, returns and overrides reference the run they acted on; this does not make LLM output replayable (see DECISIONS.md ADR-010).
 
 **Audit methodology model**
 - RACM schema with risks (likelihood/impact), controls (owner, frequency, nature, type, key-control flag, assertions/IT objectives, IPE), and test-of-design / test-of-effectiveness / substantive steps with population, sample size, sampling method and period of reliance.

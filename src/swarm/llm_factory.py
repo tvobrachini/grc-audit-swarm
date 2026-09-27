@@ -88,6 +88,54 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
     )
 
 
+def describe_crew_llm() -> dict[str, str]:
+    """Non-secret ``{"provider", "model"}`` for what :func:`get_crew_llm` would
+    build right now, with no API key, base URL or token in it.
+
+    Mirrors :func:`get_crew_llm`'s provider-selection order exactly (see its
+    docstring); the two must be kept in sync. Kept a separate, lightweight
+    lookup rather than deriving the metadata from a constructed ``LLM``
+    instance, so describing a run never itself makes a network call or
+    constructs a client.
+
+    Raises:
+        LLMConfigurationError: if no supported provider is configured.
+    """
+    ollama_model = os.environ.get("OLLAMA_MODEL")
+    if ollama_model:
+        return {"provider": "ollama", "model": ollama_model}
+    if os.environ.get("NVIDIA_API_KEY"):
+        return {"provider": "nvidia_nim", "model": "meta/llama-3.3-70b-instruct"}
+    if os.environ.get("GEMINI_API_KEY"):
+        return {
+            "provider": "gemini",
+            "model": os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        }
+    if os.environ.get("OPENAI_API_KEY"):
+        return {"provider": "openai", "model": "gpt-4o-mini"}
+    if os.environ.get("GROQ_API_KEY"):
+        return {"provider": "groq", "model": "llama-3.3-70b-versatile"}
+    raise LLMConfigurationError(
+        "No LLM provider configured. Set one of: "
+        + ", ".join(_PROVIDER_ENV_VARS)
+        + " (or run with DEMO_MODE=1 to bypass the crews)."
+    )
+
+
+def describe_qa_llm() -> dict[str, str]:
+    """Non-secret ``{"provider", "model"}`` for what :func:`get_qa_llm` would
+    build right now. Without ``QA_LLM_MODEL`` this is :func:`describe_crew_llm`
+    (the QA reviewer shares the crew's model); with it, the provider is the
+    ``QA_LLM_MODEL`` string's ``provider/model`` prefix (LiteLLM convention),
+    or ``"custom"`` if it has none. No key, base URL or token is included.
+    """
+    model = os.environ.get("QA_LLM_MODEL", "").strip()
+    if not model:
+        return describe_crew_llm()
+    provider, _, rest = model.partition("/")
+    return {"provider": provider if rest else "custom", "model": model}
+
+
 def qa_llm_configured() -> bool:
     """True when a separate QA reviewer model is configured (QA_LLM_MODEL)."""
     return bool(os.environ.get("QA_LLM_MODEL", "").strip())

@@ -4,9 +4,12 @@ The flow is the application's own ``AuditFlow``: state machine, QA retry,
 deterministic evidence check, human gates and approval trail all run as in
 production. Only two things are substituted:
 
-* the **reviewers**: a synthetic reviewer approves every gate (and, by
-  default, overrides a QA rejection so later phases can still be measured;
-  the rejection is recorded and reported);
+* the **reviewers**: an automated (synthetic) reviewer approves every gate
+  (and, by default, overrides a QA rejection so later phases can still be
+  measured; the rejection is recorded and reported). Before Gates 2 and 3
+  it records the minimum reviewer decisions the gate requires (ADR-011),
+  each accepting the AI draft unchanged, under a declared identity that
+  names it as the harness's automated reviewer;
 * in **replay** mode, the **crews**: canned outputs from a fixture stand in
   for the model. The Fieldwork stand-in still runs the real evidence tools
   against the simulated account, so vault records and quote checks are real.
@@ -49,12 +52,33 @@ from swarm.schema import (
 logger = logging.getLogger(__name__)
 
 PREPARER = "eval-harness (preparer)"
-REVIEWER = "eval-harness synthetic reviewer (in-charge)"
-MANAGER = "eval-harness synthetic reviewer (manager)"
+REVIEWER = "eval-harness automated reviewer (in-charge)"
+MANAGER = "eval-harness automated reviewer (manager)"
 OVERRIDE_REASON = (
-    "Evaluation harness: QA rejection accepted by the synthetic reviewer so "
+    "Evaluation harness: QA rejection accepted by the automated reviewer so "
     "the later phases can be measured. The rejection is recorded in the "
     "results; this is not a review decision."
+)
+# Rationales of the decisions the automated reviewer records before Gates 2
+# and 3 (ADR-011). They accept the AI draft unchanged, so the scored output
+# is the model's; none of them is an audit judgement.
+_AUTOMATED = "Recorded by the evaluation harness's automated reviewer, not a person"
+AUTOMATED_SIGN_OFF = (
+    f"{_AUTOMATED}: accepts the AI draft unchanged so the model's conclusion "
+    "is what the harness scores."
+)
+AUTOMATED_CLASSIFY = (
+    f"{_AUTOMATED}: keeps the AI-drafted classification unchanged so the "
+    "model's evaluation is what the harness scores."
+)
+AUTOMATED_SCOPE_LIMITATION = (
+    f"{_AUTOMATED}: the draft concluded this key control Not tested; recorded "
+    "as a scope limitation only so Gate 3 can be approved."
+)
+AUTOMATED_CONCLUSION = (
+    f"{_AUTOMATED}: set mechanically (Needs improvement if the draft has any "
+    "deficiency evaluation, else Satisfactory) only so Gate 3 can be "
+    "approved. Not scored."
 )
 
 QA_TASK = {1: "qa_gate_task", 2: "eval_qa_gate_task", 3: "tone_qa_task"}
@@ -322,10 +346,70 @@ def _dump(model: Any) -> Optional[dict[str, Any]]:
     return None if model is None else model.model_dump(mode="json")
 
 
+def _decision_body(flow: AuditFlow, missing: Any) -> dict[str, Any]:
+    """The minimum decision that satisfies one missing gate precondition,
+    accepting the AI draft unchanged so the model's output is what is scored."""
+    subject = missing.subject_id
+    dtype = missing.required[0]
+    body: dict[str, Any] = {"decision_type": dtype, "subject_id": subject}
+    if dtype == "sign_off":
+        body["rationale"] = AUTOMATED_SIGN_OFF
+    elif dtype == "classify":
+        view = flow.effective_view().deficiency(subject)
+        draft = view.draft if view is not None else None
+        body["values"] = {"classification": str(getattr(draft, "classification", ""))}
+        body["rationale"] = AUTOMATED_CLASSIFY
+    elif dtype == "scope_limitation":
+        body["rationale"] = AUTOMATED_SCOPE_LIMITATION
+    elif dtype == "engagement_conclusion":
+        view = flow.effective_view()
+        conclusion = "Needs improvement" if view.deficiencies else "Satisfactory"
+        body["values"] = {"conclusion": conclusion}
+        body["rationale"] = AUTOMATED_CONCLUSION
+    return body
+
+
+def record_required_decisions(
+    flow: AuditFlow, gate: int, reviewer: str
+) -> tuple[int, list[dict[str, Any]]]:
+    """Record the reviewer decisions ``gate`` still needs, as ``reviewer``.
+
+    Returns (decisions recorded, problems). Each decision is the minimum
+    the gate requires (ADR-011): a sign-off for each finding needing review
+    at Gate 2; at Gate 3 a classification equal to the AI draft per
+    deficiency, a scope limitation per untested key control and the
+    engagement conclusion. Every decision is recorded with a declared
+    identity and a rationale naming the automated reviewer.
+    """
+    missing = flow.effective_view().missing_for_gate.get(str(gate), [])
+    recorded, problems = 0, []
+    for m in missing:
+        body = _decision_body(flow, m)
+        try:
+            flow.record_decision(decided_by=reviewer, **body)
+            recorded += 1
+        except Exception as exc:
+            problems.append(
+                {
+                    "phase": gate,
+                    "event": "decision_failed",
+                    "decision_type": body["decision_type"],
+                    "subject_id": body["subject_id"],
+                    "error": str(exc),
+                }
+            )
+    return recorded, problems
+
+
 def _drive(flow: AuditFlow, on_qa_reject: str) -> dict[str, Any]:
-    """Phase 1 -> Gate 1 -> Phase 2 -> Gate 2 -> Phase 3 -> Gate 3."""
+    """Phase 1 -> Gate 1 -> Phase 2 -> Gate 2 -> Phase 3 -> Gate 3.
+
+    The audit requires reviewer decisions, as one created through the API
+    does; the automated reviewer records the minimum each gate needs.
+    """
     events: list[dict[str, Any]] = []
-    flow.record_preparer(PREPARER)
+    decisions: dict[str, int] = {}
+    flow.record_preparer(PREPARER, require_review_decisions=True)
     flow.begin_phase_1()
     steps: list[tuple[int, Callable[[], None], Callable[[str], None], str]] = [
         (1, flow.generate_planning, flow.begin_phase_2, REVIEWER),
@@ -366,6 +450,10 @@ def _drive(flow: AuditFlow, on_qa_reject: str) -> dict[str, Any]:
             )
             stopped_at = status
             break
+        if phase in (2, 3):
+            count, problems = record_required_decisions(flow, phase, approver)
+            decisions[str(phase)] = count
+            events.extend(problems)
         try:
             approve(approver)
         except Exception as exc:
@@ -378,6 +466,7 @@ def _drive(flow: AuditFlow, on_qa_reject: str) -> dict[str, Any]:
         "completed": flow.state.status == "COMPLETED",
         "stopped_at": stopped_at,
         "events": events,
+        "decisions_recorded": decisions,
     }
 
 
@@ -425,6 +514,9 @@ def run_scenario(
         record["working_papers"] = _dump(state.working_papers)
         record["final_report"] = _dump(state.final_report)
         record["approval_trail"] = list(state.approval_trail)
+        record["review_decisions"] = [
+            d.model_dump(mode="json") for d in state.review_decisions
+        ]
         record["kickoffs"] = list(getattr(crews, "kickoffs", []))
         record["citations"] = [
             citation(f) for f in (record["working_papers"] or {}).get("findings", [])

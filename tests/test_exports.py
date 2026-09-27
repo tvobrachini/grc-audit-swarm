@@ -268,17 +268,28 @@ class TestReportExport:
 
 
 class TestOscalExport:
+    """Envelope only; conformance is in tests/test_oscal_ar.py."""
+
     def test_json(self, client):
-        sid = _session("COMPLETED", report=demo_final_report("S3"))
+        sid = _session(
+            "COMPLETED",
+            papers=make_papers(),
+            report=demo_final_report("S3"),
+        )
         r = client.get(f"/api/sessions/{sid}/export/oscal.json", headers=AUTH)
         assert r.status_code == 200
         assert r.headers["content-type"] == "application/json"
         data = json.loads(r.content)
-        assert set(data) == {"metadata", "import_ap", "results"}
-        assert data["results"][0]["observations"]
+        assert set(data) == {"assessment-results"}
+        assert data["assessment-results"]["results"][0]["observations"]
 
-    def test_404_when_report_has_no_oscal(self, client):
-        sid = _session("COMPLETED", report=make_report())
+    def test_report_without_model_oscal_still_exports(self, client):
+        sid = _session("COMPLETED", papers=make_papers(), report=make_report())
+        r = client.get(f"/api/sessions/{sid}/export/oscal.json", headers=AUTH)
+        assert r.status_code == 200
+
+    def test_404_without_report(self, client):
+        sid = _session("WAITING_HUMAN_GATE_2", papers=make_papers())
         r = client.get(f"/api/sessions/{sid}/export/oscal.json", headers=AUTH)
         assert r.status_code == 404
 

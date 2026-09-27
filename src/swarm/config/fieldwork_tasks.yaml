@@ -3,7 +3,7 @@ evidence_collection_task:
     RACM test plan approved at Gate 1 (one block per control):
     {test_plan}
 
-    For each control, run the available read-only tools that produce evidence for its test steps. Do not simulate or paraphrase evidence. For every tool run, copy the tool's response verbatim, including its 'Vault ID:' line, and list the Control-IDs it relates to. Tool results show the configuration at the time of the call (point in time). Finally list the Control-IDs that no available tool covers as 'NO APPLICABLE TOOL'.
+    For each control, run the available read-only tools that produce evidence for its test steps. This includes the direct AWS reads and the two findings-import tools: 'Import Prowler Findings' (a Prowler JSON export, if PROWLER_FINDINGS_PATH is configured) and 'Get Security Hub Findings' (active AWS Security Hub findings). Do not simulate or paraphrase evidence. For every tool run, copy the tool's response verbatim, including its 'Vault ID:' line, and list the Control-IDs it relates to. Tool results show the configuration or scan result at the time of the call (point in time), never operating effectiveness over a period by themselves; a Prowler or Security Hub PASS is the scanning tool's own classification, not an audit conclusion. Finally list the Control-IDs that no available tool covers as 'NO APPLICABLE TOOL'.
   expected_output: "Per tool run: the related Control-IDs, the Vault ID and the raw output verbatim. Then the list of Control-IDs with no applicable tool."
 
 execution_evaluation_task:

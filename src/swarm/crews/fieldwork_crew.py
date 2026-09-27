@@ -7,6 +7,10 @@ from swarm.tools.aws_tools import (
     list_iam_users_with_mfa,
     list_public_s3_buckets,
 )
+from swarm.tools.findings_tools import (
+    get_securityhub_findings,
+    import_prowler_findings,
+)
 from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
@@ -31,6 +35,8 @@ class FieldworkCrew:
                 get_iam_password_policy,
                 list_iam_users_with_mfa,
                 list_public_s3_buckets,
+                import_prowler_findings,
+                get_securityhub_findings,
             ],
         )
 

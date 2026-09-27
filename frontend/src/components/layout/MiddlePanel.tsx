@@ -9,6 +9,7 @@ import { FindingsBoard } from "@/components/audit/FindingsBoard";
 import { ReportView } from "@/components/audit/ReportView";
 import { PhaseRecovery } from "@/components/audit/PhaseRecovery";
 import { ExportBar } from "@/components/audit/ExportBar";
+import { ReviewerIdentityProvider } from "@/hooks/ReviewerIdentityProvider";
 
 interface Props {
   session: SessionDetail;
@@ -95,11 +96,13 @@ export function MiddlePanel({ session, events, onDeleted }: Props) {
 
         {status === "WAITING_HUMAN_GATE_1" && <RACMTree session={session} />}
 
-        {status === "WAITING_HUMAN_GATE_2" && <FindingsBoard session={session} />}
+        <ReviewerIdentityProvider>
+          {status === "WAITING_HUMAN_GATE_2" && <FindingsBoard session={session} />}
 
-        {(status === "WAITING_HUMAN_GATE_3" || status === "COMPLETED") && (
-          <ReportView session={session} />
-        )}
+          {(status === "WAITING_HUMAN_GATE_3" || status === "COMPLETED") && (
+            <ReportView session={session} />
+          )}
+        </ReviewerIdentityProvider>
 
         {problem && (
           <div className="flex flex-col gap-4">

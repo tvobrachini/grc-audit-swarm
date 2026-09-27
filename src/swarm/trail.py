@@ -20,6 +20,14 @@ What this detects
     * with the keyed variant: all of the above even when the editor
       recomputed every digest, unless they also hold the key.
 
+Reviewer decisions (ADR-011)
+    each decision is a ``review_decision`` entry holding its
+    ``decision_digest``, and a gate approval records a ``decisions_digest``
+    over that phase's decisions recorded before it. Given the stored
+    decisions, :func:`verify_trail` reports one that was edited, removed or
+    added without an entry (``decision_changed``) and a gate whose sealed
+    decisions changed (``artifact_changed``).
+
 What it does not detect on its own
     * removal of entries from the *end* of the trail, or of the whole trail
       (the remaining chain is still valid) — unless the head is anchored
@@ -29,7 +37,13 @@ What it does not detect on its own
       editor cannot also rewrite the anchor file (ship it to separate storage
       for that);
     * with the unkeyed variant, an editor who recomputes the whole chain;
-    * anything about *who* acted: identities are self-declared.
+    * anything about *who* acted. Each entry written since ADR-012 carries
+      ``identity_source``: ``declared`` (the name was typed by the caller)
+      or ``authenticated`` (the name a reviewer token belongs to). The hash
+      covers that field like any other, so changing it is detected as an
+      edit; it records what the API was told, not proof of who was at the
+      keyboard. Entries written before the field existed have none and
+      verify as before; read them as declared.
 """
 
 from __future__ import annotations
@@ -55,6 +69,10 @@ STATUS_TRUNCATED = "truncated"
 STATUS_UNKEYED = "unkeyed"
 STATUS_KEY_UNAVAILABLE = "key_unavailable"
 STATUS_ARTIFACT_CHANGED = "artifact_changed"
+STATUS_DECISION_CHANGED = "decision_changed"
+
+# Phase whose reviewer decisions a gate approval of each artifact seals.
+ARTIFACT_PHASE = {"racm_plan": 1, "working_papers": 2, "final_report": 3}
 
 
 def _canonical(value: Any) -> bytes:
@@ -133,6 +151,29 @@ def artifact_digest(artifact: Any) -> str:
     return hashlib.sha256(_canonical(artifact)).hexdigest()
 
 
+def decision_digest(decision: Any) -> str:
+    """SHA-256 over the canonical JSON of one reviewer decision."""
+    return artifact_digest(decision)
+
+
+def decisions_digest(decisions: Iterable[Any]) -> str:
+    """SHA-256 over the canonical JSON list of reviewer decisions, in order."""
+    return hashlib.sha256(
+        _canonical(
+            [
+                d.model_dump(mode="json") if hasattr(d, "model_dump") else d
+                for d in decisions
+            ]
+        )
+    ).hexdigest()
+
+
+def _decision_fields(decision: Any) -> Mapping[str, Any]:
+    if hasattr(decision, "model_dump"):
+        return decision.model_dump(mode="json")
+    return decision if isinstance(decision, Mapping) else {}
+
+
 def _result(
     status: str,
     trail: list[Mapping[str, Any]],
@@ -143,6 +184,7 @@ def _result(
     anchored: bool = False,
     detail: str = "",
     changed: Optional[list[str]] = None,
+    decisions_changed: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     count, head_hash = head(trail)
     return {
@@ -155,6 +197,7 @@ def _result(
         "anchored": anchored,
         "head_hash": head_hash,
         "changed_since_approval": changed or [],
+        "decisions_changed": decisions_changed or [],
         "detail": detail,
     }
 
@@ -163,6 +206,7 @@ def verify_trail(
     trail: list[Mapping[str, Any]],
     anchor: Optional[Mapping[str, Any]] = None,
     artifacts: Optional[Mapping[str, Any]] = None,
+    decisions: Optional[Iterable[Any]] = None,
 ) -> dict[str, Any]:
     """Recompute the chain and report the first problem found.
 
@@ -174,6 +218,11 @@ def verify_trail(
         artifacts: optional ``{field_name: artifact}`` (``racm_plan`` …); each
             gate approval records the digest of the artifact it approved, and
             a mismatch is reported as ``artifact_changed``.
+        decisions: optional reviewer decisions as stored (models or dicts).
+            Each must match the ``decision_digest`` of its ``review_decision``
+            entry (else ``decision_changed``), and each gate approval's
+            ``decisions_digest`` must still match the decisions it sealed
+            (else ``artifact_changed`` for that gate).
 
     Returns a dict with ``ok``, ``status`` (see the ``STATUS_*`` constants),
     ``first_broken_index`` and diagnostic fields.
@@ -305,7 +354,15 @@ def verify_trail(
             ),
         )
 
-    changed = changed_since_approval(trail, artifacts) if artifacts is not None else []
+    decision_list = list(decisions) if decisions is not None else None
+    changed = (
+        changed_since_approval(trail, artifacts, decision_list)
+        if artifacts is not None
+        else []
+    )
+    decision_problems = (
+        decisions_changed(trail, decision_list) if decision_list is not None else []
+    )
     if changed:
         return _result(
             STATUS_ARTIFACT_CHANGED,
@@ -314,9 +371,24 @@ def verify_trail(
             keyed=all_keyed,
             anchored=anchored,
             changed=changed,
+            decisions_changed=decision_problems,
             detail=(
-                "The chain is intact, but these approved artifacts no longer match "
-                "the digest recorded at approval: " + ", ".join(changed) + "."
+                "The chain is intact, but these approved artifacts (or the "
+                "reviewer decisions sealed with them) no longer match the digest "
+                "recorded at approval: " + ", ".join(changed) + "."
+            ),
+        )
+    if decision_problems:
+        return _result(
+            STATUS_DECISION_CHANGED,
+            trail,
+            legacy_entries=first,
+            keyed=all_keyed,
+            anchored=anchored,
+            decisions_changed=decision_problems,
+            detail=(
+                "The chain is intact, but reviewer decisions do not match their "
+                "trail entries: " + "; ".join(decision_problems) + "."
             ),
         )
 
@@ -342,22 +414,80 @@ def verify_trail(
 
 
 def changed_since_approval(
-    trail: Iterable[Mapping[str, Any]], artifacts: Mapping[str, Any]
+    trail: Iterable[Mapping[str, Any]],
+    artifacts: Mapping[str, Any],
+    decisions: Optional[Iterable[Any]] = None,
 ) -> list[str]:
     """Gate labels whose approved artifact no longer matches its digest.
 
-    Only the latest approval per artifact counts.
+    Only the latest approval per artifact counts. With ``decisions``, an
+    approval that recorded a ``decisions_digest`` is also checked: the
+    decisions of that phase recorded before the approval (in trail order)
+    must still exist and hash to it. Decisions recorded after the approval
+    (management responses after COMPLETED) are not part of it.
     """
-    latest: dict[str, tuple[str, str]] = {}
+    latest: dict[str, tuple[str, str, Optional[str], list[str]]] = {}
+    recorded: dict[int, list[str]] = {}
     for e in trail:
-        if e.get("action") == "gate_approval" and e.get("artifact_digest"):
-            latest[str(e.get("artifact", ""))] = (
+        if e.get("action") == "review_decision":
+            try:
+                phase = int(str(e.get("phase", "")))
+            except ValueError:
+                continue
+            recorded.setdefault(phase, []).append(str(e.get("decision_id", "")))
+        elif e.get("action") == "gate_approval" and e.get("artifact_digest"):
+            field = str(e.get("artifact", ""))
+            sealed = e.get("decisions_digest")
+            latest[field] = (
                 str(e.get("gate", "")),
                 str(e["artifact_digest"]),
+                str(sealed) if sealed else None,
+                list(recorded.get(ARTIFACT_PHASE.get(field, 0), [])),
             )
+    by_id: dict[str, Mapping[str, Any]] = {}
+    for d in decisions or []:
+        fields = _decision_fields(d)
+        by_id[str(fields.get("decision_id", ""))] = fields
     changed = []
-    for field, (gate, digest) in latest.items():
+    for field, (gate, digest, sealed, ids) in latest.items():
         current = artifacts.get(field)
         if current is None or not hmac.compare_digest(artifact_digest(current), digest):
             changed.append(gate)
+            continue
+        if sealed is None or decisions is None:
+            continue
+        if any(i not in by_id for i in ids) or not hmac.compare_digest(
+            decisions_digest([by_id[i] for i in ids]), sealed
+        ):
+            changed.append(gate)
     return changed
+
+
+def decisions_changed(
+    trail: Iterable[Mapping[str, Any]], decisions: Iterable[Any]
+) -> list[str]:
+    """Reviewer decisions that do not match their ``review_decision`` entry.
+
+    Reports a decision with no trail entry (added outside the flow), one
+    whose content no longer hashes to its recorded ``decision_digest``
+    (edited), and a trail entry whose decision is gone (removed).
+    """
+    recorded: dict[str, str] = {}
+    for e in trail:
+        if e.get("action") == "review_decision" and e.get("decision_id"):
+            recorded[str(e["decision_id"])] = str(e.get("decision_digest", ""))
+    problems: list[str] = []
+    seen: set[str] = set()
+    for d in decisions:
+        fields = _decision_fields(d)
+        did = str(fields.get("decision_id", ""))
+        seen.add(did)
+        label = f"decision {did} ({fields.get('decision_type', '?')} on {fields.get('subject_id', '?')})"
+        if did not in recorded:
+            problems.append(f"{label} has no trail entry")
+        elif not hmac.compare_digest(decision_digest(fields), recorded[did]):
+            problems.append(f"{label} was changed after it was recorded")
+    for did in recorded:
+        if did not in seen:
+            problems.append(f"decision {did} is in the trail but was removed")
+    return problems

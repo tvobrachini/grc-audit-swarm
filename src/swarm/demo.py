@@ -14,6 +14,12 @@ DEMO_MODE is refused in ``ENVIRONMENT=production`` / ``staging`` (see
 
 ``DEMO_QA_REJECT_PHASE=n`` (1-3) makes the demo QA reviewer reject phase *n*
 until a human retries it, so the retry and QA-override paths can be demoed.
+
+Reviewer decisions (ADR-011) are never made by the demo: the flow waits at
+each gate for a person to record them. :func:`demo_review_decisions` holds
+the example decisions of the scripted walk-through
+(``scripts/demo_walkthrough.py``) that a person, or that script acting as
+one, posts to ``/api/sessions/{id}/decisions``.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ import os
 import re
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
@@ -686,3 +692,163 @@ class DemoCrew:
             outputs.append(SimpleNamespace(name=task_name, pydantic=pydantic))
         logger.info("DEMO_MODE: phase %d crew replaced with demo output", self.phase)
         return SimpleNamespace(tasks_output=outputs)
+
+
+# ── Example reviewer decisions for the scripted walk-through ────────────────
+
+
+def demo_review_decisions(
+    stage: str, effective: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Example decisions a reviewer records in the demo walk-through.
+
+    Never applied by the application. ``stage`` is ``"gate2"`` (before
+    approving Gate 2), ``"gate3"`` (before approving Gate 3) or
+    ``"after_issue"`` (management responses after COMPLETED);
+    ``effective`` is the session's effective view as returned by the API
+    (``GET /api/sessions/{id}`` → ``effective``). Each item is a request
+    body for ``POST /api/sessions/{id}/decisions`` without ``decided_by``.
+    """
+    label = f"[{DEMO_LABEL}]"
+    out: list[dict[str, Any]] = []
+    findings = effective.get("findings") or []
+    deficiencies = effective.get("deficiencies") or []
+    if stage == "gate2":
+        for f in findings:
+            if not f.get("review_required_for_gate_2") or f.get("review"):
+                continue
+            result = f["draft"]["result"]
+            if result == "Exception":
+                note = "Exception agreed to the verified vault quote."
+            elif result == "Not tested":
+                note = (
+                    "Agreed that no evidence covers this control; it will be "
+                    "reported as a scope limitation."
+                )
+            else:
+                note = (
+                    "Design evidence agrees to the test step; the ToE gap is "
+                    "stated in the working paper."
+                )
+            out.append(
+                {
+                    "decision_type": "sign_off",
+                    "subject_id": f["control_id"],
+                    "rationale": f"{label} {note}",
+                }
+            )
+    elif stage == "gate3":
+        risk_rating = effective.get("deficiency_scale") == "Risk rating"
+        for d in deficiencies:
+            if d.get("classification_decision"):
+                continue
+            if risk_rating:
+                out.append(
+                    {
+                        "decision_type": "classify",
+                        "subject_id": d["deficiency_id"],
+                        "values": {
+                            "classification": "High",
+                            "likelihood": "High",
+                            "magnitude": "High",
+                        },
+                        "rationale": (
+                            f"{label} The data owner confirmed that the public "
+                            "bucket holds customer exports, so magnitude is High; "
+                            "the draft left it Medium pending that confirmation."
+                        ),
+                    }
+                )
+            else:
+                out.append(
+                    {
+                        "decision_type": "classify",
+                        "subject_id": d["deficiency_id"],
+                        "values": dict(d["draft"]),
+                        "rationale": f"{label} Agree with the draft classification.",
+                    }
+                )
+            if not d.get("writeup"):
+                out.append(
+                    {
+                        "decision_type": "writeup",
+                        "subject_id": d["deficiency_id"],
+                        "values": {
+                            "criteria": (
+                                f"{label} S3 Block Public Access is enabled at "
+                                "account level and on every bucket (RACM control)."
+                            ),
+                            "condition": (
+                                f"{label} One of three buckets is readable by "
+                                "anyone through an ACL; Block Public Access is off "
+                                "at account and bucket level."
+                            ),
+                            "cause": (
+                                f"{label} No guardrail enforces Block Public "
+                                "Access for new or changed buckets."
+                            ),
+                            "effect": (
+                                f"{label} Customer exports can be read without "
+                                "authentication."
+                            ),
+                            "recommendation": (
+                                f"{label} Enable account-level Block Public Access "
+                                "and remove the public ACL; add a preventive "
+                                "guardrail."
+                            ),
+                        },
+                    }
+                )
+        for f in findings:
+            if (
+                f.get("key_control")
+                and f["effective"]["result"] == "Not tested"
+                and not f.get("scope_limitation")
+            ):
+                out.append(
+                    {
+                        "decision_type": "scope_limitation",
+                        "subject_id": f["control_id"],
+                        "rationale": (
+                            f"{label} {f['control_id']} was not tested: its "
+                            "evidence is held outside AWS. Reported as a scope "
+                            "limitation; no conclusion is given on it."
+                        ),
+                    }
+                )
+        if not effective.get("engagement_conclusion"):
+            out.append(
+                {
+                    "decision_type": "engagement_conclusion",
+                    "subject_id": "engagement",
+                    "values": {"conclusion": "Needs improvement"},
+                    "rationale": (
+                        f"{label} One high-rated deficiency and one key control "
+                        "not tested; the password policy is designed effectively."
+                    ),
+                }
+            )
+    elif stage == "after_issue":
+        for d in deficiencies:
+            if d.get("management_response"):
+                continue
+            out.append(
+                {
+                    "decision_type": "management_response",
+                    "subject_id": d["deficiency_id"],
+                    "values": {
+                        "text": (
+                            f"{label} Agreed. Account-level Block Public Access "
+                            "will be enabled and the ACL removed."
+                        ),
+                        "agreement": "agree",
+                        "action_owner_role": "Cloud Platform Engineering Lead",
+                        "target_date": "2026-12-31",
+                        "received_from": "Head of Cloud Platform (demo)",
+                        "received_on": "2026-10-01",
+                    },
+                }
+            )
+    else:
+        raise ValueError("stage must be gate2, gate3 or after_issue")
+    return out

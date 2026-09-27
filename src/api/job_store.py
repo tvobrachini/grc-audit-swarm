@@ -61,6 +61,12 @@ def remove_flow(session_id: str) -> None:
         _event_queues.pop(session_id, None)
 
 
+def peek_queue(session_id: str) -> Optional[asyncio.Queue]:
+    """Return the session's event queue if one exists, without creating it."""
+    with _queues_lock:
+        return _event_queues.get(session_id)
+
+
 def get_queue(session_id: str) -> asyncio.Queue:
     # First, try to get the queue without holding the lock for long if we need to create it safely
     with _queues_lock:

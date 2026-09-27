@@ -44,7 +44,7 @@ describe("ReportView", () => {
     expect(screen.getByText(/IAM access review not evidenced quarterly/)).toBeInTheDocument();
     expect(screen.getByText("Significant Deficiency")).toBeInTheDocument();
     expect(screen.getByText(/One quarter of the review was not performed/)).toBeInTheDocument();
-    expect(screen.getByText(/auditor's judgement at Gate/)).toBeInTheDocument();
+    expect(screen.getByText(/reviewer's classification/)).toBeInTheDocument();
   });
 
   it("renders nothing about deficiencies when there are none", () => {

@@ -178,19 +178,37 @@ def _bpa_layer(settings: dict | None = None, *, error: str | None = None) -> dic
     }
 
 
-def get_account_bpa(sts, s3control) -> dict:
-    """Read account-level Block Public Access.
+def get_caller_identity(sts) -> tuple[str | None, str | None]:
+    """(account_id, arn) from sts:GetCallerIdentity (needs no IAM permission).
 
-    The account ID comes from sts:GetCallerIdentity (which needs no IAM
-    permission). It is used only for the S3 Control call and is never
-    returned or logged.
+    ``(None, None)`` if the call fails (logged, redacted). The arn has its
+    account id redacted before it is returned, so it can be recorded as
+    evidence-collection provenance (see ``swarm.evidence.register_evidence``)
+    without that id ever leaving this function; the raw ``account_id`` is
+    used only for the S3 Control BPA call in :func:`get_account_bpa` and is
+    never itself returned to a caller outside this module's collection path.
     """
     try:
-        account_id = sts.get_caller_identity()["Account"]
-    except (ClientError, BotoCoreError, KeyError) as e:
-        text = describe_error(e) if not isinstance(e, KeyError) else "no Account"
-        logger.warning("GetCallerIdentity failed: %s", text)
-        return _bpa_layer(error=f"GetCallerIdentity failed ({text})")
+        identity = sts.get_caller_identity()
+    except (ClientError, BotoCoreError) as e:
+        logger.warning("GetCallerIdentity failed: %s", describe_error(e))
+        return None, None
+    account_id = identity.get("Account")
+    arn = identity.get("Arn")
+    return account_id, (_redact_account_ids(arn) if isinstance(arn, str) else None)
+
+
+def get_account_bpa(account_id: str | None, s3control) -> dict:
+    """Read account-level Block Public Access for ``account_id``.
+
+    ``account_id`` comes from :func:`get_caller_identity`; pass ``None`` when
+    that call failed (reported as an unknown layer here, not raised).
+    """
+    if account_id is None:
+        return _bpa_layer(
+            error="GetCallerIdentity failed (no account id available for the "
+            "S3 Control call)"
+        )
     try:
         resp = s3control.get_public_access_block(AccountId=account_id)
     except ClientError as e:
@@ -378,8 +396,14 @@ def _list_bucket_names(s3) -> list[str]:
 
 
 def collect_s3_public_access(s3, s3control, sts) -> dict:
-    """Evaluate every bucket in the account. Raises if buckets cannot be listed."""
-    account_bpa = get_account_bpa(sts, s3control)
+    """Evaluate every bucket in the account. Raises if buckets cannot be listed.
+
+    ``CallerIdentityArn`` (account id already redacted, or ``None`` if
+    GetCallerIdentity failed) is included for evidence provenance — see
+    :func:`get_caller_identity`.
+    """
+    account_id, caller_arn = get_caller_identity(sts)
+    account_bpa = get_account_bpa(account_id, s3control)
     names = _list_bucket_names(s3)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -400,4 +424,5 @@ def collect_s3_public_access(s3, s3control, sts) -> dict:
             "unknown": sum(1 for r in results if r["Verdict"] == "UNKNOWN"),
         },
         "Notes": [S3_SCOPE_NOTE],
+        "CallerIdentityArn": caller_arn,
     }

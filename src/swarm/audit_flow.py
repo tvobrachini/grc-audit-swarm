@@ -1,9 +1,16 @@
+import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, UTC
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from pathlib import Path
 from typing import Any, Callable, Optional
 
-from swarm.state.schema import AuditState  # noqa: F401 (re-exported for backwards compat)
+from swarm.state.schema import (  # noqa: F401 (re-exported for backwards compat)
+    AuditState,
+    GenerationRun,
+)
 from swarm.state.machine import (
     AuditStatus,
     AuditStateMachine,
@@ -13,23 +20,41 @@ from swarm.crews.planning_crew import PlanningCrew
 from swarm.crews.fieldwork_crew import FieldworkCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
-from swarm.demo import DemoCrew, demo_mode_enabled, demo_reject_phase
-from swarm.evidence import unverified_findings
+from swarm.demo import (
+    DemoCrew,
+    demo_mode_enabled,
+    demo_mode_requested,
+    demo_reject_phase,
+)
+from swarm.evidence import app_version as evidence_app_version, unverified_findings
 from swarm.review_policy import (
+    MissingReviewDecisionsError,
     ReviewBlockedError,
     SegregationOfDutiesError,
     UnverifiedEvidenceError,
     sod_violation,
 )
+from swarm.review_decisions import (
+    DecisionConflictError,
+    DecisionContext,
+    DecisionValidationError,
+    EffectiveView,
+    build_decision,
+    decision_states,
+    effective_view,
+)
 from swarm import trail as audit_trail
-from swarm.schema import DeficiencyScale
+from swarm.schema import DeficiencyScale, IdentitySource, ReviewDecision
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "AuditFlow",
     "AuditState",
+    "DecisionConflictError",
+    "DecisionValidationError",
     "InvalidTransitionError",
+    "MissingReviewDecisionsError",
     "PhaseArtifactMissingError",
     "QA_UNPARSEABLE_REASON",
     "ReviewBlockedError",
@@ -116,10 +141,80 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# ── Generation provenance (see DECISIONS.md, ADR-010) ──────────────────────
+
+_CONFIG_DIR = Path(__file__).parent / "config"
+# Per phase: the agent/task YAML files whose content is fingerprinted.
+_PHASE_CONFIG_FILES: dict[int, tuple[str, str]] = {
+    1: ("planning_agents.yaml", "planning_tasks.yaml"),
+    2: ("fieldwork_agents.yaml", "fieldwork_tasks.yaml"),
+    3: ("reporting_agents.yaml", "reporting_tasks.yaml"),
+}
+
+
+def prompt_fingerprint(phase: int, skill_context: list[Any]) -> str:
+    """Deterministic SHA-256 fingerprint of the prompts a phase run used.
+
+    Covers the phase's agent and task YAML config files (raw bytes, as
+    loaded by the crew) and the specialist prompt text injected into an
+    agent's backstory for any active domain skill (``skill_loader
+    .get_specialist_prompt``), in that order. The same config files plus the
+    same active skills always hash to the same value; a change to either
+    changes it. Each part is length-prefixed before hashing so that
+    concatenating differently split content can never collide.
+
+    Only the *prompt* fingerprint changes on a skill toggle or a config edit;
+    a difference does not by itself mean the model call itself was
+    different — see ADR-010 for what this can and cannot prove.
+    """
+    parts: list[bytes] = [
+        (_CONFIG_DIR / name).read_bytes() for name in _PHASE_CONFIG_FILES[phase]
+    ]
+    if skill_context:
+        from swarm.skill_loader import get_specialist_prompt
+
+        parts.append(get_specialist_prompt(skill_context).encode("utf-8"))
+    digest = hashlib.sha256()
+    for part in parts:
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return digest.hexdigest()
+
+
+def _crewai_version() -> str:
+    try:
+        return _pkg_version("crewai")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+# Fixed at import time: it cannot change while the process is running.
+_CREWAI_VERSION = _crewai_version()
+_APP_VERSION = evidence_app_version()
+
+# Crew / QA temperatures, matching the crews' Agent construction
+# (swarm.crews.*_crew): base agents at 0.1, QA reviewers at 0.0. Recorded
+# here so a generation run states the temperature it used without having to
+# re-derive it from the crew classes.
+_CREW_TEMPERATURE = 0.1
+_QA_TEMPERATURE = 0.0
+
+
 def _require_text(value: str, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{what} is required")
     return value.strip()
+
+
+def _identity_source(value: str) -> str:
+    """Validated ``identity_source`` (declared | authenticated; ADR-012)."""
+    try:
+        return IdentitySource(value).value
+    except ValueError as exc:
+        raise ValueError(
+            "identity_source must be one of: "
+            + ", ".join(s.value for s in IdentitySource)
+        ) from exc
 
 
 def _control_attributes(control: Any) -> str:
@@ -328,16 +423,103 @@ class AuditFlow:
 
     # ── Gate helpers (call synchronously before the phase thread) ────────────
 
-    def _stamp_trail(self, gate: str, human_id: str, action: str, **extra: str) -> None:
-        """Append a hash-chained entry to the approval trail (append-only)."""
+    def _stamp_trail(
+        self,
+        gate: str,
+        human_id: str,
+        action: str,
+        *,
+        identity_source: str = IdentitySource.DECLARED.value,
+        **extra: str,
+    ) -> None:
+        """Append a hash-chained entry to the approval trail (append-only).
+
+        ``identity_source`` says whether ``human`` was typed by the caller
+        (``declared``) or taken from a reviewer token (``authenticated``,
+        ADR-012); like every field, it is covered by the entry's hash.
+        """
         entry = {
             "gate": gate,
             "human": human_id,
             "timestamp": _now(),
             "action": action,
+            "identity_source": _identity_source(identity_source),
         }
         entry.update(extra)
         audit_trail.append_entry(self.state.approval_trail, entry)
+
+    # ── Generation provenance ────────────────────────────────────────────────
+
+    def _start_generation_run(self, phase: int) -> GenerationRun:
+        """Begin recording generation provenance for one phase run.
+
+        Appended to ``state.generation_runs`` immediately (``outcome`` starts
+        as ``"running"``) so a run is recorded even if the crew never
+        returns; ``_run_crew_with_qa`` fills in ``attempts``, ``ended_at``
+        and the final ``outcome`` as the run progresses.
+
+        Uses ``demo_mode_requested`` (never raises) rather than
+        ``demo_mode_enabled`` (raises when DEMO_MODE is set in a blocked
+        environment): that guard's raise must surface from inside the crew
+        build/kickoff try/except in ``_run_crew_with_qa`` exactly as before,
+        not here, before a run record even exists.
+        """
+        demo = demo_mode_requested()
+        if demo:
+            crew_info = {"provider": "demo", "model": "fixed-content"}
+            qa_info = {"provider": "demo", "model": "fixed-content"}
+        else:
+            from swarm.llm_factory import describe_crew_llm, describe_qa_llm
+
+            try:
+                crew_info = describe_crew_llm()
+            except Exception:
+                # No provider configured: the crew build that follows raises
+                # the same error and is handled there (_fail_phase). This
+                # run record still gets stamped so the failed attempt has one.
+                crew_info = {"provider": "unknown", "model": "unknown"}
+            try:
+                qa_info = describe_qa_llm()
+            except Exception:
+                qa_info = {"provider": "unknown", "model": "unknown"}
+        run = GenerationRun(
+            run_id=str(uuid.uuid4()),
+            phase=phase,
+            provider=crew_info["provider"],
+            model=crew_info["model"],
+            qa_provider=qa_info["provider"],
+            qa_model=qa_info["model"],
+            temperature=0.0 if demo else _CREW_TEMPERATURE,
+            qa_temperature=0.0 if demo else _QA_TEMPERATURE,
+            crewai_version=_CREWAI_VERSION,
+            app_version=_APP_VERSION,
+            prompt_fingerprint=prompt_fingerprint(phase, self._skill_context),
+            started_at=_now(),
+            demo_mode=demo,
+        )
+        self.state.generation_runs.append(run)
+        return run
+
+    def _latest_run_for_phase(self, phase: int) -> Optional[GenerationRun]:
+        for run in reversed(self.state.generation_runs):
+            if run.phase == phase:
+                return run
+        return None
+
+    def _run_provenance_extra(self, phase: int) -> dict[str, str]:
+        """Trail-entry fields tying an action to the generation run it acted
+        on: the run id, its prompt fingerprint, and its provider/model —
+        enough to say exactly what was reviewed (see ADR-010). Empty when no
+        run has been recorded yet for this phase (e.g. a snapshot from
+        before this field existed)."""
+        run = self._latest_run_for_phase(phase)
+        if run is None:
+            return {}
+        return {
+            "generation_run_id": run.run_id,
+            "generation_prompt_fingerprint": run.prompt_fingerprint,
+            "generation_model": f"{run.provider}/{run.model}",
+        }
 
     def verify_trail(self, anchor: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Verify the approval trail's hash chain (see :mod:`swarm.trail`).
@@ -348,21 +530,157 @@ class AuditFlow:
             self.state.approval_trail,
             anchor=anchor,
             artifacts={f: getattr(self.state, f) for f in _ARTIFACT_FIELDS.values()},
+            decisions=self.state.review_decisions,
         )
 
-    def record_preparer(self, prepared_by: str) -> None:
+    def record_preparer(
+        self,
+        prepared_by: str,
+        *,
+        require_review_decisions: bool = False,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Set the audit's preparer and record it as the trail's first entry.
 
         Call once, when the audit is created (before ``begin_phase_1``).
+        ``require_review_decisions`` turns on the reviewer-decision gate
+        preconditions for this audit (ADR-011); the API always sets it. It
+        is recorded in the chained ``audit_created`` entry, so editing the
+        stored flag does not lift it. ``identity_source`` records whether
+        the preparer's name was typed or taken from a reviewer token.
 
         Raises:
             ValueError: if ``prepared_by`` is blank or a preparer is already set.
         """
         prepared_by = _require_text(prepared_by, "prepared_by")
+        identity_source = _identity_source(identity_source)
         if self.state.prepared_by:
             raise ValueError("prepared_by is already set for this audit")
         self.state.prepared_by = prepared_by
-        self._stamp_trail("Audit created", prepared_by, "audit_created")
+        extra = (
+            {"review_decisions_required": "true"} if require_review_decisions else {}
+        )
+        self.state.review_decisions_required = require_review_decisions
+        self._stamp_trail(
+            "Audit created",
+            prepared_by,
+            "audit_created",
+            identity_source=identity_source,
+            **extra,
+        )
+
+    # ── Reviewer decisions (ADR-011) ─────────────────────────────────────────
+
+    def review_decisions_required(self) -> bool:
+        """Whether gate approvals need reviewer decisions on this audit.
+
+        True if the stored flag or the chained ``audit_created`` entry says
+        so (either is enough, like the preparer check).
+        """
+        return self.state.review_decisions_required or any(
+            e.get("action") == "audit_created"
+            and e.get("review_decisions_required") == "true"
+            for e in self.state.approval_trail
+        )
+
+    def decision_context(self) -> DecisionContext:
+        return DecisionContext(
+            racm=self.state.racm_plan,
+            papers=self.state.working_papers,
+            report=self.state.final_report,
+        )
+
+    def effective_view(self) -> EffectiveView:
+        """AI drafts plus the active reviewer decisions (the conclusion of record)."""
+        return effective_view(
+            self.decision_context(),
+            self.state.review_decisions,
+            decisions_required=self.review_decisions_required(),
+        )
+
+    def decision_states(self) -> dict[str, str]:
+        """``decision_id`` -> active / superseded / stale."""
+        return dict(
+            decision_states(self.decision_context(), self.state.review_decisions)
+        )
+
+    def record_decision(
+        self,
+        *,
+        decision_type: str,
+        subject_id: str,
+        decided_by: str,
+        values: Optional[dict[str, Any]] = None,
+        rationale: str = "",
+        subject_type: Optional[str] = None,
+        supersedes: Optional[str] = None,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> ReviewDecision:
+        """Append one reviewer decision and stamp it in the trail.
+
+        Validation and policy are in
+        :func:`swarm.review_decisions.build_decision`; nothing is stored or
+        stamped when it raises. The AI drafts are never changed.
+        ``identity_source`` (declared | authenticated) is stored on the
+        decision and on its trail entry.
+
+        Raises:
+            DecisionValidationError: bad input (HTTP 422).
+            DecisionConflictError: wrong status / policy / supersede conflict
+                (HTTP 409).
+            SegregationOfDutiesError: the preparer may not record this type.
+        """
+        decision = build_decision(
+            self.decision_context(),
+            status=self.machine.status.value,
+            preparers=self._preparers(),
+            decisions=self.state.review_decisions,
+            decision_type=decision_type,
+            subject_id=subject_id,
+            decided_by=decided_by,
+            values=values,
+            rationale=rationale,
+            subject_type=subject_type,
+            supersedes=supersedes,
+            identity_source=identity_source,
+            now=_now(),
+        )
+        self.state.review_decisions.append(decision)
+        extra = {
+            "phase": str(decision.phase),
+            "decision_id": decision.decision_id,
+            "decision_digest": audit_trail.decision_digest(decision),
+            "decision_type": str(decision.decision_type),
+            "subject": f"{decision.subject_type}:{decision.subject_id}",
+            "artifact": decision.artifact,
+        }
+        if decision.supersedes:
+            extra["supersedes"] = decision.supersedes
+        self._stamp_trail(
+            f"Review decision ({_PHASE_LABELS[decision.phase]})",
+            decision.decided_by,
+            "review_decision",
+            identity_source=str(decision.identity_source),
+            **extra,
+        )
+        return decision
+
+    def _phase_decisions(self, phase: int) -> list[ReviewDecision]:
+        return [d for d in self.state.review_decisions if d.phase == phase]
+
+    def _check_review_decisions(self, gate: int) -> None:
+        if gate not in (2, 3) or not self.review_decisions_required():
+            return
+        missing = self.effective_view().missing_for_gate.get(str(gate), [])
+        if missing:
+            listed = "; ".join(
+                f"{m.subject_type} {m.subject_id}: {' or '.join(m.required)}"
+                for m in missing
+            )
+            raise MissingReviewDecisionsError(
+                f"{_GATE_LABELS[gate]} needs reviewer decisions first: {listed}.",
+                [m.model_dump() for m in missing],
+            )
 
     def _preparers(self) -> list[str]:
         """The declared preparer, from state and from the chained trail entry.
@@ -430,12 +748,18 @@ class AuditFlow:
                 "fieldwork for rework, or have the evidence restored."
             )
 
-    def _approve_gate(self, gate: int, human_id: str) -> None:
+    def _approve_gate(
+        self,
+        gate: int,
+        human_id: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Validate, apply policy, transition, then stamp — in that order.
 
         Nothing is transitioned or stamped when any check fails.
         """
         human_id = _require_text(human_id, "human_id")
+        identity_source = _identity_source(identity_source)
         target = {
             1: AuditStatus.RUNNING_PHASE_2,
             2: AuditStatus.RUNNING_PHASE_3,
@@ -451,6 +775,18 @@ class AuditFlow:
             raise PhaseArtifactMissingError(
                 f"{_GATE_LABELS[gate]} has no {field} to approve."
             )
+        self._check_review_decisions(gate)
+
+        # The approval seals the artifact and the decisions of this phase
+        # recorded so far (a later change to either is reported by
+        # verify_trail as a change since approval).
+        sealed: dict[str, str] = {}
+        if gate in (2, 3):
+            phase_decisions = self._phase_decisions(gate)
+            sealed = {
+                "decisions_digest": audit_trail.decisions_digest(phase_decisions),
+                "decisions_count": str(len(phase_decisions)),
+            }
 
         transition = {
             1: self.machine.approve_gate_1,
@@ -463,8 +799,11 @@ class AuditFlow:
             _GATE_LABELS[gate],
             human_id,
             "gate_approval",
+            identity_source=identity_source,
             artifact=field,
             artifact_digest=audit_trail.artifact_digest(artifact),
+            **sealed,
+            **self._run_provenance_extra(gate),
         )
         if gate == 3:
             self.state.current_human_dossier = (
@@ -483,7 +822,9 @@ class AuditFlow:
         self._commit_status()
         self.state.current_human_dossier = "Planning is running."
 
-    def begin_phase_2(self, human_id: str) -> None:
+    def begin_phase_2(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 1 approval: transition to RUNNING_PHASE_2, then stamp the trail.
 
         Raises:
@@ -493,12 +834,15 @@ class AuditFlow:
             PhaseArtifactMissingError: if there is no RACM to approve.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(1, human_id)
+        self._approve_gate(1, human_id, identity_source)
 
-    def begin_phase_3(self, human_id: str) -> None:
+    def begin_phase_3(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 2 approval: transition to RUNNING_PHASE_3, then stamp the trail.
 
-        Re-runs the deterministic evidence check first.
+        Re-runs the deterministic evidence check first, then (when the audit
+        requires them) checks the reviewer decisions Gate 2 needs.
 
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_2.
@@ -506,22 +850,32 @@ class AuditFlow:
             UnverifiedEvidenceError: if a finding's quote no longer verifies
                 (and was not accepted by a supervisor override of these
                 exact working papers).
+            MissingReviewDecisionsError: if required sign-offs are missing.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(2, human_id)
+        self._approve_gate(2, human_id, identity_source)
 
-    def finalize_audit(self, human_id: str) -> None:
+    def finalize_audit(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 3 approval: mark the audit COMPLETED, then stamp the trail.
 
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_3.
             SegregationOfDutiesError: if ``human_id`` prepared the audit or
                 approved Gate 2 (see ``review_policy.DISTINCT_APPROVER_GATES``).
+            MissingReviewDecisionsError: if required classifications, scope
+                limitations or the engagement conclusion are missing.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(3, human_id)
+        self._approve_gate(3, human_id, identity_source)
 
-    def retry_phase(self, phase: int, human_id: str) -> None:
+    def retry_phase(
+        self,
+        phase: int,
+        human_id: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Re-open a QA-rejected or errored phase: → RUNNING_PHASE_n.
 
         The caller then runs the matching ``generate_*`` method. The retry is
@@ -536,6 +890,7 @@ class AuditFlow:
         if phase not in _PHASE_LABELS:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
+        identity_source = _identity_source(identity_source)
         previous = self.machine.status.value
         self.machine.retry_phase(phase)
         self._commit_status()
@@ -543,15 +898,23 @@ class AuditFlow:
             f"Retry ({_PHASE_LABELS[phase]})",
             human_id,
             "retry",
+            identity_source=identity_source,
             previous_status=previous,
             previous_reason=self.state.qa_rejection_reason or "",
+            **self._run_provenance_extra(phase),
         )
         self.state.current_human_dossier = (
             f"{_PHASE_LABELS[phase]} retry requested by {human_id}; the phase is "
             "running again."
         )
 
-    def return_for_rework(self, phase: int, human_id: str, notes: str) -> None:
+    def return_for_rework(
+        self,
+        phase: int,
+        human_id: str,
+        notes: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Reviewer returns the phase at its gate: WAITING_HUMAN_GATE_n → RUNNING_PHASE_n.
 
         The review notes are recorded in the approval trail and fed to the
@@ -567,6 +930,7 @@ class AuditFlow:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
         notes = _require_text(notes, "notes")
+        identity_source = _identity_source(identity_source)
         self._require_transition(
             AuditStatus(f"RUNNING_PHASE_{phase}"),
             AuditStatus(f"WAITING_HUMAN_GATE_{phase}"),
@@ -579,10 +943,12 @@ class AuditFlow:
         extra = {"notes": notes, "artifact": field}
         if artifact is not None:
             extra["artifact_digest"] = audit_trail.artifact_digest(artifact)
+        extra.update(self._run_provenance_extra(phase))
         self._stamp_trail(
             f"Return for rework ({_PHASE_LABELS[phase]})",
             human_id,
             "return_for_rework",
+            identity_source=identity_source,
             **extra,
         )
         self.state.qa_rejection_reason = None
@@ -591,7 +957,13 @@ class AuditFlow:
             "The phase is re-running with these review notes."
         )
 
-    def override_qa_rejection(self, phase: int, human_id: str, reason: str) -> None:
+    def override_qa_rejection(
+        self,
+        phase: int,
+        human_id: str,
+        reason: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Supervisor override: accept a QA-rejected artifact as-is.
 
         Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n, so the normal human
@@ -610,6 +982,7 @@ class AuditFlow:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
         reason = _require_text(reason, "reason")
+        identity_source = _identity_source(identity_source)
         target = AuditStatus(f"WAITING_HUMAN_GATE_{phase}")
         self._require_transition(target, AuditStatus(f"QA_REJECTED_PHASE_{phase}"))
         self._check_sod("qa_override", human_id)
@@ -629,10 +1002,15 @@ class AuditFlow:
         unverified = self.unverified_evidence() if phase == 2 else []
         if unverified:
             extra["unverified_controls"] = ",".join(unverified)
+        extra.update(self._run_provenance_extra(phase))
         self.machine.override_qa(phase)
         self._commit_status()
         self._stamp_trail(
-            f"QA Override ({_PHASE_LABELS[phase]})", human_id, "qa_override", **extra
+            f"QA Override ({_PHASE_LABELS[phase]})",
+            human_id,
+            "qa_override",
+            identity_source=identity_source,
+            **extra,
         )
         self.state.qa_rejection_reason = None
         note = (
@@ -739,8 +1117,13 @@ class AuditFlow:
         rejection: Optional[str] = None
         qa_rejected = False
         artifact: Any = None
+        # Generation provenance for this attempted run (ADR-010): started
+        # now, filled in as the run progresses, and never removed even if
+        # every attempt fails.
+        gen_run = self._start_generation_run(phase)
 
         for attempt in range(1, _MAX_QA_ATTEMPTS + 1):
+            gen_run.attempts = attempt
             run = "crew" if attempt == 1 else "crew retry"
             try:
                 result = build_crew().kickoff(inputs=inputs)
@@ -749,6 +1132,8 @@ class AuditFlow:
                 artifact = adapter.get(artifact_task).pydantic
             except Exception as exc:
                 logger.exception("%s %s failed", label, run)
+                gen_run.ended_at = _now()
+                gen_run.outcome = "error"
                 self._fail_phase(phase, f"{label} {run} error: {exc}")
                 return False
 
@@ -786,6 +1171,8 @@ class AuditFlow:
             except Exception:
                 logger.warning("Rejected %s draft failed validation", field)
                 setattr(self.state, field, None)
+            gen_run.ended_at = _now()
+            gen_run.outcome = "qa_rejected"
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection
@@ -802,6 +1189,8 @@ class AuditFlow:
             return False
 
         if artifact is None:
+            gen_run.ended_at = _now()
+            gen_run.outcome = "error"
             self._fail_phase(
                 phase,
                 f"{label} crew produced no {field}: the output could not be "
@@ -812,8 +1201,12 @@ class AuditFlow:
             setattr(self.state, field, artifact)
         except Exception as exc:
             logger.exception("%s artifact failed validation", label)
+            gen_run.ended_at = _now()
+            gen_run.outcome = "error"
             self._fail_phase(phase, f"{label} crew produced an invalid {field}: {exc}")
             return False
+        gen_run.ended_at = _now()
+        gen_run.outcome = "qa_approved"
         return True
 
     # ── Crew construction ────────────────────────────────────────────────────
@@ -983,6 +1376,11 @@ class AuditFlow:
             "evidence vault. Review the working papers before approving Gate 2 "
             "(supervision step inspired by IIA Standard 12.3, formerly 2340)."
         )
+        if self.review_decisions_required():
+            self.state.current_human_dossier += (
+                " Record a sign-off or a challenge for every exception and every "
+                "key-control finding before approving."
+            )
 
     def generate_reporting(self, event_callback=None):
         """Phase 3 — Run the Reporting Crew to produce the Final Report.
@@ -1032,3 +1430,9 @@ class AuditFlow:
             "audit. Gate 3 must be approved by someone other than the Gate 2 "
             "approver."
         )
+        if self.review_decisions_required():
+            self.state.current_human_dossier += (
+                " Before approving, record your classification of each "
+                "deficiency, a scope limitation for each untested key control, "
+                "and the engagement conclusion."
+            )

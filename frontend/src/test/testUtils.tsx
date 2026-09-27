@@ -37,6 +37,9 @@ export function makeSession(overrides: Partial<SessionDetail> = {}): SessionDeta
     approval_trail: [],
     qa_rejection_reason: null,
     trail_verification: null,
+    review_decisions: [],
+    effective: null,
+    review_decisions_required: false,
     ...overrides,
   };
 }
