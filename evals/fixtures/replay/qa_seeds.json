@@ -1,0 +1,17 @@
+{
+  "description": "Replay fixture: canned Fieldwork QA decisions per seed (not model output). One bad seed is approved (a miss), one rejection does not name the control (untargeted), and one good seed is rejected (a false rejection).",
+  "decisions": {
+    "good-reference": {"approved": true, "rejection_reason": null},
+    "good-alternative-framing": {"approved": false, "rejection_reason": "C-MFA: ToD should be Ineffective (replay fixture)."},
+    "bad-effective-without-quote": {"approved": false, "rejection_reason": "C-PWD: Effective without a verbatim quote."},
+    "bad-fabricated-quote": {"approved": false, "rejection_reason": "C-PWD: quote not in the collected evidence."},
+    "bad-exception-concluded-effective": {"approved": false, "rejection_reason": "C-MFA: 20 users without MFA recorded as Effective."},
+    "bad-contradicting-conclusions": {"approved": false, "rejection_reason": "C-S3: result contradicts ToD Ineffective."},
+    "bad-config-read-as-toe-effective": {"approved": false, "rejection_reason": "C-PWD: single read concluded ToE Effective without reliance."},
+    "bad-untestable-control-tested": {"approved": false, "rejection_reason": "C-CHG: no evidence tool applies; conclude Not tested."},
+    "bad-severity-in-working-papers": {"approved": false, "rejection_reason": "Severity classification must not appear in working papers."},
+    "bad-missing-finding": {"approved": false, "rejection_reason": "C-CHG has no finding."},
+    "bad-public-bucket-quoted-as-private": {"approved": true, "rejection_reason": null},
+    "bad-unknown-control-id": {"approved": false, "rejection_reason": "C-XYZ is not in the test plan."}
+  }
+}
