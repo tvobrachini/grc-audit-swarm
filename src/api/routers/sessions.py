@@ -629,12 +629,34 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
         except MissingReviewDecisionsError as exc:
             # detail stays a string for existing clients; the structured
-            # list is alongside it.
+            # list is alongside it. Both are built from the missing list,
+            # not from the exception text.
+            missing = [
+                {
+                    k: m.get(k)
+                    for k in (
+                        "gate",
+                        "subject_type",
+                        "subject_id",
+                        "required",
+                        "reason",
+                    )
+                }
+                for m in exc.missing
+            ]
+            listed = "; ".join(
+                f"{m['subject_type']} {m['subject_id']}: "
+                f"{' or '.join(m['required'] or [])}"
+                for m in missing
+            )
             return JSONResponse(  # type: ignore[return-value]
                 status_code=409,
                 content={
-                    "detail": f"Cannot approve gate {req.gate_number}: {exc}",
-                    "missing_decisions": exc.missing,
+                    "detail": (
+                        f"Cannot approve gate {req.gate_number}: reviewer "
+                        f"decisions needed first: {listed}."
+                    ),
+                    "missing_decisions": missing,
                 },
             )
         except (ReviewBlockedError, PhaseArtifactMissingError) as exc:
