@@ -28,7 +28,8 @@ First tagged version. Summary of what the project does at this point:
 
 **Evaluation**
 - `tests/eval/` uses moto to seed a fresh in-memory AWS account with planted misconfigurations and checks the deterministic evidence tools against them (coverage, redaction, vault storage and quote verification), across password-policy, MFA and S3 public-access scenarios.
-- This evaluates the evidence-collection layer only. An LLM evaluation harness for the agents' conclusions and the quality of the working papers and report does not exist yet in this version; those results are pending.
+- That evaluates the evidence-collection layer only.
+- An LLM-layer evaluation harness (`evals/`, [docs/EVALUATION.md](docs/EVALUATION.md)): 13 scenarios planted in simulated AWS with a draft answer key, and metrics led by the false-pass rate (plus false fails, "Not tested" correctness, ToE basis, citation faithfulness, coverage, QA catch rate on seeded bad working papers, deficiency-classification agreement and run-to-run consistency). It is tested offline in replay mode. No real-model results are published in this version, and the answer key has not yet been reviewed by the owner.
 
 **Security and supply chain**
 - Bearer-token auth on all `/api/*` routes, CORS allow-list, non-root API container, nginx security headers, and a refusal to start with `DEMO_MODE=1` in `production`/`staging`.

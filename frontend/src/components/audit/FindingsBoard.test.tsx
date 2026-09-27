@@ -99,4 +99,23 @@ describe("FindingsBoard", () => {
     expect(screen.getByText(/1 × Exception/)).toBeInTheDocument();
     expect(screen.getByText(/1 × Not tested/)).toBeInTheDocument();
   });
+  it("counts ToE not tested separately so a clean result can't hide it", () => {
+    const base = {
+      exact_quote_from_evidence: "",
+      vault_id_reference: "",
+      test_conclusion: "x",
+      preliminary_deficiency: false,
+    };
+    renderWithClient(
+      <FindingsBoard
+        session={sessionWithFindings([
+          { ...base, control_id: "C1", tod_conclusion: "Effective", toe_conclusion: "Not tested", result: "No exception" },
+          { ...base, control_id: "C2", tod_conclusion: "Effective", toe_conclusion: "Effective", result: "No exception" },
+          { ...base, control_id: "C3", tod_conclusion: "Not tested", toe_conclusion: "Not tested", result: "Not tested" },
+        ])}
+      />
+    );
+    const stat = screen.getByText("ToE not tested").parentElement!;
+    expect(stat).toHaveTextContent("2");
+  });
 });

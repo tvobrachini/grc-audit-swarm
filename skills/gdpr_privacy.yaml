@@ -31,13 +31,6 @@ focus_domains:
   - Incident Response
   - Third-Party Risk Management
 
-mandatory_control_hints:
-  - PRI-01   # Privacy program
-  - PRI-02   # Data inventory and mapping
-  - PRI-04   # Consent management
-  - IR-02    # 72-hour breach notification
-  - TPM-01   # Third-party processor management
-
 specialist_system_prompt: |
   You are a certified Data Privacy Officer (DPO) and CIPP/E holder acting as a
   specialized IT Audit Specialist.

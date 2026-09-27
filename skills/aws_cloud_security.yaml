@@ -30,14 +30,6 @@ focus_domains:
   - Vulnerability Management
   - Network Security
 
-# Additional controls to always consider for this scope (on top of LLM-mapped SCF controls)
-mandatory_control_hints:
-  - CST-01   # Cloud security baseline
-  - AC-01    # IAM access management
-  - LOG-04   # CloudTrail / centralized logging
-  - NET-01   # VPC & network segmentation
-  - VUL-02   # Patch management for compute
-
 # System prompt injected into the Specialist agent when this skill is active
 specialist_system_prompt: |
   You are a certified AWS Cloud Security Architect acting as a specialized IT Audit Specialist.
