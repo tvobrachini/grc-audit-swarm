@@ -107,7 +107,7 @@ class TestImportProwlerFindings:
         from swarm.tools.findings_tools import import_prowler_findings
 
         result = import_prowler_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "must point to a .json file" in result
 
     def test_missing_file_is_registered_error(self, tmp_path, monkeypatch):
@@ -118,7 +118,7 @@ class TestImportProwlerFindings:
         from swarm.tools.findings_tools import import_prowler_findings
 
         result = import_prowler_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "Error reading Prowler findings file" in result
 
     def test_oversized_file_is_registered_error(self, tmp_path, monkeypatch):
@@ -130,7 +130,7 @@ class TestImportProwlerFindings:
             from swarm.tools.findings_tools import import_prowler_findings
 
             result = import_prowler_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "limit" in result
 
     def test_malformed_json_is_registered_error(self, tmp_path, monkeypatch):
@@ -141,7 +141,7 @@ class TestImportProwlerFindings:
         from swarm.tools.findings_tools import import_prowler_findings
 
         result = import_prowler_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "Not valid JSON" in result
 
     def test_legacy_format_parses(self, tmp_path, monkeypatch):
@@ -291,7 +291,7 @@ class TestGetSecurityHubFindings:
             from swarm.tools.findings_tools import get_securityhub_findings
 
             result = get_securityhub_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "Error fetching Security Hub findings" in result
 
     def test_malformed_max_findings_env_falls_back_to_default(
@@ -306,7 +306,7 @@ class TestGetSecurityHubFindings:
                 from swarm.tools.findings_tools import get_securityhub_findings
 
                 result = get_securityhub_findings.run("")
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
 
 
 class TestUntrustedWrapping:
