@@ -18,7 +18,8 @@ repos:
         exclude: |
           (?x)^(
             .env.example|
-            README.md
+            README.md|
+            tests/fixtures/findings/.*\.json
           )$
 
   # ── General hygiene ───────────────────────────────────────────────────────
