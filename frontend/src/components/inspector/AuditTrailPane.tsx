@@ -93,6 +93,14 @@ const BADGE_CONFIG: Record<
       "The trail has fewer entries than its separately stored anchor recorded: " +
       "entries were removed from the end.",
   },
+  anchor_mismatch: {
+    label: "Trail rewritten",
+    icon: ShieldX,
+    color: "text-red-400 border-red-700/40 bg-red-900/10",
+    tooltip:
+      "The entry at the separately anchored position no longer matches the " +
+      "anchored hash: the trail was cut back and extended, or rewritten.",
+  },
   unkeyed: {
     label: "Trail unkeyed",
     icon: ShieldAlert,
@@ -117,6 +125,14 @@ const BADGE_CONFIG: Record<
     tooltip:
       "The hash chain is intact, but an approved artifact's content no longer " +
       "matches the digest recorded at the time it was approved.",
+  },
+  decision_changed: {
+    label: "Decision changed after approval",
+    icon: ShieldAlert,
+    color: "text-red-400 border-red-700/40 bg-red-900/10",
+    tooltip:
+      "The hash chain is intact, but a reviewer decision no longer matches " +
+      "the digest sealed by the gate approval that covered it.",
   },
 };
 

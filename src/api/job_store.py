@@ -39,6 +39,15 @@ def session_lock(session_id: str) -> threading.Lock:
         return lock
 
 
+def discard_session_lock(session_id: str) -> None:
+    """Forget the session's action lock (on delete), so the map cannot grow
+    without bound. A thread already holding or waiting on the old lock keeps
+    its reference; a later request gets a fresh lock and finds the session
+    gone."""
+    with _session_locks_guard:
+        _session_locks.pop(session_id, None)
+
+
 # job_id → {status: running|completed|failed, error: str|None}
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
@@ -50,15 +59,22 @@ def get_flow(session_id: str) -> Optional[Any]:
 
 
 def set_flow(session_id: str, flow: Any) -> None:
+    # Bind the flow to its session: evidence it registers is tagged with it
+    # and its Gate 2 quote check only accepts evidence of this session.
+    if hasattr(flow, "session_id"):
+        flow.session_id = session_id
     with _flows_lock:
         _flows[session_id] = flow
 
 
 def remove_flow(session_id: str) -> None:
+    """Drop everything held in memory for a session (flow, event queue and
+    action lock). Called by the session delete path."""
     with _flows_lock:
         _flows.pop(session_id, None)
     with _queues_lock:
         _event_queues.pop(session_id, None)
+    discard_session_lock(session_id)
 
 
 def peek_queue(session_id: str) -> Optional[asyncio.Queue]:

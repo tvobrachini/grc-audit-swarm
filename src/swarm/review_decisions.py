@@ -300,14 +300,21 @@ def _draft_classification(evaluation: DeficiencyEvaluationSchema) -> dict[str, s
 
 
 def _management_values(
-    parsed: ManagementResponseValues, rationale: str
+    parsed: ManagementResponseValues, rationale: str, recorded_on: str
 ) -> dict[str, str]:
     agreement = str(parsed.agreement)
+    received_on = _iso_date(parsed.received_on, "received_on") or ""
+    if received_on and received_on > recorded_on:
+        raise DecisionValidationError(
+            f"values.received_on ({received_on}) is after the date this "
+            f"decision is being recorded ({recorded_on}): the response cannot "
+            "have been received before it happened"
+        )
     values = {
         "text": parsed.text,
         "agreement": agreement,
         "received_from": parsed.received_from,
-        "received_on": _iso_date(parsed.received_on, "received_on") or "",
+        "received_on": received_on,
     }
     owner = _text(parsed.action_owner_role)
     target = _iso_date(parsed.target_date, "target_date")
@@ -358,6 +365,7 @@ def build_decision(
         SegregationOfDutiesError: the preparer may not record this type
             (HTTP 409).
     """
+    decided_at = now or _now()
     try:
         dtype = DecisionType(decision_type)
     except ValueError as exc:
@@ -452,7 +460,7 @@ def build_decision(
                 )
         elif dtype == DecisionType.MANAGEMENT_RESPONSE:
             stored = _management_values(
-                cast(ManagementResponseValues, parsed), rationale
+                cast(ManagementResponseValues, parsed), rationale, decided_at[:10]
             )
         else:
             stored = {k: str(v) for k, v in parsed.model_dump().items()}
@@ -507,7 +515,7 @@ def build_decision(
         rationale=rationale,
         decided_by=decided_by,
         identity_source=source,
-        decided_at=now or _now(),
+        decided_at=decided_at,
         supersedes=supersedes,
     )
 

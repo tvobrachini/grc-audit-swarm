@@ -99,7 +99,7 @@ RESPONSE = {
     "action_owner_role": "Cloud Platform Lead",
     "target_date": "2026-12-31",
     "received_from": "CISO",
-    "received_on": "2026-10-01",
+    "received_on": "2026-09-20",
 }
 
 
@@ -443,6 +443,7 @@ class TestRecording:
             ({"received_on": ""}, "received_on"),
             ({"agreement": "maybe"}, "agreement"),
             ({"agreement": "disagree"}, "rebuttal"),
+            ({"received_on": "2099-01-01"}, "after the date"),
         ],
     )
     def test_management_response_validation(self, change, match):
@@ -461,7 +462,7 @@ class TestRecording:
                 "text": "The bucket is intentionally public.",
                 "agreement": "disagree",
                 "received_from": "CISO",
-                "received_on": "2026-10-01",
+                "received_on": "2026-09-20",
             },
             rationale="It holds customer exports; public access is not justified.",
         )
@@ -744,9 +745,31 @@ class TestEffectiveViewAndExports:
         assert "## Scope Limitations" in md and "**CTRL-03**" in md
         assert "(review_decision) — classify on deficiency:DEF-01" in md
         assert "conclusion of record is the reviewer's decision" in md
+        # A short block near the top states the reviewer's classification and
+        # engagement conclusion, and labels the AI-drafted summary as such.
+        assert "## Conclusions of Record" in md
+        assert md.index("## Conclusions of Record") < md.index("## Executive Summary")
+        assert "## Executive Summary (AI-drafted summary)" in md
+        assert "**Engagement conclusion:** Needs improvement" in md
+        assert "DEF-01: High (AI draft: Medium) — decided by" in md
+        assert "**Scope limitations:**" in md and "CTRL-03 — decided by" in md
         # Without the view (legacy callers) the proposed wording is unchanged.
         legacy = report_markdown(flow.state.final_report, [], ctx)
         assert "## Deficiency Evaluation (proposed)" in legacy
+        assert "## Conclusions of Record" not in legacy
+        assert "## Executive Summary\n" in legacy
+
+    def test_report_omits_conclusions_of_record_before_any_decision(self):
+        flow = self._walked()
+        md = report_markdown(
+            flow.state.final_report,
+            [],
+            ExportContext("sid", "Demo", flow.state.status),
+            flow.effective_view(),
+        )
+        assert "## Conclusions of Record" not in md
+        assert "## Executive Summary\n" in md
+        assert "AI-drafted summary" not in md
 
     def test_report_marks_undecided_rows_as_proposed(self):
         flow = self._walked()
