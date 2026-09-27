@@ -153,6 +153,7 @@ def _make_mock_flow(status="WAITING_FOR_SCOPE"):
     flow.state.final_report = None
     flow.state.approval_trail = []
     flow.state.qa_rejection_reason = None
+    flow.state.prepared_by = "preparer"
     flow.state.model_dump.return_value = {"status": status}
     return flow
 
@@ -253,6 +254,7 @@ class TestSessionsCreate:
                     "theme": "IAM Review",
                     "business_context": "AWS IAM posture review",
                     "frameworks": ["SOC2"],
+                    "prepared_by": "preparer",
                 },
             )
         assert resp.status_code == 201

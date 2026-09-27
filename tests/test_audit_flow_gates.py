@@ -18,6 +18,7 @@ from flow_builders import (  # type: ignore[import-not-found]
     crew_result,
     make_flow,
     make_papers,
+    make_verified_papers,
     make_racm,
     run_phase,
 )
@@ -185,6 +186,7 @@ class TestGateMethodsRaiseOnWrongState:
 
     def test_gate_approval_stamps_action(self):
         flow = AuditFlow(initial_status="WAITING_HUMAN_GATE_1")
+        flow.state.racm_plan = make_racm()
         flow.begin_phase_2("alice")
         entry = flow.state.approval_trail[-1]
         assert entry["gate"] == "Gate 1 (Planning)"
@@ -268,7 +270,9 @@ class TestRetryCarriesQaFeedback:
         run_phase(flow, 2, [crew_result(2, APPROVED, None)])
         assert flow.state.status == "ERROR_PHASE_2"
         flow.retry_phase(2, "bob")
-        mock_crew, _ = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        mock_crew, _ = run_phase(
+            flow, 2, [crew_result(2, APPROVED, make_verified_papers())]
+        )
         assert mock_crew.kickoff.call_args.kwargs["inputs"]["qa_feedback"] == ""
 
     def test_first_run_after_gate_has_no_feedback(self):
@@ -280,7 +284,9 @@ class TestRetryCarriesQaFeedback:
         flow.retry_phase(1, "sup")
         run_phase(flow, 1, [crew_result(1, APPROVED, make_racm())])
         flow.begin_phase_2("sup")
-        mock_crew, _ = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        mock_crew, _ = run_phase(
+            flow, 2, [crew_result(2, APPROVED, make_verified_papers())]
+        )
         assert mock_crew.kickoff.call_args.kwargs["inputs"]["qa_feedback"] == ""
 
     def test_feedback_survives_reload(self, tmp_path, monkeypatch):
@@ -391,14 +397,18 @@ class TestSkillContextPersistence:
         )
 
         restored.begin_phase_2("alice")
-        _, MockCrew = run_phase(restored, 2, [crew_result(2, APPROVED, make_papers())])
+        _, MockCrew = run_phase(
+            restored, 2, [crew_result(2, APPROVED, make_verified_papers())]
+        )
         skill_context = MockCrew.call_args.kwargs["skill_context"]
         assert [s["id"] for s in skill_context] == flow.state.active_skill_ids
 
     def test_legacy_snapshot_without_ids_rederives_from_scope(self):
         flow = make_flow(2)
         assert flow.state.active_skill_ids == []
-        _, MockCrew = run_phase(flow, 2, [crew_result(2, APPROVED, make_papers())])
+        _, MockCrew = run_phase(
+            flow, 2, [crew_result(2, APPROVED, make_verified_papers())]
+        )
         skill_context = MockCrew.call_args.kwargs["skill_context"]
         assert "aws_cloud_security" in [s["id"] for s in skill_context]
 

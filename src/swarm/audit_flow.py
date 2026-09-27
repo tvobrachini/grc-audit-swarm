@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, UTC
 from typing import Any, Callable, Optional
 
@@ -13,6 +14,15 @@ from swarm.crews.fieldwork_crew import FieldworkCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
 from swarm.demo import DemoCrew, demo_mode_enabled, demo_reject_phase
+from swarm.evidence import unverified_findings
+from swarm.review_policy import (
+    ReviewBlockedError,
+    SegregationOfDutiesError,
+    UnverifiedEvidenceError,
+    sod_violation,
+)
+from swarm import trail as audit_trail
+from swarm.schema import DeficiencyScale
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +32,9 @@ __all__ = [
     "InvalidTransitionError",
     "PhaseArtifactMissingError",
     "QA_UNPARSEABLE_REASON",
+    "ReviewBlockedError",
+    "SegregationOfDutiesError",
+    "UnverifiedEvidenceError",
 ]
 
 # One automatic QA-driven retry per phase run (i.e. two crew attempts in total).
@@ -51,14 +64,29 @@ _QA_FEEDBACK = {
     ),
     2: (
         "qa_feedback",
-        " IMPORTANT: A previous evaluation was rejected — fix all "
-        "severity and evidence issues: {reason}",
+        " IMPORTANT: A previous evaluation was rejected — fix the ToD/ToE "
+        "conclusions and evidence issues: {reason}",
     ),
     3: (
         "tone_qa_feedback",
         " IMPORTANT: A previous draft was rejected for tone — fix all issues: {reason}",
     ),
 }
+
+
+# Text carrying a reviewer's return-for-rework notes into the same per-phase
+# feedback input the QA retries use.
+_REWORK_FEEDBACK = (
+    " IMPORTANT: The human reviewer returned the previous draft for rework. "
+    "Address every review note before re-drafting: {notes}"
+)
+
+_EVIDENCE_REJECTION = (
+    "Deterministic evidence check failed for {controls}: the quoted evidence was "
+    "not found verbatim in the evidence vault record it cites (or that record "
+    "failed its integrity check). Every tested finding needs a verifiable quote; "
+    "a finding without a quote must be concluded 'Not tested'."
+)
 
 
 class PhaseArtifactMissingError(RuntimeError):
@@ -94,26 +122,148 @@ def _require_text(value: str, what: str) -> str:
     return value.strip()
 
 
+def _control_attributes(control: Any) -> str:
+    """Compact ``key; Automated; Preventive; Daily; owner …`` tag for a control."""
+    parts: list[str] = []
+    if control.key_control is not None:
+        parts.append("key" if control.key_control else "non-key")
+    for value in (control.nature, control.control_type, control.frequency):
+        if value is not None:
+            parts.append(str(value))
+    if control.control_owner:
+        parts.append(f"owner {control.control_owner}")
+    return "; ".join(parts)
+
+
 def racm_summary(racm: Any) -> str:
-    """One line per risk and control — IDs, descriptions and mappings only."""
+    """One line per risk and control — IDs, ratings, attributes and mappings;
+    no test procedures."""
     if racm is None:
         return "(no RACM available)"
     lines: list[str] = []
     for risk in racm.risks:
         mapping = ", ".join(risk.regulatory_mapping)
-        lines.append(f"{risk.risk_id}: {risk.description} [{mapping}]")
+        rating = ""
+        if risk.likelihood or risk.impact:
+            rating = (
+                f" (likelihood {risk.likelihood or '?'}, impact {risk.impact or '?'})"
+            )
+        lines.append(f"{risk.risk_id}: {risk.description}{rating} [{mapping}]")
         for control in risk.controls:
-            lines.append(f"  - {control.control_id}: {control.description}")
+            attrs = _control_attributes(control)
+            tag = f" [{attrs}]" if attrs else ""
+            lines.append(f"  - {control.control_id}{tag}: {control.description}")
     return "\n".join(lines) or "(RACM contains no risks)"
 
 
+def _numbered_steps(steps: Any) -> str:
+    return " ".join(
+        f"{i}. {s.step_description} -> expect: {s.expected_result}"
+        for i, s in enumerate(steps or [], 1)
+    )
+
+
+def racm_test_plan(racm: Any) -> str:
+    """Compact per-control test plan for Fieldwork: attributes, ToD / ToE /
+    substantive steps and the ToE test design (population, sample, period).
+
+    Plain text rather than the RACM JSON: every fieldwork agent needs it, and
+    JSON keys and nulls would roughly double its size in each prompt.
+    """
+    if racm is None:
+        return "(no RACM available)"
+    lines: list[str] = []
+    for risk in racm.risks:
+        for c in risk.controls:
+            tp = c.testing_procedures
+            lines.append(
+                f"Control {c.control_id} (risk {risk.risk_id}): {c.description}"
+            )
+            attrs = _control_attributes(c)
+            extra = []
+            if c.assertions:
+                extra.append("objectives: " + ", ".join(c.assertions))
+            if c.ipe:
+                extra.append("IPE: " + ", ".join(c.ipe))
+            detail = "; ".join(x for x in [attrs, *extra] if x)
+            if detail:
+                lines.append(f"  Attributes: {detail}")
+            lines.append(f"  ToD: {_numbered_steps(tp.test_of_design) or '(none)'}")
+            design: list[str] = []
+            if tp.population is not None:
+                design.append(
+                    f"population: {tp.population.source} "
+                    f"(completeness: {tp.population.completeness_procedure})"
+                )
+            if tp.sample_size is not None or tp.sampling_method is not None:
+                size = tp.sample_size if tp.sample_size is not None else "?"
+                method = f", {tp.sampling_method}" if tp.sampling_method else ""
+                design.append(f"sample: {size}{method}")
+            if tp.period_of_reliance:
+                design.append(f"period: {tp.period_of_reliance}")
+            toe = _numbered_steps(tp.test_of_effectiveness) or "(none)"
+            lines.append(
+                f"  ToE: {toe}" + (f" | {'; '.join(design)}" if design else "")
+            )
+            if tp.substantive_testing:
+                lines.append(
+                    f"  Substantive: {_numbered_steps(tp.substantive_testing)}"
+                )
+    return "\n".join(lines) or "(RACM contains no controls)"
+
+
 def findings_index(papers: Any) -> str:
-    """``control_id | severity | vault_id`` per finding, for OSCAL mapping."""
+    """``control_id | result (ToD …; ToE …) | vault_id`` per finding, for OSCAL
+    mapping."""
     if papers is None or not papers.findings:
         return "(no findings)"
     return "\n".join(
-        f"{f.control_id} | {f.severity} | {f.vault_id_reference}"
+        f"{f.control_id} | {f.result} (ToD {f.tod_conclusion}; ToE "
+        f"{f.toe_conclusion}) | {f.vault_id_reference or '(no evidence)'}"
         for f in papers.findings
+    )
+
+
+# Scope terms that make an engagement an ICFR / SOX one, so deficiencies are
+# classified on the control deficiency / significant deficiency / material
+# weakness scale instead of a risk rating. Deliberately not matched: "PCAOB"
+# and "COSO" (in the API's default framework list for every session) and
+# SOC 1 / ISAE 3402 (service-auditor reports, which use a different model).
+_ICFR_SCOPE = re.compile(
+    r"\b(sox|sarbanes|icfr|internal control over financial reporting"
+    r"|financial reporting|financial statements?|section 404)\b",
+    re.IGNORECASE,
+)
+
+
+def deficiency_scale_for_scope(
+    theme: str, business_context: str, frameworks: list[str]
+) -> DeficiencyScale:
+    """ICFR scale for SOX / financial-reporting scopes, else a risk rating."""
+    text = " ".join([theme or "", business_context or "", *frameworks])
+    if _ICFR_SCOPE.search(text):
+        return DeficiencyScale.ICFR
+    return DeficiencyScale.RISK_RATING
+
+
+def deficiency_scale_guidance(scale: DeficiencyScale) -> str:
+    """Prompt text telling the deficiency evaluator which scale to use."""
+    if scale == DeficiencyScale.ICFR:
+        return (
+            f"deficiency_scale = '{scale}' (the scope is ICFR / SOX). Classify "
+            "each deficiency as 'Control Deficiency', 'Significant Deficiency' "
+            "or 'Material Weakness' (or 'Not a deficiency'). A Material Weakness "
+            "needs a reasonable possibility (likelihood Medium/High) that a "
+            "material misstatement (magnitude High) is not prevented or detected "
+            "on a timely basis; a Significant Deficiency is less severe but "
+            "merits the attention of those charged with governance; otherwise "
+            "it is a Control Deficiency."
+        )
+    return (
+        f"deficiency_scale = '{scale}' (the scope is not ICFR). Rate each "
+        "deficiency 'Low', 'Medium' or 'High' from likelihood x magnitude (or "
+        "'Not a deficiency'). Do NOT use SOX terms (significant deficiency, "
+        "material weakness) for this scope."
     )
 
 
@@ -179,6 +329,7 @@ class AuditFlow:
     # ── Gate helpers (call synchronously before the phase thread) ────────────
 
     def _stamp_trail(self, gate: str, human_id: str, action: str, **extra: str) -> None:
+        """Append a hash-chained entry to the approval trail (append-only)."""
         entry = {
             "gate": gate,
             "human": human_id,
@@ -186,23 +337,151 @@ class AuditFlow:
             "action": action,
         }
         entry.update(extra)
-        self.state.approval_trail.append(entry)
+        audit_trail.append_entry(self.state.approval_trail, entry)
+
+    def verify_trail(self, anchor: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """Verify the approval trail's hash chain (see :mod:`swarm.trail`).
+
+        Also reports gate-approved artifacts that changed after approval.
+        """
+        return audit_trail.verify_trail(
+            self.state.approval_trail,
+            anchor=anchor,
+            artifacts={f: getattr(self.state, f) for f in _ARTIFACT_FIELDS.values()},
+        )
+
+    def record_preparer(self, prepared_by: str) -> None:
+        """Set the audit's preparer and record it as the trail's first entry.
+
+        Call once, when the audit is created (before ``begin_phase_1``).
+
+        Raises:
+            ValueError: if ``prepared_by`` is blank or a preparer is already set.
+        """
+        prepared_by = _require_text(prepared_by, "prepared_by")
+        if self.state.prepared_by:
+            raise ValueError("prepared_by is already set for this audit")
+        self.state.prepared_by = prepared_by
+        self._stamp_trail("Audit created", prepared_by, "audit_created")
+
+    def _preparers(self) -> list[str]:
+        """The declared preparer, from state and from the chained trail entry.
+
+        Both are checked, so editing ``prepared_by`` in a stored snapshot does
+        not lift the preparer restriction while the trail still records them.
+        """
+        names = [self.state.prepared_by]
+        names += [
+            e.get("human", "")
+            for e in self.state.approval_trail
+            if e.get("action") == "audit_created"
+        ]
+        return [n for n in names if n] or [""]
+
+    def _check_sod(self, action: str, human_id: str, gate: Optional[int] = None):
+        for preparer in self._preparers():
+            violation = sod_violation(
+                action, human_id, preparer, self.state.approval_trail, gate=gate
+            )
+            if violation:
+                raise SegregationOfDutiesError(violation)
+
+    def _require_transition(self, target: AuditStatus, source: AuditStatus) -> None:
+        if not self.machine.can(target, source):
+            raise InvalidTransitionError(self.machine.status, target)
+
+    def unverified_evidence(self) -> list[str]:
+        """Control IDs of working-paper findings whose quote does not verify."""
+        papers = self.state.working_papers
+        if papers is None:
+            return []
+        return unverified_findings(getattr(papers, "findings", None) or [])
+
+    def _accepted_unverified(self) -> set[str]:
+        """Unverified controls a supervisor accepted for the *current* papers.
+
+        Only a Fieldwork QA override whose recorded artifact digest matches
+        the working papers as they are now counts, so an override can never
+        carry over to a re-run or edited set of working papers.
+        """
+        papers = self.state.working_papers
+        if papers is None:
+            return set()
+        digest = audit_trail.artifact_digest(papers)
+        for e in reversed(self.state.approval_trail):
+            if (
+                e.get("action") == "qa_override"
+                and e.get("gate") == f"QA Override ({_PHASE_LABELS[2]})"
+                and e.get("artifact_digest") == digest
+            ):
+                raw = e.get("unverified_controls", "")
+                return {c for c in raw.split(",") if c}
+        return set()
+
+    def _check_evidence_for_gate_2(self) -> None:
+        unverified = self.unverified_evidence()
+        accepted = self._accepted_unverified() if unverified else set()
+        not_accepted = [c for c in unverified if c not in accepted]
+        if not_accepted:
+            raise UnverifiedEvidenceError(
+                "Gate 2 cannot be approved: evidence quotes for "
+                + ", ".join(not_accepted)
+                + " do not verify against the evidence vault. Return the "
+                "fieldwork for rework, or have the evidence restored."
+            )
 
     def _approve_gate(self, gate: int, human_id: str) -> None:
+        """Validate, apply policy, transition, then stamp — in that order.
+
+        Nothing is transitioned or stamped when any check fails.
+        """
         human_id = _require_text(human_id, "human_id")
+        target = {
+            1: AuditStatus.RUNNING_PHASE_2,
+            2: AuditStatus.RUNNING_PHASE_3,
+            3: AuditStatus.COMPLETED,
+        }[gate]
+        self._require_transition(target, AuditStatus(f"WAITING_HUMAN_GATE_{gate}"))
+        self._check_sod("gate_approval", human_id, gate=gate)
+        if gate == 2:
+            self._check_evidence_for_gate_2()
+        field = _ARTIFACT_FIELDS[gate]
+        artifact = getattr(self.state, field)
+        if artifact is None:
+            raise PhaseArtifactMissingError(
+                f"{_GATE_LABELS[gate]} has no {field} to approve."
+            )
+
         transition = {
             1: self.machine.approve_gate_1,
             2: self.machine.approve_gate_2,
             3: self.machine.approve_gate_3,
         }[gate]
-        transition()  # raises InvalidTransitionError when not at this gate
+        transition()
         self._commit_status()
-        self._stamp_trail(_GATE_LABELS[gate], human_id, "gate_approval")
+        self._stamp_trail(
+            _GATE_LABELS[gate],
+            human_id,
+            "gate_approval",
+            artifact=field,
+            artifact_digest=audit_trail.artifact_digest(artifact),
+        )
+        if gate == 3:
+            self.state.current_human_dossier = (
+                f"Audit completed: the final report was approved at "
+                f"{_GATE_LABELS[3]} by {human_id}."
+            )
+        else:
+            self.state.current_human_dossier = (
+                f"{_GATE_LABELS[gate]} approved by {human_id}. "
+                f"{_PHASE_LABELS[gate + 1]} is running."
+            )
 
     def begin_phase_1(self) -> None:
         """Transition to RUNNING_PHASE_1 — call before spawning the phase 1 thread."""
         self.machine.start_phase_1()
         self._commit_status()
+        self.state.current_human_dossier = "Planning is running."
 
     def begin_phase_2(self, human_id: str) -> None:
         """Gate 1 approval: transition to RUNNING_PHASE_2, then stamp the trail.
@@ -210,6 +489,8 @@ class AuditFlow:
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_1
                 (nothing is transitioned or stamped).
+            SegregationOfDutiesError: if ``human_id`` prepared the audit.
+            PhaseArtifactMissingError: if there is no RACM to approve.
             ValueError: if ``human_id`` is blank.
         """
         self._approve_gate(1, human_id)
@@ -217,8 +498,14 @@ class AuditFlow:
     def begin_phase_3(self, human_id: str) -> None:
         """Gate 2 approval: transition to RUNNING_PHASE_3, then stamp the trail.
 
+        Re-runs the deterministic evidence check first.
+
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_2.
+            SegregationOfDutiesError: if ``human_id`` prepared the audit.
+            UnverifiedEvidenceError: if a finding's quote no longer verifies
+                (and was not accepted by a supervisor override of these
+                exact working papers).
             ValueError: if ``human_id`` is blank.
         """
         self._approve_gate(2, human_id)
@@ -228,6 +515,8 @@ class AuditFlow:
 
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_3.
+            SegregationOfDutiesError: if ``human_id`` prepared the audit or
+                approved Gate 2 (see ``review_policy.DISTINCT_APPROVER_GATES``).
             ValueError: if ``human_id`` is blank.
         """
         self._approve_gate(3, human_id)
@@ -236,7 +525,8 @@ class AuditFlow:
         """Re-open a QA-rejected or errored phase: → RUNNING_PHASE_n.
 
         The caller then runs the matching ``generate_*`` method. The retry is
-        recorded in the approval trail.
+        recorded in the approval trail. Anyone, including the preparer, may
+        retry: a retry re-runs the preparation, it does not review it.
 
         Raises:
             InvalidTransitionError: unless the flow is in QA_REJECTED_PHASE_n
@@ -256,6 +546,50 @@ class AuditFlow:
             previous_status=previous,
             previous_reason=self.state.qa_rejection_reason or "",
         )
+        self.state.current_human_dossier = (
+            f"{_PHASE_LABELS[phase]} retry requested by {human_id}; the phase is "
+            "running again."
+        )
+
+    def return_for_rework(self, phase: int, human_id: str, notes: str) -> None:
+        """Reviewer returns the phase at its gate: WAITING_HUMAN_GATE_n → RUNNING_PHASE_n.
+
+        The review notes are recorded in the approval trail and fed to the
+        re-run as feedback (same crew input the QA retries use). The caller
+        then runs the matching ``generate_*`` method.
+
+        Raises:
+            InvalidTransitionError: unless the flow is at WAITING_HUMAN_GATE_n.
+            SegregationOfDutiesError: if ``human_id`` prepared the audit.
+            ValueError: if ``human_id``/``notes`` are blank or ``phase`` invalid.
+        """
+        if phase not in _PHASE_LABELS:
+            raise ValueError("phase must be 1, 2, or 3")
+        human_id = _require_text(human_id, "human_id")
+        notes = _require_text(notes, "notes")
+        self._require_transition(
+            AuditStatus(f"RUNNING_PHASE_{phase}"),
+            AuditStatus(f"WAITING_HUMAN_GATE_{phase}"),
+        )
+        self._check_sod("return_for_rework", human_id)
+        field = _ARTIFACT_FIELDS[phase]
+        artifact = getattr(self.state, field)
+        self.machine.return_for_rework(phase)
+        self._commit_status()
+        extra = {"notes": notes, "artifact": field}
+        if artifact is not None:
+            extra["artifact_digest"] = audit_trail.artifact_digest(artifact)
+        self._stamp_trail(
+            f"Return for rework ({_PHASE_LABELS[phase]})",
+            human_id,
+            "return_for_rework",
+            **extra,
+        )
+        self.state.qa_rejection_reason = None
+        self.state.current_human_dossier = (
+            f"{_PHASE_LABELS[phase]} returned for rework by {human_id}: {notes} "
+            "The phase is re-running with these review notes."
+        )
 
     def override_qa_rejection(self, phase: int, human_id: str, reason: str) -> None:
         """Supervisor override: accept a QA-rejected artifact as-is.
@@ -263,10 +597,12 @@ class AuditFlow:
         Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n, so the normal human
         gate approval still follows. The override, the approver and the
         justification are recorded in the approval trail together with the QA
-        rejection being overridden.
+        rejection being overridden, the digest of the accepted artifact and
+        (Fieldwork) the controls whose evidence quotes did not verify.
 
         Raises:
             InvalidTransitionError: unless the flow is in QA_REJECTED_PHASE_n.
+            SegregationOfDutiesError: if ``human_id`` prepared the audit.
             PhaseArtifactMissingError: if the phase produced no artifact to accept.
             ValueError: if ``human_id``/``reason`` are blank or ``phase`` invalid.
         """
@@ -275,56 +611,78 @@ class AuditFlow:
         human_id = _require_text(human_id, "human_id")
         reason = _require_text(reason, "reason")
         target = AuditStatus(f"WAITING_HUMAN_GATE_{phase}")
-        if not self.machine.can(target, AuditStatus(f"QA_REJECTED_PHASE_{phase}")):
-            raise InvalidTransitionError(self.machine.status, target)
-        if getattr(self.state, _ARTIFACT_FIELDS[phase]) is None:
+        self._require_transition(target, AuditStatus(f"QA_REJECTED_PHASE_{phase}"))
+        self._check_sod("qa_override", human_id)
+        artifact = getattr(self.state, _ARTIFACT_FIELDS[phase])
+        if artifact is None:
             raise PhaseArtifactMissingError(
                 f"Phase {phase} has no {_ARTIFACT_FIELDS[phase]} to accept — "
                 "retry the phase instead."
             )
         overridden = self.state.qa_rejection_reason or ""
+        extra = {
+            "reason": reason,
+            "qa_rejection_reason": overridden,
+            "artifact": _ARTIFACT_FIELDS[phase],
+            "artifact_digest": audit_trail.artifact_digest(artifact),
+        }
+        unverified = self.unverified_evidence() if phase == 2 else []
+        if unverified:
+            extra["unverified_controls"] = ",".join(unverified)
         self.machine.override_qa(phase)
         self._commit_status()
         self._stamp_trail(
-            f"QA Override ({_PHASE_LABELS[phase]})",
-            human_id,
-            "qa_override",
-            reason=reason,
-            qa_rejection_reason=overridden,
+            f"QA Override ({_PHASE_LABELS[phase]})", human_id, "qa_override", **extra
         )
         self.state.qa_rejection_reason = None
+        note = (
+            f" Accepted with unverified evidence for: {', '.join(unverified)}."
+            if unverified
+            else ""
+        )
         self.state.current_human_dossier = (
-            f"{_PHASE_LABELS[phase]} QA rejection overridden by {human_id}: {reason}. "
-            "Review the artifact before approving the gate."
+            f"{_PHASE_LABELS[phase]} QA rejection overridden by {human_id}: {reason}."
+            f"{note} Review the artifact before approving the gate."
         )
 
     # ── Shared phase runner ──────────────────────────────────────────────────
 
-    def _retry_feedback(self, phase: int) -> Optional[str]:
-        """QA rejection reason to carry into a human-initiated retry, if any.
+    def _carried_feedback(self, phase: int) -> Optional[str]:
+        """Feedback text a human-initiated re-run of ``phase`` starts with.
 
-        Returns the reason only when the most recent trail entry is a retry of
-        *this* phase out of QA_REJECTED_PHASE_n (a retry after a crew error
-        carries an error message, not QA feedback). The trail is persisted, so
-        this also survives an API restart between the retry and the run.
+        * a retry out of QA_REJECTED_PHASE_n carries the QA rejection reason
+          (a retry after a crew error carries an error message, not feedback);
+        * a return for rework carries the reviewer's notes.
+
+        Only the most recent trail entry counts, so an old retry or return
+        never leaks into a later run. The trail is persisted, so this also
+        survives an API restart between the action and the run.
         """
         if not self.state.approval_trail:
             return None
         last = self.state.approval_trail[-1]
+        label = _PHASE_LABELS[phase]
+        if (
+            last.get("action") == "return_for_rework"
+            and last.get("gate") == f"Return for rework ({label})"
+        ):
+            notes = (last.get("notes") or "").strip()
+            return _REWORK_FEEDBACK.format(notes=notes) if notes else None
         if (
             last.get("action") != "retry"
-            or last.get("gate") != f"Retry ({_PHASE_LABELS[phase]})"
+            or last.get("gate") != f"Retry ({label})"
             or last.get("previous_status") != f"QA_REJECTED_PHASE_{phase}"
         ):
             return None
         reason = (last.get("previous_reason") or "").strip()
-        return reason or None
+        if not reason:
+            return None
+        return _QA_FEEDBACK[phase][1].format(reason=reason)
 
     def _seed_feedback(self, phase: int, inputs: dict[str, Any]) -> None:
-        reason = self._retry_feedback(phase)
-        if reason:
-            key, template = _QA_FEEDBACK[phase]
-            inputs[key] = template.format(reason=reason)
+        feedback = self._carried_feedback(phase)
+        if feedback:
+            inputs[_QA_FEEDBACK[phase][0]] = feedback
 
     def _fail_phase(self, phase: int, reason: str) -> None:
         self.machine.error_phase(phase)
@@ -334,6 +692,23 @@ class AuditFlow:
             f"{_PHASE_LABELS[phase]} stopped with an error: {reason} "
             "Retry the phase once the cause is fixed."
         )
+
+    def _evidence_rejection(self, phase: int, artifact: Any) -> Optional[str]:
+        """Deterministic check of the Fieldwork artifact's evidence quotes.
+
+        None when it passes (or does not apply). Fails closed: an unexpected
+        error while checking is a rejection.
+        """
+        if phase != 2 or artifact is None:
+            return None
+        try:
+            unverified = unverified_findings(getattr(artifact, "findings", None) or [])
+        except Exception as exc:
+            logger.exception("Evidence check failed to run")
+            return f"Deterministic evidence check could not run ({exc}); fails closed."
+        if not unverified:
+            return None
+        return _EVIDENCE_REJECTION.format(controls=", ".join(unverified))
 
     def _run_crew_with_qa(
         self,
@@ -346,6 +721,10 @@ class AuditFlow:
     ) -> bool:
         """Run a phase crew with one automatic QA-driven retry.
 
+        After the QA agent, Fieldwork artifacts also go through the
+        deterministic evidence check; a failure there counts as a QA
+        rejection (same retry-once path, same supervisor override).
+
         On success stores the artifact in state and returns True, leaving the
         machine in RUNNING_PHASE_n for the caller to complete. On failure it
         has already transitioned to QA_REJECTED_PHASE_n / ERROR_PHASE_n and
@@ -354,7 +733,11 @@ class AuditFlow:
         label = _PHASE_LABELS[phase]
         field = _ARTIFACT_FIELDS[phase]
         feedback_key, feedback_template = _QA_FEEDBACK[phase]
+        # Feedback the run started with (reviewer notes / earlier QA reason)
+        # is kept when an auto-retry adds the new QA reason.
+        seeded_feedback = str(inputs.get(feedback_key, "") or "")
         rejection: Optional[str] = None
+        qa_rejected = False
         artifact: Any = None
 
         for attempt in range(1, _MAX_QA_ATTEMPTS + 1):
@@ -369,7 +752,11 @@ class AuditFlow:
                 self._fail_phase(phase, f"{label} {run} error: {exc}")
                 return False
 
-            rejection = _qa_rejection(qa_output)
+            qa_reason = _qa_rejection(qa_output)
+            evidence_reason = self._evidence_rejection(phase, artifact)
+            qa_rejected = qa_reason is not None
+            reasons = [r for r in (qa_reason, evidence_reason) if r]
+            rejection = " ".join(reasons) if reasons else None
             if rejection is None:
                 break
             if attempt < _MAX_QA_ATTEMPTS:
@@ -379,7 +766,9 @@ class AuditFlow:
                     attempt,
                     rejection,
                 )
-                inputs[feedback_key] = feedback_template.format(reason=rejection)
+                inputs[feedback_key] = seeded_feedback + feedback_template.format(
+                    reason=rejection
+                )
         else:
             logger.error(
                 "%s QA rejected again after auto-retry — no further retries; "
@@ -400,10 +789,15 @@ class AuditFlow:
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection
+            by = (
+                "rejected by the QA reviewer"
+                if qa_rejected
+                else "failed the deterministic evidence check"
+            )
             self.state.current_human_dossier = (
-                f"{label} draft rejected by the QA reviewer after one automatic "
-                f"retry: {rejection} Review the draft, then retry the phase or "
-                "approve it with a written justification."
+                f"{label} draft {by} after one automatic retry: {rejection} "
+                "Review the draft, then retry the phase or approve it with a "
+                "written justification."
             )
             return False
 
@@ -469,10 +863,12 @@ class AuditFlow:
         }
 
     def _fieldwork_inputs(self) -> dict[str, Any]:
-        racm = self.state.racm_plan
         return {
-            # Fieldwork needs the full test procedures, but not null fields.
-            "racm_string": racm.model_dump_json(exclude_none=True) if racm else "",
+            # The working papers' theme field.
+            "theme": self.state.theme,
+            # Compact per-control test plan (attributes, steps, population,
+            # sample, period) shared by the collector, evaluator and QA.
+            "test_plan": racm_test_plan(self.state.racm_plan),
             "qa_feedback": "",
         }
 
@@ -491,6 +887,15 @@ class AuditFlow:
             # Small control_id → vault_id index for the OSCAL mapper, which
             # otherwise only sees the narrative draft via task context.
             "findings_index": findings_index(papers),
+            # Which classification scale the engagement-level deficiency
+            # evaluation uses (ICFR vs risk rating), decided from the scope.
+            "deficiency_scale_guidance": deficiency_scale_guidance(
+                deficiency_scale_for_scope(
+                    self.state.theme,
+                    self.state.business_context,
+                    self.state.frameworks,
+                )
+            ),
             "tone_qa_feedback": "",
         }
 
@@ -570,9 +975,13 @@ class AuditFlow:
 
         self.machine.complete_phase_2()
         self._commit_status()
+        papers = self.state.working_papers
+        count = len(getattr(papers, "findings", None) or [])
         self.state.current_human_dossier = (
-            "Execution Fieldwork complete with substantive evidence evaluated. "
-            "Please review Findings for final Standard 12.3 (formerly IIA 2340) approval."
+            f"Fieldwork complete: ToD/ToE conclusions recorded for {count} "
+            "finding(s), and every cited evidence quote was verified against the "
+            "evidence vault. Review the working papers before approving Gate 2 "
+            "(supervision step inspired by IIA Standard 12.3, formerly 2340)."
         )
 
     def generate_reporting(self, event_callback=None):
@@ -616,3 +1025,10 @@ class AuditFlow:
 
         self.machine.complete_phase_3()
         self._commit_status()
+        self.state.current_human_dossier = (
+            "Reporting complete: the final report passed the tone QA review. "
+            "Review the report and the proposed deficiency classifications (a "
+            "draft for your judgement), then approve Gate 3 to complete the "
+            "audit. Gate 3 must be approved by someone other than the Gate 2 "
+            "approver."
+        )

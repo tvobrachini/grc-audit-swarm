@@ -1,18 +1,22 @@
+// Control frameworks the RACM maps to (mirrors src/api/models.py
+// DEFAULT_FRAMEWORKS and the selectable list in NewAuditModal). Auditing
+// standards (IIA, PCAOB) govern the auditor, not the entity's controls, so
+// they are never listed here — see AUDITING_STANDARDS below.
 const FRAMEWORK_REFS: Record<string, { title: string; desc: string; url: string }> = {
-  COSO: {
-    title: "COSO ERM Framework",
-    desc: "Enterprise Risk Management — Integrating with Strategy and Performance (2017)",
+  "COSO 2013": {
+    title: "COSO 2013 Internal Control – Integrated Framework",
+    desc: "The 17 principles organized under the five components of internal control.",
     url: "https://www.coso.org/",
   },
-  PCAOB: {
-    title: "PCAOB AS 2201",
-    desc: "Auditing Standard No. 2201 — Integrated Audit of Internal Control",
-    url: "https://pcaobus.org/",
+  "NIST SP 800-53": {
+    title: "NIST SP 800-53",
+    desc: "Security and Privacy Controls for Information Systems and Organizations",
+    url: "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final",
   },
-  IIA: {
-    title: "IIA Standards",
-    desc: "International Standards for the Professional Practice of Internal Auditing (2024)",
-    url: "https://www.theiia.org/",
+  "CIS Controls": {
+    title: "CIS Critical Security Controls",
+    desc: "Prioritized safeguards to mitigate common cyber-attacks",
+    url: "https://www.cisecurity.org/controls",
   },
   "ISO 27001": {
     title: "ISO/IEC 27001:2022",
@@ -25,6 +29,21 @@ const FRAMEWORK_REFS: Record<string, { title: string; desc: string; url: string 
     url: "https://www.aicpa.org/",
   },
 };
+
+/**
+ * Auditing standards that inspired this tool's design (not control
+ * frameworks, and not a claim of conformance with them).
+ */
+const AUDITING_STANDARDS = [
+  {
+    title: "IIA Global Internal Audit Standards 12.3",
+    desc: "Engagement planning, informing the RACM's planning phase.",
+  },
+  {
+    title: "IIA Global Internal Audit Standards 14.6",
+    desc: "Communicating engagement results, informing the reporting phase.",
+  },
+];
 
 interface Props {
   frameworks: string[];
@@ -55,6 +74,30 @@ export function FrameworkPane({ frameworks }: Props) {
           No framework references
         </p>
       )}
+
+      <div className="pt-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+          Auditing standards that inspired the design
+        </p>
+        <p className="mb-2 text-[10px] text-[var(--color-text-muted)]">
+          These govern how the audit is conducted, not the entity's controls —
+          they are not control frameworks, and this tool makes no claim of
+          conformance with them.
+        </p>
+        <div className="space-y-2">
+          {AUDITING_STANDARDS.map((s) => (
+            <div
+              key={s.title}
+              className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-base)]/50 p-3"
+            >
+              <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {s.title}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{s.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

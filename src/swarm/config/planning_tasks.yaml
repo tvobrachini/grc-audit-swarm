@@ -1,19 +1,34 @@
 context_task:
-  description: "Consume the theme '{theme}' and business context '{business_context}'. Determine the audit objective."
+  description: "Consume the theme '{theme}' and business context '{business_context}'. Determine the audit objective, the in-scope systems and processes, and the period the conclusions must cover (state an assumed period if none is given)."
   expected_output: "A concise 2-paragraph Audit Scope and Objective memo."
 
 crosswalk_task:
-  description: "Crosswalk the '{theme}' against the provided frameworks: {frameworks}. Identify key threat vectors."
-  expected_output: "List of explicit regulatory requirements and recent threat vectors related to the scope."
+  description: "Crosswalk the '{theme}' against the provided frameworks: {frameworks}. Identify the relevant control requirements and well-known threat vectors for this scope. Reference a framework section or ID only when you are certain it exists. Do not cite specific documents, incidents, fines, enforcement actions or dates you cannot source."
+  expected_output: "List of relevant framework requirements and well-known threat vectors related to the scope."
 
 weighting_task:
-  description: "Take the threat vectors and the Scope Memo, and calculate the highest priority risks. Assign a severity weight to each."
-  expected_output: "A concise numbered list of exactly 3 major risks. Format: RISK-XX | Short title | One-sentence description. No prose, no headers."
+  description: "Take the threat vectors and the Scope Memo and identify the key risks, in proportion to the scope: about 3 for a narrow scope, up to 8 for a broad one. Rate each risk's inherent likelihood and impact (Low / Medium / High) and justify the ratings in one sentence."
+  expected_output: "A numbered list, highest priority first, one line per risk. Format: RISK-XX | Short title | Likelihood L/M/H | Impact L/M/H | One-sentence description and rating rationale. No prose, no headers."
 
 racm_drafting_task:
-  description: "Audit scope — theme: '{theme}', business context: '{business_context}', frameworks: {frameworks}. Using the Risk Specialist's prioritised top-3 risk list provided in your context (keep its RISK-XX IDs and ordering), draft the Risk and Control Matrix. For EVERY control you MUST include: (1) test_of_design steps, (2) test_of_effectiveness steps with sampling instructions, AND (3) substantive_testing steps — never leave substantive_testing null or empty.{qa_feedback}"
-  expected_output: "A structured RACM matching exactly the required JSON/Pydantic schema with substantive_testing populated for every control."
+  description: |-
+    Audit scope — theme: '{theme}', business context: '{business_context}', frameworks: {frameworks}. Using the Risk Specialist's prioritised risk list provided in your context (keep its RISK-XX IDs, ordering, likelihood and impact), draft the Risk and Control Matrix.
+
+    Per risk: likelihood, impact, rating_rationale, and regulatory_mapping to CONTROL frameworks (e.g. COSO 2013 principles for ICFR, NIST SP 800-53, CIS, ISO/IEC 27001 Annex A, SCF) — never auditing standards such as PCAOB AS 2201, and only IDs you are sure exist.
+
+    Per control: control_owner (a role), frequency, nature (Manual / Automated / IT-dependent manual), control_type (Preventive / Detective), key_control, assertions (financial statement assertions for ICFR, ITGC domains or security objectives) and ipe (reports or extracts the control relies on).
+
+    Per control, testing_procedures with: (1) test_of_design steps (design and implementation); (2) test_of_effectiveness steps over the period of reliance — manual controls: sample occurrences across the period, sized by frequency and risk; automated or configuration controls: a test of one plus reliance on change-management ITGCs or configuration history for the period (a single point-in-time read is design evidence only); (3) substantive_testing steps (follow-up or corroborating procedures, never null or empty); (4) population (source and completeness procedure), sample_size, sampling_method and period_of_reliance. Keep each step list to 1-3 concise steps.{qa_feedback}
+  expected_output: "A structured RACM matching exactly the required JSON/Pydantic schema, with control attributes, test design and substantive_testing populated for every control."
 
 qa_gate_task:
-  description: "Review the drafted RACM. If it lacks substantive testing details, or if ToE relies only on inquiry, you MUST reject it with a specific rejection_reason. Otherwise, approve it."
+  description: |-
+    Review the drafted RACM. Reject it (approved=false) with a specific rejection_reason naming the risk/control IDs if any of these fail:
+    1. Every risk has at least one control, likelihood and impact.
+    2. regulatory_mapping references control frameworks, not auditing standards (e.g. PCAOB AS 2201).
+    3. Every control has control_owner, frequency, nature, control_type and key_control.
+    4. Every control has test_of_design, test_of_effectiveness and non-empty substantive_testing steps; ToE does not rely on inquiry only.
+    5. Every control has a period_of_reliance and a sampling approach; manual controls also have a population with a completeness procedure and a sample_size.
+    6. A point-in-time configuration read is not presented as operating effectiveness for the period unless the reliance (ITGCs or configuration history) is stated.
+    Otherwise, approve it.
   expected_output: "A QA_PushbackSchema object validating the RACM."

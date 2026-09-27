@@ -96,9 +96,10 @@ def _load() -> Dict:
             return {}
 
 
-def _save(data: Dict) -> None:
-    """Write the sessions map atomically (temp file in the same dir + os.replace)."""
-    dir_path = os.path.dirname(SESSIONS_PATH) or "."
+def _save(data: Dict, path: Optional[str] = None) -> None:
+    """Write a JSON map atomically (temp file in the same dir + os.replace)."""
+    path = path or SESSIONS_PATH
+    dir_path = os.path.dirname(path) or "."
     os.makedirs(dir_path, exist_ok=True)
     tmp_path = None
     try:
@@ -109,9 +110,9 @@ def _save(data: Dict) -> None:
             json.dump(data, tmp, indent=2)
             tmp.flush()
             os.fsync(tmp.fileno())
-        os.replace(tmp_path, SESSIONS_PATH)
+        os.replace(tmp_path, path)
     except (OSError, TypeError, ValueError):
-        logger.exception("Failed to save sessions file at %s", SESSIONS_PATH)
+        logger.exception("Failed to save JSON file at %s", path)
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
@@ -176,7 +177,80 @@ def delete_session(thread_id: str) -> None:
         data = _load()
         data.pop(thread_id, None)
         _save(data)
+        try:
+            anchors = _load_anchors()
+        except (ValueError, UnicodeDecodeError):
+            return
+        if thread_id in anchors:
+            anchors.pop(thread_id)
+            _save(anchors, _anchors_path())
 
 
 def get_session(thread_id: str) -> Optional[Dict]:
     return _load().get(thread_id)
+
+
+# ── Approval-trail anchors ───────────────────────────────────────────────────
+# The entry count and head hash of each session's hash-chained approval trail,
+# kept in a separate file (TRAIL_ANCHORS_PATH, default: trail_anchors.json
+# next to the sessions file). swarm.trail.verify_trail uses it to detect a
+# trail whose tail was cut off, which the chain alone cannot show. It only
+# helps against someone who cannot also rewrite this file — put it on
+# separate storage for that.
+
+
+def _anchors_path() -> str:
+    return os.environ.get("TRAIL_ANCHORS_PATH") or os.path.join(
+        os.path.dirname(SESSIONS_PATH) or ".", "trail_anchors.json"
+    )
+
+
+def _load_anchors() -> Dict:
+    try:
+        with open(_anchors_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (ValueError, UnicodeDecodeError):
+        logger.error("Trail anchors file %s is unreadable", _anchors_path())
+        raise
+    return data if isinstance(data, dict) else {}
+
+
+def get_trail_anchor(thread_id: str) -> Optional[Dict]:
+    """``{"count", "head_hash", "updated_at"}`` for the session, if anchored."""
+    try:
+        anchor = _load_anchors().get(thread_id)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return anchor if isinstance(anchor, dict) else None
+
+
+def save_trail_anchor(thread_id: str, count: int, head_hash: str) -> bool:
+    """Record the trail head. Refuses to move the anchor backwards.
+
+    The trail is append-only, so a lower count than the one recorded means
+    the trail being saved was truncated: that is logged and not recorded.
+    Returns True when the anchor was written (or already current).
+    """
+    with _LOCK:
+        anchors = _load_anchors()
+        current = anchors.get(thread_id) or {}
+        current_count = int(current.get("count", 0) or 0)
+        if count < current_count:
+            logger.error(
+                "Not moving trail anchor for %s back from %d to %d entries",
+                thread_id,
+                current_count,
+                count,
+            )
+            return False
+        if count == current_count and current.get("head_hash") == head_hash:
+            return True
+        anchors[thread_id] = {
+            "count": count,
+            "head_hash": head_hash,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        _save(anchors, _anchors_path())
+        return True
