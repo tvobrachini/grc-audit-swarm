@@ -1,58 +1,777 @@
 {
-  "metadata": {
-    "title": "[DEMO DATA] AWS IAM and S3 access controls \u2014 sample results",
-    "last_modified": "2026-01-01T00:00:00+00:00",
-    "version": "demo",
-    "oscal_version": "1.1.2"
-  },
-  "import_ap": {
-    "href": "demo://assessment-plan",
-    "remarks": "Demo data: no assessment plan exists."
-  },
-  "results": [
-    {
-      "assessment_result_id": "demo-result-1",
-      "start_date": "2026-01-01T00:00:00+00:00",
-      "end_date": "2026-01-01T00:00:00+00:00",
-      "observations": [
+  "assessment-results": {
+    "uuid": "2501007b-7f40-574b-ac53-6c9b9887b163",
+    "metadata": {
+      "title": "[DEMO DATA] AWS IAM and S3 access controls — sample results",
+      "last-modified": "2026-09-27T05:49:18.382486+00:00",
+      "version": "sha256-b2a6bfbfd903d906",
+      "oscal-version": "1.2.1",
+      "props": [
         {
-          "observation_id": "demo-obs-1",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] Design and implementation: at the time of the read, the password policy meets the minimum length (14) and the complexity rules in the test step (symbols, numbers, uppercase). Operating effectiveness over the period was not tested.",
-          "methods": [
-            "test"
-          ],
-          "subjects": [
-            "CTRL-01"
-          ],
-          "relevant_evidence": [
-            "be449040-284b-424f-a401-a02198a85193"
+          "name": "session-id",
+          "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+          "value": "963b19ff-f8d7-42eb-8e15-85222b61961e"
+        },
+        {
+          "name": "session-status",
+          "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+          "value": "COMPLETED"
+        },
+        {
+          "name": "report-state",
+          "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+          "value": "Approved at Gate 3"
+        }
+      ],
+      "roles": [
+        {
+          "id": "prepared-by",
+          "title": "Preparer (created the audit)"
+        },
+        {
+          "id": "gate-approver",
+          "title": "Gate approver (Planning, Fieldwork or Reporting)"
+        },
+        {
+          "id": "content-approver",
+          "title": "Report approver (Gate 3)"
+        }
+      ],
+      "parties": [
+        {
+          "uuid": "c97b5579-2ab7-5a84-af9b-a7b8c63b93c3",
+          "type": "person",
+          "name": "J. Rivera, IT Auditor",
+          "remarks": "Declared identity as entered in the application. The API does not authenticate individual reviewers; see the hash-chained assessment log for what this party did."
+        },
+        {
+          "uuid": "b57ca45d-bba7-5edc-b8b8-a36d1bdb95c3",
+          "type": "person",
+          "name": "M. Alvarez, IT Audit Manager",
+          "remarks": "Declared identity as entered in the application. The API does not authenticate individual reviewers; see the hash-chained assessment log for what this party did."
+        },
+        {
+          "uuid": "0d025666-ffd7-5e90-9b64-6342a1e0b87a",
+          "type": "person",
+          "name": "S. Chen, Audit Director",
+          "remarks": "Declared identity as entered in the application. The API does not authenticate individual reviewers; see the hash-chained assessment log for what this party did."
+        }
+      ],
+      "responsible-parties": [
+        {
+          "role-id": "prepared-by",
+          "party-uuids": [
+            "c97b5579-2ab7-5a84-af9b-a7b8c63b93c3"
           ]
         },
         {
-          "observation_id": "demo-obs-2",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. It is a key control: before Gate 3 the auditor must either extend testing (for example, inspect the review sign-offs) or report it as a scope limitation.",
-          "methods": [
-            "examine"
-          ],
-          "subjects": [
-            "CTRL-03"
-          ],
-          "relevant_evidence": []
+          "role-id": "gate-approver",
+          "party-uuids": [
+            "b57ca45d-bba7-5edc-b8b8-a36d1bdb95c3",
+            "0d025666-ffd7-5e90-9b64-6342a1e0b87a"
+          ]
         },
         {
-          "observation_id": "demo-obs-3",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] All three buckets in the population were tested (full population from ListBuckets). One bucket is public through an ACL granting AllUsers READ, with Block Public Access off at both account and bucket level; for that bucket the control is not implemented as designed.",
-          "methods": [
-            "test"
+          "role-id": "content-approver",
+          "party-uuids": [
+            "0d025666-ffd7-5e90-9b64-6342a1e0b87a"
+          ]
+        }
+      ],
+      "remarks": "Report state: Approved at Gate 3. Generated by GRC Audit Swarm from the gate-reviewed RACM, working papers and report of this session. The content was drafted by LLM agents and reviewed by the people recorded in the assessment log. last-modified is the time of the latest approval-trail entry, not the export time; version is a digest of the source artifacts."
+    },
+    "import-ap": {
+      "href": "#32f23069-6503-5d58-8bca-cd2e77e4ad88",
+      "remarks": "No OSCAL assessment plan document exists. This reference resolves to a back-matter resource describing the RACM, which served as the assessment plan."
+    },
+    "results": [
+      {
+        "uuid": "77adf246-e398-541a-b4db-f83617f1ed35",
+        "title": "Audit results — AWS IAM and S3 access controls",
+        "description": "DEMO DATA — generated by DEMO_MODE from fixed sample content. No language model was called and no AWS account was examined; the evidence referenced is synthetic; it is stored in the evidence vault under a DEMO DATA label so quote verification can be shown working. Not an audit opinion.\n\nThe demo walk-through evaluated 3 sample control(s): 1 × Exception, 1 × No exception, 1 × Not tested. Operating effectiveness was not tested for 3 of 3 control(s) (CTRL-01, CTRL-03, CTRL-02); for those, the evidence covers design and implementation only. 1 deficiency evaluation(s) proposed on the 'Risk rating' scale, subject to the auditor's judgement at Gate 3.",
+        "start": "2026-09-27T05:49:18.365023+00:00",
+        "end": "2026-09-27T05:49:18.365268+00:00",
+        "props": [
+          {
+            "name": "deficiency-scale",
+            "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+            "value": "Risk rating"
+          }
+        ],
+        "local-definitions": {
+          "components": [
+            {
+              "uuid": "ed4bebbc-5fbc-566f-a611-2bc281dddc54",
+              "type": "this-system",
+              "title": "Audit scope: AWS IAM and S3 access controls",
+              "description": "The environment in scope for this audit, as described by the audit theme. No system security plan was imported, so the component is described only by the audit scope.",
+              "status": {
+                "state": "other",
+                "remarks": "Operational status was not recorded by the audit."
+              }
+            }
           ],
-          "subjects": [
-            "CTRL-02"
-          ],
-          "relevant_evidence": [
-            "93d469c5-13ea-4718-8767-e554d2a60b7e"
+          "assessment-assets": {
+            "assessment-platforms": [
+              {
+                "uuid": "588713f0-d098-5883-b4e0-fd01c6e51789",
+                "title": "GRC Audit Swarm",
+                "props": [
+                  {
+                    "name": "platform-description",
+                    "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                    "value": "LLM agent crews draft the RACM, working papers and report; a human approves each phase at a gate"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "reviewed-controls": {
+          "description": "Controls in the engagement's Risk and Control Matrix (RACM). The control IDs are the engagement's own identifiers, not IDs from an OSCAL catalog; no catalog or profile is imported.",
+          "control-selections": [
+            {
+              "include-controls": [
+                {
+                  "control-id": "CTRL-01"
+                },
+                {
+                  "control-id": "CTRL-03"
+                },
+                {
+                  "control-id": "CTRL-02"
+                }
+              ]
+            }
+          ]
+        },
+        "assessment-log": {
+          "entries": [
+            {
+              "uuid": "4143db1d-bc96-5702-a190-c7c2e8c77c41",
+              "title": "Audit created",
+              "start": "2026-09-27T05:49:18.330343+00:00",
+              "props": [
+                {
+                  "name": "trail-action",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "audit_created"
+                },
+                {
+                  "name": "trail-hash-alg",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "sha256"
+                },
+                {
+                  "name": "trail-entry-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "0f60dd30111275a3fdf4c8ef4f190a2c157d0cde15bb3ea630c9527055806781"
+                },
+                {
+                  "name": "trail-prev-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "0000000000000000000000000000000000000000000000000000000000000000"
+                }
+              ],
+              "description": "audit_created by J. Rivera, IT Auditor",
+              "logged-by": [
+                {
+                  "party-uuid": "c97b5579-2ab7-5a84-af9b-a7b8c63b93c3"
+                }
+              ]
+            },
+            {
+              "uuid": "3cb6d185-fbe1-52b6-bd8f-baac70be18f3",
+              "title": "Return for rework (Planning)",
+              "start": "2026-09-27T05:49:18.351834+00:00",
+              "props": [
+                {
+                  "name": "trail-action",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "return_for_rework"
+                },
+                {
+                  "name": "artifact",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "racm_plan"
+                },
+                {
+                  "name": "artifact-digest",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "767cfde5ce6b1f0f7dd7ae2cb3e1cb210503f269710f64a644fd42acdfc2a13e"
+                },
+                {
+                  "name": "trail-hash-alg",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "sha256"
+                },
+                {
+                  "name": "trail-entry-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "e29bc0ba4d302b3fd0946a9e9ac2ec8d45912d1b145a239266a311b48201ff55"
+                },
+                {
+                  "name": "trail-prev-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "0f60dd30111275a3fdf4c8ef4f190a2c157d0cde15bb3ea630c9527055806781"
+                }
+              ],
+              "description": "return_for_rework by M. Alvarez, IT Audit Manager\n\nReview notes: Please add a completeness procedure for the IAM credential report population before I can approve the RACM.",
+              "logged-by": [
+                {
+                  "party-uuid": "b57ca45d-bba7-5edc-b8b8-a36d1bdb95c3"
+                }
+              ]
+            },
+            {
+              "uuid": "bd6fdb09-6043-54f4-a9b3-f16c5ff982c8",
+              "title": "Gate 1 (Planning)",
+              "start": "2026-09-27T05:49:18.362258+00:00",
+              "props": [
+                {
+                  "name": "trail-action",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "gate_approval"
+                },
+                {
+                  "name": "artifact",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "racm_plan"
+                },
+                {
+                  "name": "artifact-digest",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "767cfde5ce6b1f0f7dd7ae2cb3e1cb210503f269710f64a644fd42acdfc2a13e"
+                },
+                {
+                  "name": "trail-hash-alg",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "sha256"
+                },
+                {
+                  "name": "trail-entry-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "5aae8857bc1516c67784c1c906956c6441084612e59f6cd2f72d534051e1cf8c"
+                },
+                {
+                  "name": "trail-prev-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "e29bc0ba4d302b3fd0946a9e9ac2ec8d45912d1b145a239266a311b48201ff55"
+                }
+              ],
+              "description": "gate_approval by M. Alvarez, IT Audit Manager",
+              "logged-by": [
+                {
+                  "party-uuid": "b57ca45d-bba7-5edc-b8b8-a36d1bdb95c3"
+                }
+              ]
+            },
+            {
+              "uuid": "4363c079-3211-5a3c-8dba-6d79a88c317a",
+              "title": "Gate 2 (Fieldwork)",
+              "start": "2026-09-27T05:49:18.372841+00:00",
+              "props": [
+                {
+                  "name": "trail-action",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "gate_approval"
+                },
+                {
+                  "name": "artifact",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "working_papers"
+                },
+                {
+                  "name": "artifact-digest",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "9eae3317c325689216e5a6c5517aac3c4dc45209ea947f77cbd1dc6bd74a318a"
+                },
+                {
+                  "name": "trail-hash-alg",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "sha256"
+                },
+                {
+                  "name": "trail-entry-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "2485d98b86ecd40fbc98f908ca6a96f45903da906bb3b9255b4ef13ac7df4c44"
+                },
+                {
+                  "name": "trail-prev-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "5aae8857bc1516c67784c1c906956c6441084612e59f6cd2f72d534051e1cf8c"
+                }
+              ],
+              "description": "gate_approval by M. Alvarez, IT Audit Manager",
+              "logged-by": [
+                {
+                  "party-uuid": "b57ca45d-bba7-5edc-b8b8-a36d1bdb95c3"
+                }
+              ]
+            },
+            {
+              "uuid": "74b083d3-dc62-5c94-8773-4d03ccd34353",
+              "title": "Gate 3 (Reporting)",
+              "start": "2026-09-27T05:49:18.382486+00:00",
+              "props": [
+                {
+                  "name": "trail-action",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "gate_approval"
+                },
+                {
+                  "name": "artifact",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "final_report"
+                },
+                {
+                  "name": "artifact-digest",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "ea1f518fe8dc07e2f2e3c38cbb8db48afc8ecca956a60cf8228083bc4f77d852"
+                },
+                {
+                  "name": "trail-hash-alg",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "sha256"
+                },
+                {
+                  "name": "trail-entry-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "3abf5e3d977a6e6b09c239f682a1bf58960a19af85a4bc91e58f550761ae4be0"
+                },
+                {
+                  "name": "trail-prev-hash",
+                  "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                  "value": "2485d98b86ecd40fbc98f908ca6a96f45903da906bb3b9255b4ef13ac7df4c44"
+                }
+              ],
+              "description": "gate_approval by S. Chen, Audit Director",
+              "logged-by": [
+                {
+                  "party-uuid": "0d025666-ffd7-5e90-9b64-6342a1e0b87a"
+                }
+              ]
+            }
+          ]
+        },
+        "observations": [
+          {
+            "uuid": "6893873b-e94f-57c4-9d2c-3307fbb565b4",
+            "title": "CTRL-01 — ToD Effective; ToE Not tested",
+            "description": "[DEMO DATA — synthetic evidence] Design and implementation: at the time of the read, the password policy meets the minimum length (14) and the complexity rules in the test step (symbols, numbers, uppercase). Operating effectiveness over the period was not tested.",
+            "props": [
+              {
+                "name": "control-id",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "CTRL-01"
+              },
+              {
+                "name": "tod-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Effective"
+              },
+              {
+                "name": "toe-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Not tested"
+              },
+              {
+                "name": "result",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "No exception"
+              },
+              {
+                "name": "items-tested",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "1"
+              },
+              {
+                "name": "exceptions-noted",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "0"
+              },
+              {
+                "name": "preliminary-deficiency",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "false"
+              }
+            ],
+            "methods": [
+              "EXAMINE"
+            ],
+            "types": [
+              "control-objective"
+            ],
+            "origins": [
+              {
+                "actors": [
+                  {
+                    "type": "assessment-platform",
+                    "actor-uuid": "588713f0-d098-5883-b4e0-fd01c6e51789"
+                  }
+                ]
+              }
+            ],
+            "subjects": [
+              {
+                "subject-uuid": "ed4bebbc-5fbc-566f-a611-2bc281dddc54",
+                "type": "component"
+              }
+            ],
+            "collected": "2026-09-27T05:49:18.365023+00:00",
+            "relevant-evidence": [
+              {
+                "href": "#7a933c81-071f-5ca4-bbb2-e32ce27d497e",
+                "description": "Evidence vault record cca5ed36-2451-4725-8826-8fc9c2a62117 (demo_mode_synthetic_evidence). Quoted in the working paper: “MinimumPasswordLength=14, RequireSymbols=true, RequireNumbers=true, RequireUppercaseCharacters=true”",
+                "props": [
+                  {
+                    "name": "vault-id",
+                    "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                    "value": "cca5ed36-2451-4725-8826-8fc9c2a62117"
+                  },
+                  {
+                    "name": "quote-verified-in-vault",
+                    "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                    "value": "true"
+                  }
+                ]
+              }
+            ],
+            "remarks": "Basis for the ToE conclusion: Single point-in-time configuration read: design and implementation evidence only. Operating effectiveness for the period would rely on change-management ITGCs over IAM configuration or on AWS Config history; neither was tested in this demo.\n\nReporting-crew narrative (model-drafted): [DEMO DATA] [DEMO DATA — synthetic evidence] Design and implementation: at the time of the read, the password policy meets the minimum length (14) and the complexity rules in the test step (symbols, numbers, uppercase). Operating effectiveness over the period was not tested."
+          },
+          {
+            "uuid": "6b4c2dee-3228-5733-a9a9-25aa3ae8e06b",
+            "title": "CTRL-03 — ToD Not tested; ToE Not tested",
+            "description": "[DEMO DATA — no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. It is a key control: before Gate 3 the auditor must either extend testing (for example, inspect the review sign-offs) or report it as a scope limitation.",
+            "props": [
+              {
+                "name": "control-id",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "CTRL-03"
+              },
+              {
+                "name": "tod-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Not tested"
+              },
+              {
+                "name": "toe-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Not tested"
+              },
+              {
+                "name": "result",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Not tested"
+              },
+              {
+                "name": "preliminary-deficiency",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "false"
+              }
+            ],
+            "methods": [
+              "EXAMINE"
+            ],
+            "types": [
+              "control-objective"
+            ],
+            "origins": [
+              {
+                "actors": [
+                  {
+                    "type": "assessment-platform",
+                    "actor-uuid": "588713f0-d098-5883-b4e0-fd01c6e51789"
+                  }
+                ]
+              }
+            ],
+            "subjects": [
+              {
+                "subject-uuid": "ed4bebbc-5fbc-566f-a611-2bc281dddc54",
+                "type": "component"
+              }
+            ],
+            "collected": "2026-09-27T05:49:18.372841+00:00",
+            "remarks": "Basis for the ToE conclusion: No evidence tool covers this control.\n\nNot tested: no evidence covered this control. OSCAL finding targets are only 'satisfied' or 'not-satisfied', so this observation has no finding; the result prop records it.\n\nReporting-crew narrative (model-drafted): [DEMO DATA] [DEMO DATA — no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. It is a key control: before Gate 3 the auditor must either extend testing (for example, inspect the review sign-offs) or report it as a scope limitation."
+          },
+          {
+            "uuid": "c7186ed7-306d-5e4b-8778-9ffad918d159",
+            "title": "CTRL-02 — ToD Ineffective; ToE Not tested",
+            "description": "[DEMO DATA — synthetic evidence] All three buckets in the population were tested (full population from ListBuckets). One bucket is public through an ACL granting AllUsers READ, with Block Public Access off at both account and bucket level; for that bucket the control is not implemented as designed.",
+            "props": [
+              {
+                "name": "control-id",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "CTRL-02"
+              },
+              {
+                "name": "tod-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Ineffective"
+              },
+              {
+                "name": "toe-conclusion",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Not tested"
+              },
+              {
+                "name": "result",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Exception"
+              },
+              {
+                "name": "items-tested",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "3"
+              },
+              {
+                "name": "exceptions-noted",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "1"
+              },
+              {
+                "name": "preliminary-deficiency",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "true"
+              }
+            ],
+            "methods": [
+              "EXAMINE"
+            ],
+            "types": [
+              "control-objective"
+            ],
+            "origins": [
+              {
+                "actors": [
+                  {
+                    "type": "assessment-platform",
+                    "actor-uuid": "588713f0-d098-5883-b4e0-fd01c6e51789"
+                  }
+                ]
+              }
+            ],
+            "subjects": [
+              {
+                "subject-uuid": "ed4bebbc-5fbc-566f-a611-2bc281dddc54",
+                "type": "component"
+              }
+            ],
+            "collected": "2026-09-27T05:49:18.365268+00:00",
+            "relevant-evidence": [
+              {
+                "href": "#6d228241-6f3e-52ca-805a-05ba5b9ae0a6",
+                "description": "Evidence vault record 31e919d0-5290-4828-a03c-a854557090de (demo_mode_synthetic_evidence). Quoted in the working paper: “Bucket demo-analytics-exports: Verdict=PUBLIC, Reasons=ACL grants AllUsers READ”",
+                "props": [
+                  {
+                    "name": "vault-id",
+                    "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                    "value": "31e919d0-5290-4828-a03c-a854557090de"
+                  },
+                  {
+                    "name": "quote-verified-in-vault",
+                    "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                    "value": "true"
+                  }
+                ]
+              }
+            ],
+            "remarks": "Basis for the ToE conclusion: Not performed: the control is not implemented on one bucket, so operating effectiveness was not tested.\n\nReporting-crew narrative (model-drafted): [DEMO DATA] [DEMO DATA — synthetic evidence] All three buckets in the population were tested (full population from ListBuckets). One bucket is public through an ACL granting AllUsers READ, with Block Public Access off at both account and bucket level; for that bucket the control is not implemented as designed."
+          }
+        ],
+        "risks": [
+          {
+            "uuid": "bb5e2da4-a5a7-5af2-b973-273719ba074e",
+            "title": "[DEMO DATA] CTRL-02 not implemented as designed",
+            "description": "Proposed by the reporting crew and approved with the report at Gate 3; see the assessment log.\n\nFindings evaluated together: CTRL-02. RACM risks affected: RISK-02.\n\nCompensating controls considered: None identified in the RACM: no other control prevents public bucket ACLs.",
+            "statement": "Likelihood High, magnitude Medium. Proposed classification: Medium (Risk rating). Rationale: [DEMO DATA] One of three buckets is publicly readable through an ACL (effective verdict PUBLIC, Block Public Access off at account and bucket level), so exposure is already possible. No compensating control was tested. The bucket's data classification was not assessed, so magnitude is Medium pending the data owner's confirmation; if it holds customer or confidential data the rating would rise to High. Proposed rating Medium: a draft for the auditor's judgement at Gate 3.",
+            "props": [
+              {
+                "name": "deficiency-id",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "DEF-01"
+              },
+              {
+                "name": "classification",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Medium"
+              },
+              {
+                "name": "deficiency-scale",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Risk rating"
+              },
+              {
+                "name": "classification-state",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "approved-with-report"
+              },
+              {
+                "name": "likelihood",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "High"
+              },
+              {
+                "name": "magnitude",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Medium"
+              },
+              {
+                "name": "racm-risk-id",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "RISK-02"
+              }
+            ],
+            "status": "open",
+            "related-observations": [
+              {
+                "observation-uuid": "c7186ed7-306d-5e4b-8778-9ffad918d159"
+              }
+            ]
+          }
+        ],
+        "findings": [
+          {
+            "uuid": "c9598aba-6ba9-5939-a49f-09a39bcaca9b",
+            "title": "CTRL-01: No exception",
+            "description": "[DEMO DATA — synthetic evidence] Design and implementation: at the time of the read, the password policy meets the minimum length (14) and the complexity rules in the test step (symbols, numbers, uppercase). Operating effectiveness over the period was not tested.",
+            "props": [
+              {
+                "name": "result",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "No exception"
+              },
+              {
+                "name": "preliminary-deficiency",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "false"
+              }
+            ],
+            "target": {
+              "type": "objective-id",
+              "target-id": "CTRL-01",
+              "title": "RACM control CTRL-01",
+              "status": {
+                "state": "satisfied",
+                "reason": "pass",
+                "remarks": "Design and implementation only: operating effectiveness over the period was not tested."
+              }
+            },
+            "related-observations": [
+              {
+                "observation-uuid": "6893873b-e94f-57c4-9d2c-3307fbb565b4"
+              }
+            ]
+          },
+          {
+            "uuid": "21fe2fa1-5c1c-58e9-9d6f-c513d6733008",
+            "title": "CTRL-02: Exception",
+            "description": "[DEMO DATA — synthetic evidence] All three buckets in the population were tested (full population from ListBuckets). One bucket is public through an ACL granting AllUsers READ, with Block Public Access off at both account and bucket level; for that bucket the control is not implemented as designed.",
+            "props": [
+              {
+                "name": "result",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "Exception"
+              },
+              {
+                "name": "preliminary-deficiency",
+                "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+                "value": "true"
+              }
+            ],
+            "target": {
+              "type": "objective-id",
+              "target-id": "CTRL-02",
+              "title": "RACM control CTRL-02",
+              "status": {
+                "state": "not-satisfied",
+                "reason": "fail"
+              }
+            },
+            "related-observations": [
+              {
+                "observation-uuid": "c7186ed7-306d-5e4b-8778-9ffad918d159"
+              }
+            ],
+            "related-risks": [
+              {
+                "risk-uuid": "bb5e2da4-a5a7-5af2-b973-273719ba074e"
+              }
+            ]
+          }
+        ],
+        "remarks": "Observations: one per working-paper finding. Findings: one per tested control; a control concluded 'Not tested' has an observation but no finding. Test-of-design / operating-effectiveness conclusions and deficiency classifications are props in the namespace https://github.com/tvobrachini/grc-audit-swarm/ns/oscal. Methods: EXAMINE marks a design and implementation conclusion, TEST an operating-effectiveness conclusion over the period."
+      }
+    ],
+    "back-matter": {
+      "resources": [
+        {
+          "uuid": "32f23069-6503-5d58-8bca-cd2e77e4ad88",
+          "title": "Audit programme (RACM) — AWS IAM and S3 access controls",
+          "description": "No OSCAL assessment plan exists for this engagement. The Risk and Control Matrix approved at Gate 1 (Planning) served as the plan: the risks, the controls in scope and their test procedures. It is available as an .xlsx export, not as OSCAL.",
+          "rlinks": [
+            {
+              "href": "/api/sessions/963b19ff-f8d7-42eb-8e15-85222b61961e/export/racm.xlsx",
+              "media-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+          ]
+        },
+        {
+          "uuid": "7a933c81-071f-5ca4-bbb2-e32ce27d497e",
+          "title": "Evidence vault record cca5ed36-2451-4725-8826-8fc9c2a62117",
+          "description": "Raw evidence collected by a read-only tool and stored in the project's evidence vault with an integrity digest. The payload is not embedded in this document.",
+          "props": [
+            {
+              "name": "vault-id",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "cca5ed36-2451-4725-8826-8fc9c2a62117"
+            },
+            {
+              "name": "evidence-source",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "demo_mode_synthetic_evidence"
+            },
+            {
+              "name": "collected",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "2026-09-27T05:49:18.365023+00:00"
+            },
+            {
+              "name": "vault-record-found",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "uuid": "6d228241-6f3e-52ca-805a-05ba5b9ae0a6",
+          "title": "Evidence vault record 31e919d0-5290-4828-a03c-a854557090de",
+          "description": "Raw evidence collected by a read-only tool and stored in the project's evidence vault with an integrity digest. The payload is not embedded in this document.",
+          "props": [
+            {
+              "name": "vault-id",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "31e919d0-5290-4828-a03c-a854557090de"
+            },
+            {
+              "name": "evidence-source",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "demo_mode_synthetic_evidence"
+            },
+            {
+              "name": "collected",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "2026-09-27T05:49:18.365268+00:00"
+            },
+            {
+              "name": "vault-record-found",
+              "ns": "https://github.com/tvobrachini/grc-audit-swarm/ns/oscal",
+              "value": "true"
+            }
           ]
         }
       ]
     }
-  ]
+  }
 }

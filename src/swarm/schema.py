@@ -743,6 +743,14 @@ class OSCAL_SAR_Result(BaseModel):
 
 
 class OSCAL_SAR_Schema(BaseModel):
+    """The reporting crew's OSCAL-oriented output, in Python-style names.
+
+    This is LLM output, not OSCAL. The ``oscal.json`` export is a real OSCAL
+    Assessment Results document built by :mod:`swarm.oscal_ar` from the
+    gate-reviewed artifacts; it uses only this object's title and
+    observation narratives (see DECISIONS.md, ADR-005).
+    """
+
     metadata: OSCAL_SAR_Metadata
     import_ap: OSCAL_SAR_ImportAP
     results: List[OSCAL_SAR_Result]

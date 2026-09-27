@@ -96,10 +96,23 @@ def export_report(session_id: str) -> Response:
 @router.get("/{session_id}/export/oscal.json")
 def export_oscal(session_id: str) -> Response:
     flow, ctx = _load(session_id)
-    report = flow.state.final_report
-    body = oscal_json(report) if report is not None else None
-    if body is None:
-        raise _missing("OSCAL assessment results")
+    state = flow.state
+    if state.final_report is None:
+        raise _missing("Final report")
+    if state.working_papers is None:
+        raise _missing("Working papers")
+    try:
+        body = oscal_json(
+            state.final_report,
+            state.working_papers,
+            state.racm_plan,
+            state.approval_trail,
+            ctx,
+            theme=state.theme,
+            prepared_by=state.prepared_by,
+        )
+    except ValueError:
+        raise _missing("OSCAL assessment results") from None
     return _download(
         body, "application/json", export_filename(ctx, "oscal-sar", "json")
     )

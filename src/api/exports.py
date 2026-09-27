@@ -1,6 +1,6 @@
 """
 Download formats for audit artifacts: RACM and working papers as .xlsx, the
-final report as Markdown, and the report's OSCAL-shaped part as JSON.
+final report as Markdown, and an OSCAL Assessment Results document as JSON.
 
 Artifact text is model output (and, for the scope, user input), so:
 
@@ -359,8 +359,37 @@ def report_markdown(
     return "\n".join(lines) + "\n"
 
 
-def oscal_json(report: FinalReportSchema) -> Optional[bytes]:
-    """The report's OSCAL-shaped part, or None when the report has none."""
-    if report.oscal_sar is None:
-        return None
-    return json.dumps(report.oscal_sar.model_dump(mode="json"), indent=2).encode()
+def oscal_json(
+    report: FinalReportSchema,
+    papers: WorkingPaperSchema,
+    racm: Optional[RiskControlMatrixSchema],
+    trail: list[dict[str, str]],
+    ctx: ExportContext,
+    *,
+    theme: str = "",
+    prepared_by: str = "",
+) -> bytes:
+    """The session as an OSCAL Assessment Results document (JSON).
+
+    Built by :mod:`swarm.oscal_ar` from the working papers, RACM, report and
+    approval trail; it validates against NIST's official OSCAL
+    assessment-results JSON schema (see tests/test_oscal_ar.py).
+    """
+    from swarm.evidence import EvidenceAssuranceProtocol
+    from swarm.oscal_ar import build_assessment_results
+
+    document = build_assessment_results(
+        session_id=ctx.session_id,
+        session_name=ctx.session_name,
+        session_status=ctx.status,
+        report_state=ctx.artifact_state(3),
+        theme=theme,
+        report=report,
+        papers=papers,
+        racm=racm,
+        trail=trail,
+        prepared_by=prepared_by,
+        markup=sanitize_report,
+        verify_quote=EvidenceAssuranceProtocol.verify_exact_quote,
+    )
+    return json.dumps(document, indent=2, ensure_ascii=False).encode("utf-8")
