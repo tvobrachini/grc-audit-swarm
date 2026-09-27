@@ -10,14 +10,16 @@ from fastapi.responses import JSONResponse
 from api.auth import require_api_auth
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
-from api.routers import config, evidence, exports, phases, sessions
+from api.routers import config, evidence, exports, imports, phases, sessions
 from api.scope_document import MAX_UPLOAD_BYTES
 from swarm.demo import demo_mode_enabled
+from swarm.tools.findings_checks import MAX_PROWLER_FILE_BYTES
 
 logger = logging.getLogger(__name__)
 
 # Document limit plus room for the multipart envelope and form fields.
 _MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_BYTES + 256 * 1024
+_MAX_PROWLER_UPLOAD_REQUEST_BYTES = MAX_PROWLER_FILE_BYTES + 256 * 1024
 
 
 @asynccontextmanager
@@ -71,6 +73,12 @@ async def limit_upload_size(request: Request, call_next):
             return JSONResponse(
                 status_code=413, content={"detail": "Upload is too large."}
             )
+    if request.method == "POST" and request.url.path.endswith("/imports/prowler"):
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > _MAX_PROWLER_UPLOAD_REQUEST_BYTES:
+            return JSONResponse(
+                status_code=413, content={"detail": "Upload is too large."}
+            )
     return await call_next(request)
 
 
@@ -98,6 +106,12 @@ app.include_router(
     evidence.router,
     prefix="/api/evidence",
     tags=["evidence"],
+    dependencies=_api_auth,
+)
+app.include_router(
+    imports.router,
+    prefix="/api/sessions",
+    tags=["imports"],
     dependencies=_api_auth,
 )
 
