@@ -244,7 +244,7 @@ class TestReportExport:
         assert "## Deficiency Evaluation (proposed)" in body
         assert "for the auditor's judgement at Gate 3. Scale: Risk rating." in body
         row = next(line for line in body.splitlines() if line.startswith("| DEF-01"))
-        assert "| CTRL-02 | RISK-02 | Medium | High | High |" in row
+        assert "| CTRL-02 | RISK-02 | High | Medium | Medium |" in row
         assert "A \\| B" in row  # a pipe in model text cannot break the table
         assert "evil.example" not in body
         assert body.index("## Deficiency Evaluation") < body.index("## Approval Trail")

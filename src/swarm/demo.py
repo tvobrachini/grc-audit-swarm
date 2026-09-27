@@ -287,12 +287,13 @@ def demo_racm(theme: str = "") -> RiskControlMatrixSchema:
             ),
             Risk(
                 risk_id="RISK-02",
-                description=f"[{DEMO_LABEL}] Customer data in S3 is exposed publicly.",
+                description=f"[{DEMO_LABEL}] Data in S3 is exposed publicly.",
                 likelihood=RiskRating.MEDIUM,
                 impact=RiskRating.HIGH,
                 rating_rationale=(
-                    "A single public ACL exposes a bucket to the internet, and "
-                    "the buckets hold customer data."
+                    "A single public ACL exposes a bucket to the internet; the "
+                    "impact depends on the data held, which the data owner must "
+                    "confirm."
                 ),
                 regulatory_mapping=[
                     "CIS AWS Foundations Benchmark, S3 section (demo mapping)",
@@ -322,7 +323,10 @@ _DEMO_FINDINGS: dict[str, dict[str, Any]] = {
             "PasswordPolicy: MinimumPasswordLength=14, RequireSymbols=true, "
             "RequireNumbers=true, RequireUppercaseCharacters=true"
         ),
-        "quote": "MinimumPasswordLength=14",
+        "quote": (
+            "MinimumPasswordLength=14, RequireSymbols=true, RequireNumbers=true, "
+            "RequireUppercaseCharacters=true"
+        ),
         "tod": DesignConclusion.EFFECTIVE,
         "toe": OperatingConclusion.NOT_TESTED,
         "toe_basis": (
@@ -334,19 +338,24 @@ _DEMO_FINDINGS: dict[str, dict[str, Any]] = {
         "items_tested": 1,
         "exceptions": 0,
         "conclusion": (
-            "Design and implementation: at the time of the read, the sample "
-            "password policy meets the length requirement in the test step. "
-            "Operating effectiveness over the period was not tested."
+            "Design and implementation: at the time of the read, the password "
+            "policy meets the minimum length (14) and the complexity rules in "
+            "the test step (symbols, numbers, uppercase). Operating "
+            "effectiveness over the period was not tested."
         ),
     },
     "CTRL-02": {
         "evidence": (
-            "Bucket demo-analytics-exports: BlockPublicAcls: false, "
-            "BlockPublicPolicy: true; Bucket demo-app-logs: BlockPublicAcls: "
-            "true, BlockPublicPolicy: true; Bucket demo-backups: "
-            "BlockPublicAcls: true, BlockPublicPolicy: true"
+            "Account Block Public Access: IgnorePublicAcls=false, "
+            "RestrictPublicBuckets=false. Bucket demo-analytics-exports: "
+            "Verdict=PUBLIC, Reasons=ACL grants AllUsers READ, bucket "
+            "IgnorePublicAcls=false. Bucket demo-app-logs: Verdict=NOT_PUBLIC. "
+            "Bucket demo-backups: Verdict=NOT_PUBLIC."
         ),
-        "quote": "Bucket demo-analytics-exports: BlockPublicAcls: false",
+        "quote": (
+            "Bucket demo-analytics-exports: Verdict=PUBLIC, Reasons=ACL grants "
+            "AllUsers READ"
+        ),
         "tod": DesignConclusion.INEFFECTIVE,
         "toe": OperatingConclusion.NOT_TESTED,
         "toe_basis": (
@@ -356,8 +365,11 @@ _DEMO_FINDINGS: dict[str, dict[str, Any]] = {
         "items_tested": 3,
         "exceptions": 1,
         "conclusion": (
-            "One of three sample buckets does not block public ACLs; the "
-            "control is not implemented as designed."
+            "All three buckets in the population were tested (full population "
+            "from ListBuckets). One bucket is public through an ACL granting "
+            "AllUsers READ, with Block Public Access off at both account and "
+            "bucket level; for that bucket the control is not implemented as "
+            "designed."
         ),
     },
 }
@@ -395,7 +407,9 @@ def _demo_finding(control_id: str) -> AuditFindingSchema:
             test_conclusion=(
                 f"[{DEMO_LABEL} — no evidence] No available evidence tool covers "
                 "this control (review sign-offs are held outside AWS), so it was "
-                "not tested. This is a scope limitation, not a deficiency."
+                "not tested. It is a key control: before Gate 3 the auditor must "
+                "either extend testing (for example, inspect the review "
+                "sign-offs) or report it as a scope limitation."
             ),
         )
     return AuditFindingSchema(
@@ -450,14 +464,18 @@ def _demo_evaluation(
         )
     return DeficiencyEvaluationSchema(
         **common,
-        likelihood=RiskRating.MEDIUM,
-        magnitude=RiskRating.HIGH,
-        classification=DeficiencyClassification.HIGH,
+        likelihood=RiskRating.HIGH,
+        magnitude=RiskRating.MEDIUM,
+        classification=DeficiencyClassification.MEDIUM,
         rationale=(
-            f"[{DEMO_LABEL}] One of three buckets accepts public ACLs, no "
-            "compensating control was identified, and the buckets hold customer "
-            "data. Proposed rating High: a draft for the auditor's judgement at "
-            "Gate 3."
+            f"[{DEMO_LABEL}] One of three buckets is publicly readable through "
+            "an ACL (effective verdict PUBLIC, Block Public Access off at "
+            "account and bucket level), so exposure is already possible. No "
+            "compensating control was tested. The bucket's data classification "
+            "was not assessed, so magnitude is Medium pending the data owner's "
+            "confirmation; if it holds customer or confidential data the rating "
+            "would rise to High. Proposed rating Medium: a draft for the "
+            "auditor's judgement at Gate 3."
         ),
     )
 
@@ -497,11 +515,25 @@ def demo_final_report(
     not_tested = [
         f.control_id for f in papers.findings if f.result == FindingResult.NOT_TESTED
     ]
+    # "No exception" says nothing about operating effectiveness: report the
+    # ToE gap separately so a clean result can't hide it.
+    toe_not_tested = [
+        f.control_id
+        for f in papers.findings
+        if f.toe_conclusion == OperatingConclusion.NOT_TESTED
+    ]
+    toe_note = (
+        f"Operating effectiveness was not tested for {len(toe_not_tested)} of "
+        f"{len(papers.findings)} control(s) ({', '.join(toe_not_tested)}); for "
+        "those, the evidence covers design and implementation only."
+        if toe_not_tested
+        else "Operating effectiveness was tested for every control."
+    )
     now = "2026-01-01T00:00:00+00:00"  # fixed: demo output is deterministic
     return FinalReportSchema(
         executive_summary=(
             f"{DEMO_NOTICE}\n\nThe demo walk-through evaluated "
-            f"{len(papers.findings)} sample control(s): {tally}. "
+            f"{len(papers.findings)} sample control(s): {tally}. {toe_note} "
             f"{len(evaluations)} deficiency evaluation(s) proposed on the "
             f"'{scale}' scale, subject to the auditor's judgement at Gate 3."
         ),
@@ -510,9 +542,15 @@ def demo_final_report(
             + "\n".join(lines)
             + "\n\nProposed deficiency evaluation (draft for Gate 3):\n"
             + "\n".join(deficiency_lines)
+            + f"\n\n{toe_note}"
             + "\n\nScope limitations (not tested): "
             + (", ".join(not_tested) or "none")
-            + "."
+            + (
+                ". Before Gate 3 the auditor must extend testing for these "
+                "controls or report the limitation."
+                if not_tested
+                else "."
+            )
         ),
         compliance_tone_approved=True,
         deficiency_scale=scale,
