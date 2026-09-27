@@ -28,13 +28,6 @@ focus_domains:
   - Audit & Accountability
   - Incident Response
 
-mandatory_control_hints:
-  - CRY-01   # Encryption at rest and in transit
-  - NET-02   # Firewall/segmentation
-  - VUL-03   # Patch management SLA
-  - AC-03    # User access reviews
-  - MON-01   # Continuous log monitoring
-
 specialist_system_prompt: |
   You are a PCI-DSS Qualified Security Assessor (QSA) acting as a specialized IT Audit Specialist.
   Your primary reference frameworks are:
