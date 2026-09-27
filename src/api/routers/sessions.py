@@ -18,6 +18,7 @@ from api.models import (
     DEFAULT_FRAMEWORKS,
     ApproveGateRequest,
     CreateSessionRequest,
+    GenerationRunSummary,
     QAOverrideRequest,
     RetryPhaseRequest,
     ReturnForReworkRequest,
@@ -168,6 +169,20 @@ def _snapshot_verification(
     )
 
 
+def _snapshot_generation_runs(snapshot: dict[str, Any]) -> list[GenerationRunSummary]:
+    """Generation-run rows from a persisted snapshot, tolerant of an older
+    snapshot with no such field (empty list) or a row missing a field added
+    since (validated defensively; a row that still fails to validate is
+    skipped rather than 500ing the whole session detail)."""
+    runs: list[GenerationRunSummary] = []
+    for raw in snapshot.get("generation_runs") or []:
+        try:
+            runs.append(GenerationRunSummary(**raw))
+        except Exception:
+            logger.warning("Skipping unparseable generation_runs entry: %r", raw)
+    return runs
+
+
 def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
     flow = get_flow(session_id)
     if flow:
@@ -193,6 +208,9 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
             trail_verification=TrailVerification(
                 **flow.verify_trail(anchor=get_trail_anchor(session_id))
             ),
+            generation_runs=[
+                GenerationRunSummary(**r.model_dump()) for r in s.generation_runs
+            ],
         )
     # flow not in memory — return stored snapshot
     snapshot = data.get("state_snapshot", {})
@@ -221,6 +239,7 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
         qa_rejection_reason=snapshot.get("qa_rejection_reason"),
         prepared_by=_prepared_by(data, None),
         trail_verification=_snapshot_verification(session_id, snapshot),
+        generation_runs=_snapshot_generation_runs(snapshot),
     )
 
 

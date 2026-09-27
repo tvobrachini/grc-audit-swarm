@@ -86,6 +86,31 @@ class SessionSummary(BaseModel):
     prepared_by: str = ""
 
 
+class GenerationRunSummary(BaseModel):
+    """Generation provenance for one phase run — see DECISIONS.md, ADR-010.
+
+    Never carries an API key, base URL or token: only provider/model names,
+    a deterministic prompt fingerprint, timing and outcome.
+    """
+
+    run_id: str
+    phase: int
+    provider: str
+    model: str
+    qa_provider: str
+    qa_model: str
+    temperature: float
+    qa_temperature: float
+    crewai_version: str
+    app_version: str
+    prompt_fingerprint: str
+    started_at: str
+    ended_at: Optional[str] = None
+    attempts: int = 0
+    demo_mode: bool = False
+    outcome: str = "running"
+
+
 class SessionDetail(BaseModel):
     session_id: str
     name: str
@@ -104,6 +129,7 @@ class SessionDetail(BaseModel):
     qa_rejection_reason: Optional[str]
     prepared_by: str = ""
     trail_verification: Optional[TrailVerification] = None
+    generation_runs: list[GenerationRunSummary] = Field(default_factory=list)
 
 
 class VerifyEvidenceRequest(BaseModel):
