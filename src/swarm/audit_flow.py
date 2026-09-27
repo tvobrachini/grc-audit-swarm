@@ -28,20 +28,33 @@ from swarm.demo import (
 )
 from swarm.evidence import app_version as evidence_app_version, unverified_findings
 from swarm.review_policy import (
+    MissingReviewDecisionsError,
     ReviewBlockedError,
     SegregationOfDutiesError,
     UnverifiedEvidenceError,
     sod_violation,
 )
+from swarm.review_decisions import (
+    DecisionConflictError,
+    DecisionContext,
+    DecisionValidationError,
+    EffectiveView,
+    build_decision,
+    decision_states,
+    effective_view,
+)
 from swarm import trail as audit_trail
-from swarm.schema import DeficiencyScale
+from swarm.schema import DeficiencyScale, ReviewDecision
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "AuditFlow",
     "AuditState",
+    "DecisionConflictError",
+    "DecisionValidationError",
     "InvalidTransitionError",
+    "MissingReviewDecisionsError",
     "PhaseArtifactMissingError",
     "QA_UNPARSEABLE_REASON",
     "ReviewBlockedError",
@@ -492,12 +505,19 @@ class AuditFlow:
             self.state.approval_trail,
             anchor=anchor,
             artifacts={f: getattr(self.state, f) for f in _ARTIFACT_FIELDS.values()},
+            decisions=self.state.review_decisions,
         )
 
-    def record_preparer(self, prepared_by: str) -> None:
+    def record_preparer(
+        self, prepared_by: str, *, require_review_decisions: bool = False
+    ) -> None:
         """Set the audit's preparer and record it as the trail's first entry.
 
         Call once, when the audit is created (before ``begin_phase_1``).
+        ``require_review_decisions`` turns on the reviewer-decision gate
+        preconditions for this audit (ADR-011); the API always sets it. It
+        is recorded in the chained ``audit_created`` entry, so editing the
+        stored flag does not lift it.
 
         Raises:
             ValueError: if ``prepared_by`` is blank or a preparer is already set.
@@ -506,7 +526,120 @@ class AuditFlow:
         if self.state.prepared_by:
             raise ValueError("prepared_by is already set for this audit")
         self.state.prepared_by = prepared_by
-        self._stamp_trail("Audit created", prepared_by, "audit_created")
+        extra = (
+            {"review_decisions_required": "true"} if require_review_decisions else {}
+        )
+        self.state.review_decisions_required = require_review_decisions
+        self._stamp_trail("Audit created", prepared_by, "audit_created", **extra)
+
+    # ── Reviewer decisions (ADR-011) ─────────────────────────────────────────
+
+    def review_decisions_required(self) -> bool:
+        """Whether gate approvals need reviewer decisions on this audit.
+
+        True if the stored flag or the chained ``audit_created`` entry says
+        so (either is enough, like the preparer check).
+        """
+        return self.state.review_decisions_required or any(
+            e.get("action") == "audit_created"
+            and e.get("review_decisions_required") == "true"
+            for e in self.state.approval_trail
+        )
+
+    def decision_context(self) -> DecisionContext:
+        return DecisionContext(
+            racm=self.state.racm_plan,
+            papers=self.state.working_papers,
+            report=self.state.final_report,
+        )
+
+    def effective_view(self) -> EffectiveView:
+        """AI drafts plus the active reviewer decisions (the conclusion of record)."""
+        return effective_view(
+            self.decision_context(),
+            self.state.review_decisions,
+            decisions_required=self.review_decisions_required(),
+        )
+
+    def decision_states(self) -> dict[str, str]:
+        """``decision_id`` -> active / superseded / stale."""
+        return dict(
+            decision_states(self.decision_context(), self.state.review_decisions)
+        )
+
+    def record_decision(
+        self,
+        *,
+        decision_type: str,
+        subject_id: str,
+        decided_by: str,
+        values: Optional[dict[str, Any]] = None,
+        rationale: str = "",
+        subject_type: Optional[str] = None,
+        supersedes: Optional[str] = None,
+    ) -> ReviewDecision:
+        """Append one reviewer decision and stamp it in the trail.
+
+        Validation and policy are in
+        :func:`swarm.review_decisions.build_decision`; nothing is stored or
+        stamped when it raises. The AI drafts are never changed.
+
+        Raises:
+            DecisionValidationError: bad input (HTTP 422).
+            DecisionConflictError: wrong status / policy / supersede conflict
+                (HTTP 409).
+            SegregationOfDutiesError: the preparer may not record this type.
+        """
+        decision = build_decision(
+            self.decision_context(),
+            status=self.machine.status.value,
+            preparers=self._preparers(),
+            decisions=self.state.review_decisions,
+            decision_type=decision_type,
+            subject_id=subject_id,
+            decided_by=decided_by,
+            values=values,
+            rationale=rationale,
+            subject_type=subject_type,
+            supersedes=supersedes,
+            now=_now(),
+        )
+        self.state.review_decisions.append(decision)
+        extra = {
+            "phase": str(decision.phase),
+            "decision_id": decision.decision_id,
+            "decision_digest": audit_trail.decision_digest(decision),
+            "decision_type": str(decision.decision_type),
+            "subject": f"{decision.subject_type}:{decision.subject_id}",
+            "artifact": decision.artifact,
+            "identity_source": str(decision.identity_source),
+        }
+        if decision.supersedes:
+            extra["supersedes"] = decision.supersedes
+        self._stamp_trail(
+            f"Review decision ({_PHASE_LABELS[decision.phase]})",
+            decision.decided_by,
+            "review_decision",
+            **extra,
+        )
+        return decision
+
+    def _phase_decisions(self, phase: int) -> list[ReviewDecision]:
+        return [d for d in self.state.review_decisions if d.phase == phase]
+
+    def _check_review_decisions(self, gate: int) -> None:
+        if gate not in (2, 3) or not self.review_decisions_required():
+            return
+        missing = self.effective_view().missing_for_gate.get(str(gate), [])
+        if missing:
+            listed = "; ".join(
+                f"{m.subject_type} {m.subject_id}: {' or '.join(m.required)}"
+                for m in missing
+            )
+            raise MissingReviewDecisionsError(
+                f"{_GATE_LABELS[gate]} needs reviewer decisions first: {listed}.",
+                [m.model_dump() for m in missing],
+            )
 
     def _preparers(self) -> list[str]:
         """The declared preparer, from state and from the chained trail entry.
@@ -595,6 +728,18 @@ class AuditFlow:
             raise PhaseArtifactMissingError(
                 f"{_GATE_LABELS[gate]} has no {field} to approve."
             )
+        self._check_review_decisions(gate)
+
+        # The approval seals the artifact and the decisions of this phase
+        # recorded so far (a later change to either is reported by
+        # verify_trail as a change since approval).
+        sealed: dict[str, str] = {}
+        if gate in (2, 3):
+            phase_decisions = self._phase_decisions(gate)
+            sealed = {
+                "decisions_digest": audit_trail.decisions_digest(phase_decisions),
+                "decisions_count": str(len(phase_decisions)),
+            }
 
         transition = {
             1: self.machine.approve_gate_1,
@@ -609,6 +754,7 @@ class AuditFlow:
             "gate_approval",
             artifact=field,
             artifact_digest=audit_trail.artifact_digest(artifact),
+            **sealed,
             **self._run_provenance_extra(gate),
         )
         if gate == 3:
@@ -643,7 +789,8 @@ class AuditFlow:
     def begin_phase_3(self, human_id: str) -> None:
         """Gate 2 approval: transition to RUNNING_PHASE_3, then stamp the trail.
 
-        Re-runs the deterministic evidence check first.
+        Re-runs the deterministic evidence check first, then (when the audit
+        requires them) checks the reviewer decisions Gate 2 needs.
 
         Raises:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_2.
@@ -651,6 +798,7 @@ class AuditFlow:
             UnverifiedEvidenceError: if a finding's quote no longer verifies
                 (and was not accepted by a supervisor override of these
                 exact working papers).
+            MissingReviewDecisionsError: if required sign-offs are missing.
             ValueError: if ``human_id`` is blank.
         """
         self._approve_gate(2, human_id)
@@ -662,6 +810,8 @@ class AuditFlow:
             InvalidTransitionError: if the flow is not at WAITING_HUMAN_GATE_3.
             SegregationOfDutiesError: if ``human_id`` prepared the audit or
                 approved Gate 2 (see ``review_policy.DISTINCT_APPROVER_GATES``).
+            MissingReviewDecisionsError: if required classifications, scope
+                limitations or the engagement conclusion are missing.
             ValueError: if ``human_id`` is blank.
         """
         self._approve_gate(3, human_id)
@@ -1146,6 +1296,11 @@ class AuditFlow:
             "evidence vault. Review the working papers before approving Gate 2 "
             "(supervision step inspired by IIA Standard 12.3, formerly 2340)."
         )
+        if self.review_decisions_required():
+            self.state.current_human_dossier += (
+                " Record a sign-off or a challenge for every exception and every "
+                "key-control finding before approving."
+            )
 
     def generate_reporting(self, event_callback=None):
         """Phase 3 — Run the Reporting Crew to produce the Final Report.
@@ -1195,3 +1350,9 @@ class AuditFlow:
             "audit. Gate 3 must be approved by someone other than the Gate 2 "
             "approver."
         )
+        if self.review_decisions_required():
+            self.state.current_human_dossier += (
+                " Before approving, record your classification of each "
+                "deficiency, a scope limitation for each untested key control, "
+                "and the engagement conclusion."
+            )

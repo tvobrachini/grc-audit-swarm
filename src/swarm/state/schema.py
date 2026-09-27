@@ -5,7 +5,12 @@ Shared Pydantic state models used across agents, workers, and the flow orchestra
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict
 
-from swarm.schema import RiskControlMatrixSchema, WorkingPaperSchema, FinalReportSchema
+from swarm.schema import (
+    FinalReportSchema,
+    ReviewDecision,
+    RiskControlMatrixSchema,
+    WorkingPaperSchema,
+)
 
 
 class GenerationRun(BaseModel):
@@ -83,3 +88,15 @@ class AuditState(BaseModel):
     # GenerationRun and DECISIONS.md, ADR-010). Never mutated in place after
     # its owning run finishes; a retry appends a new entry instead.
     generation_runs: List[GenerationRun] = Field(default_factory=list)
+
+    # Reviewer decisions (see swarm.review_decisions and DECISIONS.md,
+    # ADR-011). Append-only: only AuditFlow.record_decision adds to it, and
+    # each addition is also a chained ``review_decision`` trail entry. The AI
+    # drafts above never change because of a decision.
+    review_decisions: List[ReviewDecision] = Field(default_factory=list)
+
+    # Whether gate approvals on this audit require reviewer decisions
+    # (review_policy gate preconditions). Set when the audit is created
+    # through the API, and recorded in its ``audit_created`` trail entry.
+    # False for audits created before decisions existed.
+    review_decisions_required: bool = False

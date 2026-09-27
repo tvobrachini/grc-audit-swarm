@@ -30,6 +30,7 @@ from typing import Annotated, Any, List, Optional
 from pydantic import (
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     Field,
     ValidationInfo,
     field_validator,
@@ -757,3 +758,138 @@ class OSCAL_SAR_Schema(BaseModel):
 
 
 FinalReportSchema.model_rebuild()
+
+
+# ── Reviewer decisions (see DECISIONS.md, ADR-011) ──────────────────────────
+#
+# Human-authored records, kept apart from the AI-drafted artifacts above: the
+# crews never see these models, and recording a decision never changes an
+# artifact. The "effective view" (swarm.review_decisions) combines the AI
+# draft with the latest non-superseded decision per subject.
+
+
+class DecisionType(StrEnum):
+    SIGN_OFF = "sign_off"
+    CHALLENGE = "challenge"
+    CLASSIFY = "classify"
+    SCOPE_LIMITATION = "scope_limitation"
+    WRITEUP = "writeup"
+    MANAGEMENT_RESPONSE = "management_response"
+    ENGAGEMENT_CONCLUSION = "engagement_conclusion"
+
+
+class DecisionSubjectType(StrEnum):
+    FINDING = "finding"  # a working-paper finding, by control_id
+    DEFICIENCY = "deficiency"  # a deficiency evaluation, by deficiency_id
+    ENGAGEMENT = "engagement"  # the engagement as a whole (subject_id "engagement")
+
+
+class IdentitySource(StrEnum):
+    # Typed by the caller; the API cannot tell users apart (ADR-004/008).
+    DECLARED = "declared"
+    # Reserved for per-user authentication (not implemented yet).
+    AUTHENTICATED = "authenticated"
+
+
+class EngagementRating(StrEnum):
+    SATISFACTORY = "Satisfactory"
+    NEEDS_IMPROVEMENT = "Needs improvement"
+    UNSATISFACTORY = "Unsatisfactory"
+
+
+class ManagementAgreement(StrEnum):
+    AGREE = "agree"
+    PARTIAL = "partial"
+    DISAGREE = "disagree"
+
+
+class ReviewDecision(BaseModel):
+    """One reviewer decision. Append-only: a correction is a new decision
+    whose ``supersedes`` names the one it replaces."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decision_id: str
+    # Phase whose gate the decision belongs to (2 = Fieldwork, 3 = Reporting).
+    phase: int = Field(ge=2, le=3)
+    # Artifact the subject lives in: "working_papers" or "final_report".
+    artifact: str
+    # Digest (swarm.trail.artifact_digest) of that artifact when the decision
+    # was recorded. A decision whose artifact has since been re-drafted is
+    # stale and no longer counts.
+    draft_digest: str
+    subject_type: DecisionSubjectType
+    subject_id: str
+    decision_type: DecisionType
+    # Type-specific values, normalised to strings (see the *Values models).
+    values: dict[str, str] = Field(default_factory=dict)
+    rationale: str = ""
+    decided_by: str
+    identity_source: IdentitySource = IdentitySource.DECLARED
+    decided_at: str
+    supersedes: Optional[str] = None
+
+
+class _DecisionValues(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class SignOffValues(_DecisionValues):
+    """No values: a sign-off agrees with the draft as it stands."""
+
+
+class ChallengeValues(_DecisionValues):
+    """Optional conclusion changes; policy limits which are allowed without
+    rework (``review_policy.conclusion_change_allowed``)."""
+
+    tod_conclusion: Annotated[
+        Optional[DesignConclusion], _lenient(DesignConclusion)
+    ] = None
+    toe_conclusion: Annotated[
+        Optional[OperatingConclusion], _lenient(OperatingConclusion)
+    ] = None
+
+
+class ClassifyValues(_DecisionValues):
+    classification: Annotated[
+        DeficiencyClassification, _lenient(DeficiencyClassification)
+    ]
+    # Default to the draft's values when omitted.
+    likelihood: Optional[RiskRatingField] = None
+    magnitude: Optional[RiskRatingField] = None
+
+
+class ScopeLimitationValues(_DecisionValues):
+    """No values: the rationale states the limitation as it will be reported."""
+
+
+class WriteupValues(_DecisionValues):
+    criteria: str = Field(min_length=1)
+    condition: str = Field(min_length=1)
+    cause: str = Field(min_length=1)
+    effect: str = Field(min_length=1)
+    recommendation: str = Field(min_length=1)
+
+
+class ManagementResponseValues(_DecisionValues):
+    text: str = Field(min_length=1)
+    agreement: Annotated[ManagementAgreement, _lenient(ManagementAgreement)]
+    action_owner_role: Optional[str] = None
+    target_date: Optional[str] = None
+    received_from: str = Field(min_length=1)
+    received_on: str = Field(min_length=1)
+
+
+class EngagementConclusionValues(_DecisionValues):
+    conclusion: Annotated[EngagementRating, _lenient(EngagementRating)]
+
+
+DECISION_VALUE_MODELS: dict[DecisionType, type[_DecisionValues]] = {
+    DecisionType.SIGN_OFF: SignOffValues,
+    DecisionType.CHALLENGE: ChallengeValues,
+    DecisionType.CLASSIFY: ClassifyValues,
+    DecisionType.SCOPE_LIMITATION: ScopeLimitationValues,
+    DecisionType.WRITEUP: WriteupValues,
+    DecisionType.MANAGEMENT_RESPONSE: ManagementResponseValues,
+    DecisionType.ENGAGEMENT_CONCLUSION: EngagementConclusionValues,
+}
