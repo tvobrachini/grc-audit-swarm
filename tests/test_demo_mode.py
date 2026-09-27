@@ -43,6 +43,7 @@ from swarm.schema import (
 )
 
 AUTH = {"Authorization": "Bearer test-token"}
+DEL = {"deleted_by": "J. Rivera"}  # who deletes a draft (required)
 
 
 @pytest.fixture
@@ -432,7 +433,10 @@ def test_api_demo_run_end_to_end(client):
         assert verify["entries"] == len(detail["approval_trail"])
         assert verify["anchored"] is True
         # A completed audit cannot be deleted.
-        assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
+        assert (
+            client.delete(f"/api/sessions/{sid}", headers=AUTH, params=DEL).status_code
+            == 409
+        )
     finally:
         remove_flow(sid)
 

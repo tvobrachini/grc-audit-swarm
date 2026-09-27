@@ -48,6 +48,18 @@ describe("reviewer token header", () => {
     expect(headers["X-Reviewer-Token"]).toBe("secret-token");
   });
 
+  it("sends deleted_by and the token when deleting a draft", async () => {
+    setReviewerToken("secret-token");
+
+    await api.sessions.delete("s1", "M. Alvarez");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/sessions/s1?deleted_by=M.%20Alvarez");
+    expect(init.method).toBe("DELETE");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Reviewer-Token"]).toBe("secret-token");
+  });
+
   it("is sent on a gate-approval request once the reviewer has a token", async () => {
     setReviewerToken("secret-token");
 

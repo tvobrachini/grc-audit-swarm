@@ -130,7 +130,7 @@ class TestAnchor:
         trail[3]["human"] = "forged"
         rebuilt = _recompute_unkeyed(trail)
         result = t.verify_trail(rebuilt, anchor={"count": count, "head_hash": head})
-        assert result["status"] == "broken"
+        assert result["status"] == "anchor_mismatch"
         assert result["first_broken_index"] == 3
 
     def test_anchor_detects_stripped_hashes(self):
@@ -290,20 +290,83 @@ class TestAnchorStore:
         monkeypatch.delenv("TRAIL_ANCHORS_PATH", raising=False)
 
     def test_anchor_saved_next_to_sessions_file(self, tmp_path):
-        assert session_manager.save_trail_anchor("s1", 2, "abc") is True
+        assert session_manager.save_trail_anchor("s1", _chain(2)) is True
         assert (tmp_path / "trail_anchors.json").exists()
         assert session_manager.get_trail_anchor("s1")["count"] == 2
 
     def test_anchor_never_moves_backwards(self):
-        session_manager.save_trail_anchor("s1", 3, "abc")
-        assert session_manager.save_trail_anchor("s1", 2, "def") is False
-        assert session_manager.get_trail_anchor("s1")["head_hash"] == "abc"
+        trail = _chain(3)
+        session_manager.save_trail_anchor("s1", trail)
+        assert session_manager.save_trail_anchor("s1", trail[:2]) is False
+        assert (
+            session_manager.get_trail_anchor("s1")["head_hash"]
+            == trail[2]["entry_hash"]
+        )
+
+    def test_anchor_moves_forward_along_the_same_chain(self):
+        trail = _chain(2)
+        assert session_manager.save_trail_anchor("s1", trail) is True
+        t.append_entry(trail, _entry(3))
+        assert session_manager.save_trail_anchor("s1", trail) is True
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor["count"] == 3
+        assert t.verify_trail(trail, anchor)["status"] == "ok"
+
+    def test_truncated_then_extended_trail_does_not_move_anchor(self):
+        """Adversarial: cut the last entry, append a new one (same length)."""
+        trail = _chain(3)
+        assert session_manager.save_trail_anchor("s1", trail) is True
+        anchored_head = trail[2]["entry_hash"]
+        forged = copy.deepcopy(trail[:2])
+        t.append_entry(forged, {**_entry(3), "human": "someone-else"})
+        assert session_manager.save_trail_anchor("s1", forged) is False
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor["head_hash"] == anchored_head
+        result = t.verify_trail(forged, anchor)
+        assert result["ok"] is False
+        assert result["status"] == "anchor_mismatch"
+        assert result["first_broken_index"] == 2
+
+    def test_truncated_then_extended_longer_trail_does_not_move_anchor(self):
+        trail = _chain(3)
+        session_manager.save_trail_anchor("s1", trail)
+        forged = copy.deepcopy(trail[:2])
+        for i in (5, 6, 7):
+            t.append_entry(forged, _entry(i))
+        assert session_manager.save_trail_anchor("s1", forged) is False
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor["count"] == 3
+        assert t.verify_trail(forged, anchor)["status"] == "anchor_mismatch"
+
+    def test_broken_chain_does_not_move_anchor(self):
+        trail = _chain(2)
+        session_manager.save_trail_anchor("s1", trail)
+        t.append_entry(trail, _entry(3))
+        trail[2]["human"] = "edited"  # entry 2 no longer matches its hash
+        assert session_manager.save_trail_anchor("s1", trail) is False
+        assert session_manager.get_trail_anchor("s1")["count"] == 2
+
+    def test_repository_save_does_not_move_anchor_onto_forged_trail(self):
+        from swarm.audit_flow import AuditFlow
+        from swarm.state.repository import FlowRepository
+
+        session_manager.save_session("s1", "n", "ctx")
+        flow = AuditFlow()
+        flow.state.approval_trail = _chain(3)
+        FlowRepository().save("s1", flow)
+        assert session_manager.get_trail_anchor("s1")["count"] == 3
+        forged = copy.deepcopy(flow.state.approval_trail[:2])
+        t.append_entry(forged, {**_entry(3), "human": "someone-else"})
+        flow.state.approval_trail = forged
+        FlowRepository().save("s1", flow)
+        result = flow.verify_trail(anchor=session_manager.get_trail_anchor("s1"))
+        assert result["status"] == "anchor_mismatch"
 
     def test_separate_path_and_delete(self, tmp_path, monkeypatch):
         path = tmp_path / "elsewhere" / "anchors.json"
         monkeypatch.setenv("TRAIL_ANCHORS_PATH", str(path))
         session_manager.save_session("s1", "n", "ctx")
-        session_manager.save_trail_anchor("s1", 1, "abc")
+        session_manager.save_trail_anchor("s1", _chain(1))
         assert path.exists()
         session_manager.delete_session("s1")
         assert session_manager.get_trail_anchor("s1") is None

@@ -65,11 +65,11 @@ function resultConfig(s: string | null | undefined) {
 /** Deterministic vault check: the quote must appear verbatim in the stored,
  * digest-verified evidence record (POST /api/evidence/verify). Skipped for
  * "Not tested" findings, which legitimately carry no vault reference. */
-function VaultBadge({ finding }: { finding: AuditFinding }) {
+function VaultBadge({ finding, sessionId }: { finding: AuditFinding; sessionId: string }) {
   const { vault_id_reference: vaultId, exact_quote_from_evidence: quote } = finding;
   const { data, isError } = useQuery({
-    queryKey: ["verify", vaultId, quote],
-    queryFn: () => api.evidence.verify(vaultId, quote),
+    queryKey: ["verify", sessionId, vaultId, quote],
+    queryFn: () => api.evidence.verify(vaultId, quote, sessionId),
     enabled: !!vaultId && !!quote,
     staleTime: Infinity,
   });
@@ -201,7 +201,7 @@ function FindingCard({ finding, session }: { finding: AuditFinding; session: Ses
               <span className="font-mono text-[10px] text-violet-400/70">
                 {finding.vault_id_reference}
               </span>
-              <VaultBadge finding={finding} />
+              <VaultBadge finding={finding} sessionId={session.session_id} />
             </div>
           ) : (
             notTested && (

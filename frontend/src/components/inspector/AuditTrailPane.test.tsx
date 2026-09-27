@@ -48,6 +48,14 @@ describe("AuditTrailPane", () => {
     expect(screen.getByText(/First problem at entry 2/)).toBeInTheDocument();
   });
 
+  it("renders an 'anchor_mismatch' badge", () => {
+    const session = makeSession({
+      trail_verification: verification({ status: "anchor_mismatch" }),
+    });
+    render(<AuditTrailPane session={session} />);
+    expect(screen.getByText("Trail rewritten")).toBeInTheDocument();
+  });
+
   it("renders a 'truncated' badge", () => {
     const session = makeSession({
       trail_verification: verification({ status: "truncated" }),

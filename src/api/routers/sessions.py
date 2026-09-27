@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
 from api.auth import ReviewerIdentity, reviewer_identity
@@ -544,12 +544,25 @@ def _has_sign_off(session_id: str, data: dict[str, Any]) -> bool:
 
 
 @router.delete("/{session_id}", status_code=204)
-def remove_session(session_id: str) -> None:
+def remove_session(
+    session_id: str,
+    deleted_by: str = Query("", max_length=200),
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> None:
     """Delete an unapproved draft audit.
 
     409 once any gate has been approved or the audit completed: signed-off
-    work and its approval trail are retained.
+    work and its approval trail are retained. Who deletes it is required
+    (the ``deleted_by`` query parameter, or the authenticated reviewer when
+    reviewer tokens are configured; 422 when blank) and logged.
     """
+    deleted_by, identity_source = who.resolve(deleted_by, "deleted_by")
+    deleted_by = " ".join(deleted_by.split())
+    if not deleted_by:
+        raise HTTPException(
+            status_code=422,
+            detail="deleted_by must not be blank: say who is deleting this audit.",
+        )
     # Serialise with approve/retry/override so an action racing a delete
     # cannot re-cache the flow after it was removed.
     with session_lock(session_id):
@@ -564,6 +577,9 @@ def remove_session(session_id: str) -> None:
             )
         delete_session(session_id)
         remove_flow(session_id)
+    logger.info(
+        "Draft audit %s deleted by %r (%s)", session_id, deleted_by, identity_source
+    )
 
 
 _PHASE_RUNNERS = {1: _run_phase_1, 2: _run_phase_2, 3: _run_phase_3}

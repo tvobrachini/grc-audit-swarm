@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from api.auth import ReviewerIdentity, reviewer_identity
 from api.routers.sessions import _require_session
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids, app_version
 from swarm.tools.findings_checks import (
@@ -45,6 +46,8 @@ class ProwlerImportResult(BaseModel):
 def import_prowler_findings_file(
     session_id: str,
     file: UploadFile = File(...),
+    uploaded_by: str = Form("", max_length=200),
+    who: ReviewerIdentity = Depends(reviewer_identity),
 ) -> ProwlerImportResult:
     """Upload a Prowler JSON findings file (OCSF or legacy format, <= 10 MB,
     JSON only) and register a compact summary of it as evidence.
@@ -53,7 +56,19 @@ def import_prowler_findings_file(
     returns its vault ID and the exact summary text, for a reviewer or the
     field auditor to cite. It does not modify the session's working papers
     on its own.
+
+    Who uploaded it is required and recorded in the vault record's metadata:
+    the typed ``uploaded_by`` form field, or the authenticated reviewer when
+    reviewer tokens are configured (``X-Reviewer-Token``, ADR-012). 422 when
+    no identity is given.
     """
+    uploaded_by, identity_source = who.resolve(uploaded_by, "uploaded_by")
+    uploaded_by = " ".join(uploaded_by.split())
+    if not uploaded_by:
+        raise HTTPException(
+            status_code=422,
+            detail="uploaded_by must not be blank: say who is importing this file.",
+        )
     _require_session(session_id)
 
     filename = file.filename or ""
@@ -89,10 +104,19 @@ def import_prowler_findings_file(
         "parameters": {
             "session_id": session_id,
             "source_filename": filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:200],
+            "uploaded_by": uploaded_by,
+            "uploaded_by_identity_source": identity_source,
         },
     }
     vault_record = EvidenceAssuranceProtocol.register_evidence(
         summary, "prowler.findings_import.api_upload", metadata=metadata
+    )
+    logger.info(
+        "Prowler findings imported for session %s by %r (%s): vault %s",
+        session_id,
+        uploaded_by,
+        identity_source,
+        vault_record["vault_id"],
     )
     return ProwlerImportResult(
         vault_id=vault_record["vault_id"], summary=_redact_account_ids(summary)

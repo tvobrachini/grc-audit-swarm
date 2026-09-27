@@ -33,9 +33,11 @@ What it does not detect on its own
       (the remaining chain is still valid) — unless the head is anchored
       elsewhere: :func:`verify_trail` accepts an ``anchor`` (entry count and
       head hash, stored by the API in a separate file) and reports a trail
-      shorter than, or diverging from, the anchor. The anchor only helps if an
-      editor cannot also rewrite the anchor file (ship it to separate storage
-      for that);
+      shorter than (``truncated``), or diverging from (``anchor_mismatch``),
+      the anchor. The anchor store only moves forward along the same chain,
+      so a trail cut back and extended again keeps failing against the old
+      anchor. The anchor only helps if an editor cannot also rewrite the
+      anchor file (ship it to separate storage for that);
     * with the unkeyed variant, an editor who recomputes the whole chain;
     * anything about *who* acted. Each entry written since ADR-012 carries
       ``identity_source``: ``declared`` (the name was typed by the caller)
@@ -70,6 +72,23 @@ STATUS_UNKEYED = "unkeyed"
 STATUS_KEY_UNAVAILABLE = "key_unavailable"
 STATUS_ARTIFACT_CHANGED = "artifact_changed"
 STATUS_DECISION_CHANGED = "decision_changed"
+# The chain is internally consistent, but the entry at the anchored position
+# is not the anchored head: the trail was rewritten or truncated and then
+# extended past the anchor (the anchor store refuses to follow such a trail).
+STATUS_ANCHOR_MISMATCH = "anchor_mismatch"
+
+# Statuses that mean the recorded trail (or what it approved) was changed.
+# Exports refuse these; legacy / unkeyed / key-unavailable trails are only
+# labelled, since they show a limit of what can be checked, not a change.
+TAMPER_STATUSES = frozenset(
+    {
+        STATUS_BROKEN,
+        STATUS_TRUNCATED,
+        STATUS_ANCHOR_MISMATCH,
+        STATUS_ARTIFACT_CHANGED,
+        STATUS_DECISION_CHANGED,
+    }
+)
 
 # Phase whose reviewer decisions a gate approval of each artifact seals.
 ARTIFACT_PHASE = {"racm_plan": 1, "working_papers": 2, "final_report": 3}
@@ -327,14 +346,15 @@ def verify_trail(
         at = trail[anchor_count - 1].get("entry_hash", "")
         if not hmac.compare_digest(str(at), anchor_head):
             return _result(
-                STATUS_BROKEN,
+                STATUS_ANCHOR_MISMATCH,
                 trail,
                 first_broken_index=anchor_count - 1,
                 legacy_entries=first,
                 anchored=True,
                 detail=(
                     f"Entry {anchor_count - 1} does not match the anchored head "
-                    "hash: the trail was rewritten."
+                    "hash: the trail was rewritten, or cut back and extended "
+                    "again, after the anchor was recorded."
                 ),
             )
 

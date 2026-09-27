@@ -19,7 +19,8 @@ repos:
           (?x)^(
             .env.example|
             README.md|
-            tests/fixtures/findings/.*\.json
+            tests/fixtures/findings/.*\.json|
+            docs/sample-run/oscal\.json
           )$
 
   # ── General hygiene ───────────────────────────────────────────────────────

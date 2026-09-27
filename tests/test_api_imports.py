@@ -36,10 +36,13 @@ def client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def _upload(client, session_id, filename, content, headers=AUTH):
+def _upload(
+    client, session_id, filename, content, headers=AUTH, uploaded_by="J. Rivera"
+):
     return client.post(
         f"/api/sessions/{session_id}/imports/prowler",
         headers=headers,
+        data={"uploaded_by": uploaded_by} if uploaded_by is not None else {},
         files={"file": (filename, content, "application/json")},
     )
 
@@ -114,3 +117,77 @@ class TestRejections:
             files={"file": ("prowler.json", b"[]", "application/json")},
         )
         assert resp.status_code == 413
+
+
+def _vault_metadata(vault_id: str) -> dict:
+    vault_path = Path(os.environ["EVIDENCE_VAULT_PATH"]) / f"{vault_id}.json"
+    return json.loads(vault_path.read_text())["metadata"]
+
+
+class TestUploaderIdentity:
+    """The uploader is required and recorded in the vault record."""
+
+    def test_missing_uploaded_by_rejected(self, client):
+        content = (FIXTURES / "prowler_ocsf_sample.json").read_bytes()
+        resp = _upload(client, "sess-1", "prowler.json", content, uploaded_by=None)
+        assert resp.status_code == 422
+        resp = _upload(client, "sess-1", "prowler.json", content, uploaded_by="  ")
+        assert resp.status_code == 422
+
+    def test_declared_uploader_recorded(self, client):
+        content = (FIXTURES / "prowler_ocsf_sample.json").read_bytes()
+        resp = _upload(client, "sess-1", "prowler.json", content)
+        assert resp.status_code == 201
+        params = _vault_metadata(resp.json()["vault_id"])["parameters"]
+        assert params["uploaded_by"] == "J. Rivera"
+        assert params["uploaded_by_identity_source"] == "declared"
+
+    def test_authenticated_reviewer_recorded(self, client, monkeypatch, tmp_path):
+        from api import reviewer_tokens as rt
+
+        path = tmp_path / "reviewer_tokens.json"
+        token = rt.add_reviewer(path, "A. Chen")
+        monkeypatch.setenv(rt.ENV_VAR, str(path))
+        content = (FIXTURES / "prowler_ocsf_sample.json").read_bytes()
+
+        # Token required once reviewer tokens are configured.
+        resp = _upload(client, "sess-1", "prowler.json", content, uploaded_by=None)
+        assert resp.status_code == 401
+
+        headers = {**AUTH, rt.HEADER: token}
+        resp = _upload(
+            client, "sess-1", "prowler.json", content, headers, uploaded_by=None
+        )
+        assert resp.status_code == 201
+        params = _vault_metadata(resp.json()["vault_id"])["parameters"]
+        assert params["uploaded_by"] == "A. Chen"
+        assert params["uploaded_by_identity_source"] == "authenticated"
+
+        # A typed name naming someone else is refused, not silently replaced.
+        resp = _upload(
+            client, "sess-1", "prowler.json", content, headers, uploaded_by="Mallory"
+        )
+        assert resp.status_code == 403
+        assert resp.json()["code"] == "reviewer_name_mismatch"
+
+
+class TestNginxBodyLimit:
+    """The compose nginx proxy must not reject an upload the API accepts."""
+
+    def test_imports_location_allows_the_api_limit(self):
+        import re
+
+        template = (
+            Path(__file__).parent.parent / "frontend" / "nginx.conf.template"
+        ).read_text()
+        match = re.search(
+            r"location ~ \^/api/sessions/\[\^/\]\+/imports/ \{(.*?)\n    \}",
+            template,
+            re.S,
+        )
+        assert match, "no dedicated nginx location for /imports/"
+        size = re.search(r"client_max_body_size (\d+)m;", match.group(1))
+        assert size and int(size.group(1)) * 1024 * 1024 > MAX_PROWLER_FILE_BYTES
+        # Everything else keeps the smaller cap.
+        api_block = template.split("location /api/ {", 1)[1]
+        assert "client_max_body_size 6m;" in api_block

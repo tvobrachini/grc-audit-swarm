@@ -234,6 +234,8 @@ class SessionDetail(BaseModel):
 class VerifyEvidenceRequest(BaseModel):
     vault_id: str
     exact_quote: str
+    # When given, a record bound to a different audit session does not verify.
+    session_id: Optional[str] = None
 
 
 def _phase_from_status(status: str) -> int:

@@ -845,7 +845,7 @@ def demo_review_decisions(
                         "action_owner_role": "Cloud Platform Engineering Lead",
                         "target_date": "2026-12-31",
                         "received_from": "Head of Cloud Platform (demo)",
-                        "received_on": "2026-10-01",
+                        "received_on": "2026-09-20",
                     },
                 }
             )

@@ -74,7 +74,22 @@ or empty file is reported as an error, not silently truncated. The registered
 summary lists up to 300 individual findings verbatim (grouped and counted
 by check ID first); beyond that it says how many more exist rather than
 growing without bound — the per-status and per-check counts always cover
-every finding, listed or not.
+every finding, listed or not. Checks with a FAIL come first, then by
+severity, so the 300-line cap only ever cuts lower-priority lines, and every
+check keeps its one-line header with counts even after the cap. Security Hub
+findings are ordered the same way (FAILED and higher severity first), with
+per-generator counts for any findings past the cap.
+
+**Field hygiene.** File and API content is untrusted. Every field taken from
+it (titles, check and finding ids, status details, descriptions, resources,
+regions, compliance mappings) is collapsed to a single line — all
+whitespace, including CR/LF, tab and the Unicode line separators, becomes
+one space — with other control characters dropped and titles/ids capped at
+240 characters. A crafted field therefore cannot add a separate, quotable
+line (for example a forged `[PASS]` finding) to the evidence text. The text
+handed to agents is also wrapped in `UNTRUSTED SCANNER OUTPUT` markers that
+label it as data, not instructions; like the scope-document delimiters,
+this reduces prompt-injection risk but does not remove it.
 
 **Where it runs.**
 
@@ -86,7 +101,15 @@ every finding, listed or not.
   Same size limit and parsing, requires the same `API_AUTH_TOKEN` as every
   other `/api/*` route, and does not touch the session's flow state, RACM or
   working papers — it only writes one evidence-vault record, for a reviewer
-  or the Evidence Collector to cite.
+  or the Evidence Collector to cite. The uploader is required: send an
+  `uploaded_by` form field, or — when `REVIEWER_TOKENS_FILE` is set — your
+  `X-Reviewer-Token` (the token's owner is used; a typed name naming someone
+  else is refused with 403). It is recorded in the vault record's metadata
+  (`parameters.uploaded_by` and `parameters.uploaded_by_identity_source`);
+  a blank identity gets 422. For example:
+  `curl -H "Authorization: Bearer $API_AUTH_TOKEN" -F uploaded_by="J. Rivera" -F file=@prowler.json http://localhost:8000/api/sessions/<id>/imports/prowler`.
+  Through the Compose nginx proxy the request body may be up to 11 MB on
+  this route (6 MB elsewhere).
 
 ## AWS Security Hub
 

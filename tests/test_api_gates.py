@@ -31,6 +31,7 @@ from swarm.audit_flow import AuditFlow
 from swarm.state.repository import FlowRepository
 
 AUTH = {"Authorization": "Bearer test-token"}
+DEL = {"deleted_by": "J. Rivera"}  # who deletes a draft (required)
 
 
 @pytest.fixture
@@ -324,7 +325,10 @@ class TestPhaseRunIntegration:
             assert resp.status_code == 200
             flow = get_flow(sid)
             assert (
-                client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 204
+                client.delete(
+                    f"/api/sessions/{sid}", headers=AUTH, params=DEL
+                ).status_code
+                == 204
             )
 
             # The phase thread still holds its flow reference and finishes.

@@ -7,10 +7,13 @@ import uuid
 import os
 import datetime
 import base64
+import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +178,63 @@ def _digest_input(payload: str, metadata: Optional[dict[str, Any]]) -> str:
     return payload + "\x00" + canonical_metadata
 
 
+# Audit session the evidence being collected belongs to. The flow sets it
+# around a crew run (see ``evidence_session``) so the evidence tools, which do
+# not know the session, bind the records they register to it. CrewAI copies
+# the context into the threads it runs tools in.
+_CURRENT_SESSION: ContextVar[Optional[str]] = ContextVar(
+    "evidence_session_id", default=None
+)
+
+
+@contextmanager
+def evidence_session(session_id: Optional[str]) -> Iterator[None]:
+    """Bind evidence registered inside the block to ``session_id``."""
+    token = _CURRENT_SESSION.set(session_id or None)
+    try:
+        yield
+    finally:
+        _CURRENT_SESSION.reset(token)
+
+
+def record_session_id(record: dict[str, Any]) -> Optional[str]:
+    """Session a vault record is bound to, or None for an unbound record.
+
+    ``metadata.session_id`` is written by :meth:`register_evidence`; records
+    imported through the API before that field existed carry the session in
+    ``metadata.parameters.session_id``. Records with neither (written before
+    session binding, or outside a session) are unbound.
+    """
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    sid = metadata.get("session_id")
+    if not sid:
+        params = metadata.get("parameters")
+        sid = params.get("session_id") if isinstance(params, dict) else None
+    return str(sid) if sid else None
+
+
+def _write_record_atomically(filepath: str, record: dict[str, Any]) -> None:
+    """Write a vault record via a temp file in the same dir + os.replace, so a
+    crash never leaves a truncated record behind."""
+    dir_path = os.path.dirname(filepath) or "."
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=dir_path, delete=False, suffix=".tmp", encoding="utf-8"
+        ) as tmp:
+            tmp_path = tmp.name
+            json.dump(record, tmp, indent=2)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, filepath)
+        tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 class EvidenceAssuranceProtocol:
     """Integrity digest (SHA-256, or HMAC-SHA256 when encrypted) plus exact-quote check for collected audit evidence."""
 
@@ -188,6 +248,7 @@ class EvidenceAssuranceProtocol:
         source_mcp_operation: str,
         *,
         metadata: Optional[dict[str, Any]] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         """
         Receives raw payload from an MCP, scrubs AWS account IDs, computes an
@@ -204,6 +265,11 @@ class EvidenceAssuranceProtocol:
         the same integrity digest as the payload (see ``_digest_input`` and
         ADR-010), so tampering with either is detected the same way; a
         record with no metadata hashes the payload alone, exactly as before.
+
+        ``session_id`` (default: the one set by :func:`evidence_session`, if
+        any) is stored as ``metadata.session_id`` and so is covered by the
+        digest too; the Gate 2 quote check only accepts a record bound to the
+        session it is checking (see :func:`unverified_findings`).
         """
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
         os.makedirs(evidence_dir, exist_ok=True)
@@ -211,6 +277,12 @@ class EvidenceAssuranceProtocol:
         # Redact 12-digit AWS account IDs before they leave the environment.
         sanitized_payload = _redact_account_ids(raw_payload)
         sanitized_metadata = _sanitize_metadata(metadata) if metadata else None
+        bound_session = session_id or _CURRENT_SESSION.get()
+        if bound_session:
+            # Added after redaction: a session id is a UUID, never an account
+            # id, and must be stored exactly to be compared later.
+            sanitized_metadata = dict(sanitized_metadata or {})
+            sanitized_metadata["session_id"] = str(bound_session)
         digest_input = _digest_input(sanitized_payload, sanitized_metadata)
 
         vault_id = str(uuid.uuid4())
@@ -243,13 +315,14 @@ class EvidenceAssuranceProtocol:
             evidence_record["metadata"] = sanitized_metadata
 
         filepath = os.path.join(evidence_dir, f"{vault_id}.json")
-        with open(filepath, "w") as f:
-            json.dump(evidence_record, f, indent=2)
+        _write_record_atomically(filepath, evidence_record)
 
         return {"vault_id": vault_id, digest_field: digest}
 
     @staticmethod
-    def verify_exact_quote(vault_id: str, exact_quote_claim: str) -> bool:
+    def verify_exact_quote(
+        vault_id: str, exact_quote_claim: str, *, session_id: Optional[str] = None
+    ) -> bool:
         """
         Check that a cited quote appears verbatim in a stored evidence record.
 
@@ -257,6 +330,10 @@ class EvidenceAssuranceProtocol:
         digest still matches the payload, and the quote is an exact substring
         of that payload. It shows the words exist in the evidence, not that the
         conclusion drawn from them is right.
+
+        With ``session_id``, a record bound to a different session (see
+        :func:`record_session_id`) is rejected. Unbound records (written
+        before session binding) are still accepted.
         """
         if not _UUID_RE.fullmatch(vault_id):
             return False
@@ -307,6 +384,22 @@ class EvidenceAssuranceProtocol:
                 stored = evidence_record["sha256"]
             if not hmac.compare_digest(expected, str(stored)):
                 return False
+
+            if session_id:
+                bound = record_session_id(evidence_record)
+                # An id stored under metadata.parameters went through account
+                # id redaction, so compare its redacted form too.
+                if bound and bound not in (
+                    session_id,
+                    _redact_account_ids(session_id),
+                ):
+                    logger.warning(
+                        "Vault record %s belongs to another session; not "
+                        "accepted as evidence for session %s",
+                        vault_id,
+                        session_id,
+                    )
+                    return False
 
             return exact_quote_claim in payload
         except (
@@ -425,11 +518,14 @@ def finding_marked_not_tested(finding: Any) -> bool:
     )
 
 
-def unverified_findings(findings: Iterable[Any]) -> list[str]:
+def unverified_findings(
+    findings: Iterable[Any], *, session_id: Optional[str] = None
+) -> list[str]:
     """Control IDs of findings whose evidence quote is not found in the vault.
 
     Deterministic, no model involved. Every finding with a quote must pass
-    :meth:`EvidenceAssuranceProtocol.verify_exact_quote`. A finding without a
+    :meth:`EvidenceAssuranceProtocol.verify_exact_quote` (for ``session_id``
+    when given: a record bound to another session does not count). A finding without a
     quote passes only if it says the control was not tested (``result`` or
     ``toe_conclusion`` equal to "Not tested"); a tested conclusion must be
     backed by a verifiable quote.
@@ -443,7 +539,9 @@ def unverified_findings(findings: Iterable[Any]) -> list[str]:
             if not finding_marked_not_tested(finding):
                 unverified.append(str(control_id))
             continue
-        if not EvidenceAssuranceProtocol.verify_exact_quote(str(vault_id), quote):
+        if not EvidenceAssuranceProtocol.verify_exact_quote(
+            str(vault_id), quote, session_id=session_id
+        ):
             unverified.append(str(control_id))
     return unverified
 

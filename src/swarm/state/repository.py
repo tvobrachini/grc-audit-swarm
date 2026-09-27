@@ -62,11 +62,19 @@ class FlowRepository:
                     session_id,
                 )
                 return saved
-            # Anchor the trail exactly as it was written.
-            count, head_hash = trail_head(snapshot.get("approval_trail") or [])
-            if head_hash:
+            # Anchor the trail exactly as it was written. save_trail_anchor
+            # verifies the chain and refuses (and logs) a trail that does not
+            # extend the anchored one; the old anchor then stays in place and
+            # verification reports the mismatch.
+            trail = snapshot.get("approval_trail") or []
+            if trail_head(trail)[1]:
                 try:
-                    save_trail_anchor(session_id, count, head_hash)
+                    if not save_trail_anchor(session_id, trail):
+                        logger.error(
+                            "Trail anchor for session %s not moved: the trail "
+                            "does not extend the anchored one",
+                            session_id,
+                        )
                 except (OSError, TypeError, ValueError):
                     logger.exception(
                         "Trail anchor for session %s not saved", session_id
@@ -90,6 +98,7 @@ class FlowRepository:
             snapshot.get("status", AuditStatus.WAITING_FOR_SCOPE)
         )
         flow = AuditFlow(initial_status=initial_status.value)
+        flow.session_id = session_id
 
         # Validate and set typed artifact fields
         for field_name, schema_cls in _ARTIFACT_FIELDS.items():

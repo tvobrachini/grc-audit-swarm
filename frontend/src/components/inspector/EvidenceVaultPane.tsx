@@ -32,17 +32,21 @@ export function EvidenceVaultPane({ session }: Props) {
   return (
     <div className="space-y-2">
       {findings.map((f) => (
-        <VaultRecord key={`${f.control_id}-${f.vault_id_reference}`} finding={f} />
+        <VaultRecord
+          key={`${f.control_id}-${f.vault_id_reference}`}
+          finding={f}
+          sessionId={session.session_id}
+        />
       ))}
     </div>
   );
 }
 
-function VaultRecord({ finding }: { finding: VaultFinding }) {
+function VaultRecord({ finding, sessionId }: { finding: VaultFinding; sessionId: string }) {
   const { vault_id_reference: vaultId, exact_quote_from_evidence: quote } = finding;
   const { data, isError, isPending } = useQuery({
-    queryKey: ["verify", vaultId, quote],
-    queryFn: () => api.evidence.verify(vaultId, quote),
+    queryKey: ["verify", sessionId, vaultId, quote],
+    queryFn: () => api.evidence.verify(vaultId, quote, sessionId),
     enabled: !!vaultId && !!quote,
     staleTime: Infinity,
   });

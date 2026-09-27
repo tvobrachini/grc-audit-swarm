@@ -165,3 +165,24 @@ class TestVerifyRequestValidation:
     def test_empty_body_is_422(self, client):
         resp = client.post("/api/evidence/verify", headers=AUTH, json={})
         assert resp.status_code == 422
+
+
+def test_verify_route_refuses_record_from_another_session(client):
+    """A record bound to one audit does not verify for another audit's check."""
+    registered = EvidenceAssuranceProtocol.register_evidence(
+        "MinimumPasswordLength: 14",
+        "aws.iam.get_account_password_policy",
+        session_id="sess-a",
+    )
+    body = {
+        "vault_id": registered["vault_id"],
+        "exact_quote": "MinimumPasswordLength: 14",
+    }
+    same = client.post(
+        "/api/evidence/verify", headers=AUTH, json={**body, "session_id": "sess-a"}
+    )
+    other = client.post(
+        "/api/evidence/verify", headers=AUTH, json={**body, "session_id": "sess-b"}
+    )
+    assert same.json()["verified"] is True
+    assert other.json()["verified"] is False

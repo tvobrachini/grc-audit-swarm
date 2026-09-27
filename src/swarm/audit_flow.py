@@ -26,7 +26,11 @@ from swarm.demo import (
     demo_mode_requested,
     demo_reject_phase,
 )
-from swarm.evidence import app_version as evidence_app_version, unverified_findings
+from swarm.evidence import (
+    app_version as evidence_app_version,
+    evidence_session,
+    unverified_findings,
+)
 from swarm.review_policy import (
     MissingReviewDecisionsError,
     ReviewBlockedError,
@@ -376,6 +380,11 @@ class AuditFlow:
         self.machine = AuditStateMachine(AuditStatus(initial_status))
         self.state.status = self.machine.status.value
         self._skill_context: list[Any] = []
+        # Session this flow belongs to (set by the API when the flow is cached
+        # or loaded). Evidence registered during its crews is bound to it, and
+        # the Gate 2 quote check only accepts evidence bound to it (or
+        # unbound legacy records). None outside the API: no session check.
+        self.session_id: Optional[str] = None
 
     def _commit_status(self) -> None:
         self.state.status = self.machine.status.value
@@ -713,7 +722,9 @@ class AuditFlow:
         papers = self.state.working_papers
         if papers is None:
             return []
-        return unverified_findings(getattr(papers, "findings", None) or [])
+        return unverified_findings(
+            getattr(papers, "findings", None) or [], session_id=self.session_id
+        )
 
     def _accepted_unverified(self) -> set[str]:
         """Unverified controls a supervisor accepted for the *current* papers.
@@ -1080,7 +1091,9 @@ class AuditFlow:
         if phase != 2 or artifact is None:
             return None
         try:
-            unverified = unverified_findings(getattr(artifact, "findings", None) or [])
+            unverified = unverified_findings(
+                getattr(artifact, "findings", None) or [], session_id=self.session_id
+            )
         except Exception as exc:
             logger.exception("Evidence check failed to run")
             return f"Deterministic evidence check could not run ({exc}); fails closed."
@@ -1126,7 +1139,8 @@ class AuditFlow:
             gen_run.attempts = attempt
             run = "crew" if attempt == 1 else "crew retry"
             try:
-                result = build_crew().kickoff(inputs=inputs)
+                with evidence_session(self.session_id):
+                    result = build_crew().kickoff(inputs=inputs)
                 adapter = CrewResultAdapter(result)
                 qa_output = adapter.get(qa_task).pydantic
                 artifact = adapter.get(artifact_task).pydantic

@@ -41,6 +41,7 @@ from swarm.state.machine import AuditStateMachine, AuditStatus
 from swarm.state.repository import FlowRepository
 
 AUTH = {"Authorization": "Bearer test-token"}
+DEL = {"deleted_by": "J. Rivera"}  # who deletes a draft (required)
 PREPARER = "Pat Preparer"
 
 
@@ -532,7 +533,10 @@ class TestApproveApiPolicy:
 class TestDeleteApi:
     def test_unapproved_draft_can_be_deleted(self, client, executor):
         sid = _store(_at_gate(1))
-        assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 204
+        assert (
+            client.delete(f"/api/sessions/{sid}", headers=AUTH, params=DEL).status_code
+            == 204
+        )
         assert session_manager.get_session(sid) is None
 
     @pytest.mark.parametrize("cache", [True, False])
@@ -542,7 +546,7 @@ class TestDeleteApi:
         assert _approve(client, sid, 1, "Rita").status_code == 200
         if not cache:
             remove_flow(sid)
-        r = client.delete(f"/api/sessions/{sid}", headers=AUTH)
+        r = client.delete(f"/api/sessions/{sid}", headers=AUTH, params=DEL)
         assert r.status_code == 409
         assert session_manager.get_session(sid) is not None
 
@@ -550,7 +554,10 @@ class TestDeleteApi:
         sid = _store(_at_gate(3), cache=False)
         assert _approve(client, sid, 3, "Mona").status_code == 200
         remove_flow(sid)
-        assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
+        assert (
+            client.delete(f"/api/sessions/{sid}", headers=AUTH, params=DEL).status_code
+            == 409
+        )
 
     def test_legacy_status_past_planning_cannot_be_deleted(self, client, executor):
         sid = "legacy-1"
@@ -561,7 +568,10 @@ class TestDeleteApi:
             status="QA_REJECTED_PHASE_2",
             state_snapshot={"status": "QA_REJECTED_PHASE_2", "approval_trail": []},
         )
-        assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
+        assert (
+            client.delete(f"/api/sessions/{sid}", headers=AUTH, params=DEL).status_code
+            == 409
+        )
 
 
 class TestTrailVerifyApi:

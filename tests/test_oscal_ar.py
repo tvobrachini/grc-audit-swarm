@@ -844,7 +844,7 @@ def test_withdrawn_conclusion_and_disagreement(monkeypatch, validator):
             "text": "The bucket is meant to be public.",
             "agreement": "disagree",
             "received_from": "CISO",
-            "received_on": "2026-10-01",
+            "received_on": "2026-09-20",
         },
         rationale="It holds customer exports.",
     )

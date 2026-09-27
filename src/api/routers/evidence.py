@@ -12,7 +12,7 @@ def verify_evidence(req: VerifyEvidenceRequest) -> dict:
         from swarm.evidence import EvidenceAssuranceProtocol
 
         result = EvidenceAssuranceProtocol.verify_exact_quote(
-            req.vault_id, req.exact_quote
+            req.vault_id, req.exact_quote, session_id=req.session_id
         )
         return {"vault_id": req.vault_id, "verified": result}
     except Exception:
