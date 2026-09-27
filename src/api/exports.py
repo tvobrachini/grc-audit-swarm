@@ -302,7 +302,9 @@ def working_papers_xlsx(
     for f in papers.findings:
         if f.vault_id_reference and f.exact_quote_from_evidence:
             verified = EvidenceAssuranceProtocol.verify_exact_quote(
-                f.vault_id_reference, f.exact_quote_from_evidence
+                f.vault_id_reference,
+                f.exact_quote_from_evidence,
+                session_id=ctx.session_id,
             )
             verified_text = "Yes" if verified else "No"
         else:
@@ -807,6 +809,8 @@ def oscal_json(
         view=view,
         decisions=list(decisions),
         markup=sanitize_report,
-        verify_quote=EvidenceAssuranceProtocol.verify_exact_quote,
+        verify_quote=lambda vid, quote: EvidenceAssuranceProtocol.verify_exact_quote(
+            vid, quote, session_id=ctx.session_id
+        ),
     )
     return json.dumps(document, indent=2, ensure_ascii=False).encode("utf-8")

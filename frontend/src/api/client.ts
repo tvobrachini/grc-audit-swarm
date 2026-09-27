@@ -40,8 +40,8 @@ export interface TrailEntry {
 
 /** Result of recomputing the approval trail's hash chain
  * (GET /api/sessions/{id}/trail/verify). `status` is one of ok |
- * legacy_unchained | broken | truncated | unkeyed | key_unavailable |
- * artifact_changed. `ok` is true only for "ok". */
+ * legacy_unchained | broken | truncated | anchor_mismatch | unkeyed |
+ * key_unavailable | artifact_changed | decision_changed. `ok` is true only for "ok". */
 export interface TrailVerification {
   ok: boolean;
   status: string;
@@ -435,10 +435,10 @@ export const api = {
     },
   },
   evidence: {
-    verify: (vault_id: string, exact_quote: string) =>
+    verify: (vault_id: string, exact_quote: string, session_id?: string) =>
       request<{ vault_id: string; verified: boolean }>("/api/evidence/verify", {
         method: "POST",
-        body: JSON.stringify({ vault_id, exact_quote }),
+        body: JSON.stringify({ vault_id, exact_quote, session_id }),
       }),
   },
 };
