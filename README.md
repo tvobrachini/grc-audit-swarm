@@ -287,7 +287,7 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 371 tests, 90% line coverage of `src/`.
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 597 Python tests (93% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 20 frontend tests (Vitest and React Testing Library).
 
 ### Evidence-layer evaluation
 
@@ -375,6 +375,7 @@ src/
 frontend/                # React + Vite UI, served by nginx in Compose (nginx.conf.template)
 skills/                  # Domain skill prompts (AWS, ITGC, PCI DSS, HIPAA, GDPR)
 tests/                   # pytest suite; tests/eval/ holds the moto evidence-layer evaluation
+evals/                   # LLM-layer evaluation: scenarios, draft answer key, runner, metrics, replay fixtures
 run_monitor.py           # Headless run of all three crews
 aws_safety_heartbeat.py  # Checks a lab AWS account for running EC2 / RDS resources
 Dockerfile, docker-compose.yml
@@ -385,7 +386,7 @@ Dockerfile, docker-compose.yml
 ## Limitations and accuracy
 
 - **Decision support only.** The output is a draft for a qualified auditor. It is not an audit opinion and does not replace engagement supervision.
-- **Not benchmarked.** There are no measured accuracy, precision, time-saving or cost figures.
+- **Not benchmarked yet.** There are no measured accuracy, precision, time-saving or cost figures. The LLM-layer evaluation harness ([docs/EVALUATION.md](docs/EVALUATION.md)) defines the metrics and scenarios, but no real-model run has been published, and its answer key is still an unreviewed draft.
 - **QA is another LLM.** Temperature 0 lowers variance on hosted models but does not remove it. A QA approval does not show the output is correct.
 - **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity, so the segregation-of-duties checks compare typed names only.
 - **Approval trail.** The hash chain makes edits to the stored trail detectable; it does not prevent them. Without `VAULT_ENCRYPTION_KEY`, anyone who can write the sessions file and the anchor file can rebuild a consistent trail. With the key, they also need the key. Entries cut from the end are only detected against the anchor file.
@@ -405,4 +406,4 @@ Dockerfile, docker-compose.yml
 
 Developed by **Tiago Brachini**. The code in this repository is released under the [MIT License](LICENSE).
 
-Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. This repository maps to SCF control IDs only. It does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.
+Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. Prompts may reference SCF control IDs alongside other frameworks. This repository does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.
