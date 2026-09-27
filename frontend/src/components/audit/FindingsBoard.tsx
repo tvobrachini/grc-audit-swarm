@@ -10,7 +10,15 @@ interface AuditFinding {
   vault_id_reference: string;
   exact_quote_from_evidence: string;
   test_conclusion: string;
-  severity: string;
+  tod_conclusion?: string;
+  toe_conclusion?: string;
+  toe_basis?: string | null;
+  items_tested?: number | null;
+  exceptions_noted?: number | null;
+  result?: string | null;
+  preliminary_deficiency?: boolean | null;
+  /** Old sessions, migrated from a single free-text severity field. */
+  legacy_severity?: string | null;
 }
 
 interface WorkingPapers {
@@ -18,39 +26,33 @@ interface WorkingPapers {
   findings?: AuditFinding[];
 }
 
-const SEVERITY_CONFIG: Record<
+const RESULT_CONFIG: Record<
   string,
   { color: string; bg: string; border: string; dot: string }
 > = {
-  Pass: {
+  "No exception": {
     color: "text-green-400",
     bg: "bg-green-900/10",
     border: "border-green-800/40",
     dot: "bg-green-500",
   },
-  "Control Deficiency": {
-    color: "text-amber-400",
-    bg: "bg-amber-900/10",
-    border: "border-amber-700/40",
-    dot: "bg-amber-500",
-  },
-  "Significant Deficiency": {
-    color: "text-orange-400",
-    bg: "bg-orange-900/10",
-    border: "border-orange-700/40",
-    dot: "bg-orange-500",
-  },
-  "Material Weakness": {
+  Exception: {
     color: "text-red-400",
     bg: "bg-red-900/10",
     border: "border-red-700/40",
     dot: "bg-red-500",
   },
+  "Not tested": {
+    color: "text-[var(--color-text-muted)]",
+    bg: "bg-[var(--color-bg-elevated)]",
+    border: "border-[var(--color-border)]",
+    dot: "bg-[var(--color-text-muted)]",
+  },
 };
 
-function severityConfig(s: string) {
+function resultConfig(s: string | null | undefined) {
   return (
-    SEVERITY_CONFIG[s] ?? {
+    RESULT_CONFIG[s ?? ""] ?? {
       color: "text-[var(--color-text-muted)]",
       bg: "bg-[var(--color-bg-elevated)]",
       border: "border-[var(--color-border)]",
@@ -60,7 +62,8 @@ function severityConfig(s: string) {
 }
 
 /** Deterministic vault check: the quote must appear verbatim in the stored,
- * digest-verified evidence record (POST /api/evidence/verify). */
+ * digest-verified evidence record (POST /api/evidence/verify). Skipped for
+ * "Not tested" findings, which legitimately carry no vault reference. */
 function VaultBadge({ finding }: { finding: AuditFinding }) {
   const { vault_id_reference: vaultId, exact_quote_from_evidence: quote } = finding;
   const { data, isError } = useQuery({
@@ -71,7 +74,11 @@ function VaultBadge({ finding }: { finding: AuditFinding }) {
   });
   if (!vaultId || !quote) return null;
   if (isError) {
-    return <span className="text-[10px] text-[var(--color-text-muted)]">verification unavailable</span>;
+    return (
+      <span className="text-[10px] text-[var(--color-text-muted)]">
+        verification unavailable
+      </span>
+    );
   }
   if (!data) return null;
   return data.verified ? (
@@ -85,9 +92,23 @@ function VaultBadge({ finding }: { finding: AuditFinding }) {
   );
 }
 
+function Field({ label, value }: { label: string; value?: string | number | null }) {
+  if (value === null || value === undefined || value === "") return null;
+  return (
+    <div>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        {label}
+      </p>
+      <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{value}</p>
+    </div>
+  );
+}
+
 function FindingCard({ finding }: { finding: AuditFinding }) {
-  const [open, setOpen] = useState(finding.severity !== "Pass");
-  const cfg = severityConfig(finding.severity);
+  const result = finding.result ?? "Not tested";
+  const notTested = result === "Not tested";
+  const [open, setOpen] = useState(result !== "No exception");
+  const cfg = resultConfig(result);
 
   return (
     <div className={clsx("rounded-xl border overflow-hidden", cfg.border, cfg.bg)}>
@@ -99,14 +120,28 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
         <span className="font-mono text-[11px] text-violet-400 shrink-0">
           {finding.control_id}
         </span>
+        <span className="flex-1" />
+        {finding.preliminary_deficiency && (
+          <span className="shrink-0 rounded bg-red-900/30 px-2 py-0.5 text-[10px] font-semibold text-red-400">
+            preliminary deficiency
+          </span>
+        )}
+        {finding.legacy_severity && (
+          <span
+            title="This finding predates the ToD/ToE split; the original free-text label is kept for traceability."
+            className="shrink-0 rounded bg-[var(--color-bg-base)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+          >
+            legacy rating: {finding.legacy_severity}
+          </span>
+        )}
         <span
           className={clsx(
-            "ml-auto shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold",
+            "shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold",
             cfg.color,
             "bg-black/20"
           )}
         >
-          {finding.severity}
+          {result}
         </span>
         {open ? (
           <ChevronDown size={12} className="text-[var(--color-text-muted)] shrink-0" />
@@ -117,14 +152,28 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
 
       {open && (
         <div className="border-t border-[var(--color-border)]/50 px-4 py-3 space-y-3">
-          <div>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-              Test Conclusion
-            </p>
-            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
-              {finding.test_conclusion}
-            </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Test of Design (ToD)" value={finding.tod_conclusion} />
+            <Field label="Test of Operating Effectiveness (ToE)" value={finding.toe_conclusion} />
           </div>
+
+          {finding.toe_basis && (
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                ToE Basis (reliance statement)
+              </p>
+              <p className="text-xs italic text-[var(--color-text-secondary)] leading-relaxed">
+                {finding.toe_basis}
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-4">
+            <Field label="Items Tested" value={finding.items_tested} />
+            <Field label="Exceptions Noted" value={finding.exceptions_noted} />
+          </div>
+
+          <Field label="Test Conclusion" value={finding.test_conclusion} />
 
           {finding.exact_quote_from_evidence && (
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2">
@@ -140,7 +189,7 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
             </div>
           )}
 
-          {finding.vault_id_reference && (
+          {finding.vault_id_reference ? (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-[var(--color-text-muted)]">Vault ID:</span>
               <span className="font-mono text-[10px] text-violet-400/70">
@@ -148,6 +197,12 @@ function FindingCard({ finding }: { finding: AuditFinding }) {
               </span>
               <VaultBadge finding={finding} />
             </div>
+          ) : (
+            notTested && (
+              <p className="text-[10px] text-[var(--color-text-muted)]">
+                No vault reference — control was not tested.
+              </p>
+            )
           )}
         </div>
       )}
@@ -159,23 +214,21 @@ interface Props {
   session: SessionDetail;
 }
 
+const RESULT_ORDER = ["Exception", "Not tested", "No exception"];
+
 export function FindingsBoard({ session }: Props) {
   const papers = session.working_papers as WorkingPapers | null;
   const findings: AuditFinding[] = papers?.findings ?? [];
 
   const counts = findings.reduce(
     (acc, f) => {
-      const key = f.severity;
+      const key = f.result ?? "Not tested";
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     },
     {} as Record<string, number>
   );
-
-  const hasDeficiencies =
-    (counts["Control Deficiency"] ?? 0) +
-    (counts["Significant Deficiency"] ?? 0) +
-    (counts["Material Weakness"] ?? 0);
+  const deficiencyCount = findings.filter((f) => f.preliminary_deficiency).length;
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -198,20 +251,20 @@ export function FindingsBoard({ session }: Props) {
           <div className="flex gap-3 shrink-0 text-center">
             <div>
               <p className="text-lg font-bold text-green-400">
-                {counts["Pass"] ?? 0}
+                {counts["No exception"] ?? 0}
               </p>
-              <p className="text-[10px] text-[var(--color-text-muted)]">pass</p>
+              <p className="text-[10px] text-[var(--color-text-muted)]">no exception</p>
             </div>
             <div>
               <p
                 className={clsx(
                   "text-lg font-bold",
-                  hasDeficiencies ? "text-red-400" : "text-[var(--color-text-muted)]"
+                  deficiencyCount ? "text-red-400" : "text-[var(--color-text-muted)]"
                 )}
               >
-                {hasDeficiencies}
+                {deficiencyCount}
               </p>
-              <p className="text-[10px] text-[var(--color-text-muted)]">defic.</p>
+              <p className="text-[10px] text-[var(--color-text-muted)]">prelim. defic.</p>
             </div>
           </div>
         )}
@@ -221,11 +274,11 @@ export function FindingsBoard({ session }: Props) {
         <div className="flex flex-wrap gap-2">
           {Object.entries(counts)
             .filter(([, n]) => n > 0)
-            .map(([sev, n]) => {
-              const cfg = severityConfig(sev);
+            .map(([result, n]) => {
+              const cfg = resultConfig(result);
               return (
                 <span
-                  key={sev}
+                  key={result}
                   className={clsx(
                     "rounded-full px-2.5 py-1 text-[10px] font-medium",
                     cfg.color,
@@ -234,7 +287,7 @@ export function FindingsBoard({ session }: Props) {
                     cfg.border
                   )}
                 >
-                  {n} × {sev}
+                  {n} × {result}
                 </span>
               );
             })}
@@ -249,15 +302,11 @@ export function FindingsBoard({ session }: Props) {
         ) : (
           findings
             .slice()
-            .sort((a, b) => {
-              const order = [
-                "Material Weakness",
-                "Significant Deficiency",
-                "Control Deficiency",
-                "Pass",
-              ];
-              return order.indexOf(a.severity) - order.indexOf(b.severity);
-            })
+            .sort(
+              (a, b) =>
+                RESULT_ORDER.indexOf(a.result ?? "Not tested") -
+                RESULT_ORDER.indexOf(b.result ?? "Not tested")
+            )
             .map((f, i) => <FindingCard key={i} finding={f} />)
         )}
       </div>

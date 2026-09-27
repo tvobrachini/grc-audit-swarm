@@ -25,7 +25,12 @@ _TRANSITIONS: dict[AuditStatus, set[AuditStatus]] = {
         AuditStatus.QA_REJECTED_PHASE_1,
         AuditStatus.ERROR_PHASE_1,
     },
-    AuditStatus.WAITING_HUMAN_GATE_1: {AuditStatus.RUNNING_PHASE_2},
+    AuditStatus.WAITING_HUMAN_GATE_1: {
+        AuditStatus.RUNNING_PHASE_2,
+        AuditStatus.RUNNING_PHASE_1,
+    },
+    # WAITING_HUMAN_GATE_n → RUNNING_PHASE_n is a reviewer returning the phase
+    # for rework with review notes (see return_for_rework).
     # QA_REJECTED → RUNNING is a retry; QA_REJECTED → WAITING_HUMAN_GATE is a
     # supervisor override (accept the artifact despite the QA rejection).
     AuditStatus.QA_REJECTED_PHASE_1: {
@@ -38,7 +43,10 @@ _TRANSITIONS: dict[AuditStatus, set[AuditStatus]] = {
         AuditStatus.QA_REJECTED_PHASE_2,
         AuditStatus.ERROR_PHASE_2,
     },
-    AuditStatus.WAITING_HUMAN_GATE_2: {AuditStatus.RUNNING_PHASE_3},
+    AuditStatus.WAITING_HUMAN_GATE_2: {
+        AuditStatus.RUNNING_PHASE_3,
+        AuditStatus.RUNNING_PHASE_2,
+    },
     AuditStatus.QA_REJECTED_PHASE_2: {
         AuditStatus.RUNNING_PHASE_2,
         AuditStatus.WAITING_HUMAN_GATE_2,
@@ -49,7 +57,10 @@ _TRANSITIONS: dict[AuditStatus, set[AuditStatus]] = {
         AuditStatus.QA_REJECTED_PHASE_3,
         AuditStatus.ERROR_PHASE_3,
     },
-    AuditStatus.WAITING_HUMAN_GATE_3: {AuditStatus.COMPLETED},
+    AuditStatus.WAITING_HUMAN_GATE_3: {
+        AuditStatus.COMPLETED,
+        AuditStatus.RUNNING_PHASE_3,
+    },
     AuditStatus.QA_REJECTED_PHASE_3: {
         AuditStatus.RUNNING_PHASE_3,
         AuditStatus.WAITING_HUMAN_GATE_3,
@@ -126,6 +137,10 @@ class AuditStateMachine:
 
     def retry_phase(self, phase: int) -> None:
         self._transition(_running(phase), _qa_rejected(phase), _error(phase))
+
+    def return_for_rework(self, phase: int) -> None:
+        """Reviewer sends the phase back: WAITING_HUMAN_GATE_n → RUNNING_PHASE_n."""
+        self._transition(_running(phase), _waiting_gate(phase))
 
     def override_qa(self, phase: int) -> None:
         """Supervisor accepts a QA-rejected artifact: → WAITING_HUMAN_GATE_n."""

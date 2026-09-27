@@ -9,21 +9,40 @@ interface ControlTestStep {
   expected_result: string;
 }
 
+interface Population {
+  source: string;
+  completeness_procedure?: string;
+}
+
 interface ControlTesting {
   test_of_design: ControlTestStep[];
   test_of_effectiveness: ControlTestStep[];
   substantive_testing?: ControlTestStep[];
+  population?: Population | null;
+  sample_size?: number | null;
+  sampling_method?: string | null;
+  period_of_reliance?: string | null;
 }
 
 interface Control {
   control_id: string;
   description: string;
+  control_owner?: string | null;
+  frequency?: string | null;
+  nature?: string | null;
+  control_type?: string | null;
+  key_control?: boolean | null;
+  assertions?: string[];
+  ipe?: string[];
   testing_procedures: ControlTesting;
 }
 
 interface Risk {
   risk_id: string;
   description: string;
+  likelihood?: string | null;
+  impact?: string | null;
+  rating_rationale?: string | null;
   regulatory_mapping: string[];
   controls: Control[];
 }
@@ -40,6 +59,37 @@ const TAB_CONFIG: { id: ProcedureTab; label: string; icon: React.ReactNode; key:
   { id: "toe", label: "Test of Effectiveness", icon: <FlaskConical size={11} />, key: "test_of_effectiveness" },
   { id: "substantive", label: "Substantive", icon: <ShieldAlert size={11} />, key: "substantive_testing" },
 ];
+
+function Chip({
+  label,
+  muted,
+  emphasis,
+}: {
+  label: string;
+  muted?: boolean;
+  emphasis?: boolean;
+}) {
+  return (
+    <span
+      className={clsx(
+        "rounded px-1.5 py-0.5 text-[10px]",
+        emphasis
+          ? "bg-amber-900/30 text-amber-400"
+          : muted
+          ? "bg-[var(--color-bg-base)] text-[var(--color-text-muted)]"
+          : "bg-violet-900/30 text-violet-400"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+const RATING_COLOR: Record<string, string> = {
+  Low: "text-green-400",
+  Medium: "text-amber-400",
+  High: "text-red-400",
+};
 
 function ControlCard({ control }: { control: Control }) {
   const [open, setOpen] = useState(false);
@@ -73,6 +123,73 @@ function ControlCard({ control }: { control: Control }) {
 
       {open && (
         <div className="border-t border-[var(--color-border)]">
+          <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-bg-elevated)]/40">
+            {control.control_owner && (
+              <Chip label={`Owner: ${control.control_owner}`} />
+            )}
+            {control.frequency && <Chip label={control.frequency} />}
+            {control.nature && <Chip label={control.nature} />}
+            {control.control_type && <Chip label={control.control_type} />}
+            {control.key_control != null && (
+              <Chip
+                label={control.key_control ? "Key control" : "Non-key control"}
+                emphasis={control.key_control}
+              />
+            )}
+            {(control.assertions ?? []).map((a) => (
+              <Chip key={a} label={a} muted />
+            ))}
+            {(control.ipe ?? []).length > 0 && (
+              <Chip
+                label={`IPE: ${(control.ipe ?? []).join("; ")}`}
+                muted
+              />
+            )}
+          </div>
+
+          {(control.testing_procedures.population ||
+            control.testing_procedures.sample_size != null ||
+            control.testing_procedures.sampling_method ||
+            control.testing_procedures.period_of_reliance) && (
+            <div className="space-y-1 px-3 py-2 border-b border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)]">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                Test design
+              </p>
+              {control.testing_procedures.population && (
+                <p>
+                  <span className="text-[var(--color-text-muted)]">Population: </span>
+                  {control.testing_procedures.population.source}
+                  {control.testing_procedures.population.completeness_procedure && (
+                    <>
+                      {" — "}
+                      <span className="text-[var(--color-text-muted)]">
+                        completeness:{" "}
+                      </span>
+                      {control.testing_procedures.population.completeness_procedure}
+                    </>
+                  )}
+                </p>
+              )}
+              {(control.testing_procedures.sample_size != null ||
+                control.testing_procedures.sampling_method) && (
+                <p>
+                  <span className="text-[var(--color-text-muted)]">Sample: </span>
+                  {control.testing_procedures.sample_size ?? "—"} item(s)
+                  {control.testing_procedures.sampling_method &&
+                    ` (${control.testing_procedures.sampling_method})`}
+                </p>
+              )}
+              {control.testing_procedures.period_of_reliance && (
+                <p>
+                  <span className="text-[var(--color-text-muted)]">
+                    Period of reliance:{" "}
+                  </span>
+                  {control.testing_procedures.period_of_reliance}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex border-b border-[var(--color-border)]">
             {TAB_CONFIG.map((t) => {
               const steps =
@@ -161,13 +278,30 @@ function RiskRow({ risk }: { risk: Risk }) {
             {risk.description}
           </p>
         </div>
-        <span className="ml-2 shrink-0 text-[10px] text-[var(--color-text-muted)]">
-          {risk.controls.length} ctrl{risk.controls.length !== 1 ? "s" : ""}
-        </span>
+        <div className="ml-2 flex shrink-0 items-center gap-2 text-[10px]">
+          {risk.likelihood && (
+            <span className={RATING_COLOR[risk.likelihood] ?? "text-[var(--color-text-muted)]"}>
+              L: {risk.likelihood}
+            </span>
+          )}
+          {risk.impact && (
+            <span className={RATING_COLOR[risk.impact] ?? "text-[var(--color-text-muted)]"}>
+              I: {risk.impact}
+            </span>
+          )}
+          <span className="text-[var(--color-text-muted)]">
+            {risk.controls.length} ctrl{risk.controls.length !== 1 ? "s" : ""}
+          </span>
+        </div>
       </button>
 
       {open && (
         <div className="border-t border-[var(--color-border)] px-4 py-3 space-y-2">
+          {risk.rating_rationale && (
+            <p className="mb-1 rounded-lg bg-[var(--color-bg-base)] px-3 py-2 text-[11px] italic text-[var(--color-text-muted)]">
+              {risk.rating_rationale}
+            </p>
+          )}
           {risk.controls.map((ctrl) => (
             <ControlCard key={ctrl.control_id} control={ctrl} />
           ))}

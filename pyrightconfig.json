@@ -13,7 +13,8 @@
       "root": "src"
     },
     {
-      "root": "."
+      "root": ".",
+      "extraPaths": ["src"]
     }
   ],
   "venvPath": ".",

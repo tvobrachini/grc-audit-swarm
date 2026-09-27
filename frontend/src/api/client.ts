@@ -14,19 +14,45 @@ export interface SessionSummary {
   phase: number;
   needs_input: boolean;
   created_at: string;
+  prepared_by: string;
 }
 
-/** One approval-trail entry. `action` is gate_approval | retry | qa_override;
- * extra keys depend on the action (reason, qa_rejection_reason, …). */
+/** One approval-trail entry. `action` is audit_created | gate_approval | retry |
+ * qa_override | return_for_rework; extra keys depend on the action (reason,
+ * notes, qa_rejection_reason, artifact_digest, unverified_controls, …). */
 export interface TrailEntry {
   gate: string;
   human: string;
   timestamp: string;
   action?: string;
   reason?: string;
+  notes?: string;
   qa_rejection_reason?: string;
   previous_status?: string;
   previous_reason?: string;
+  artifact?: string;
+  artifact_digest?: string;
+  unverified_controls?: string;
+  hash_alg?: string;
+  prev_hash?: string;
+  entry_hash?: string;
+}
+
+/** Result of recomputing the approval trail's hash chain
+ * (GET /api/sessions/{id}/trail/verify). `status` is one of ok |
+ * legacy_unchained | broken | truncated | unkeyed | key_unavailable |
+ * artifact_changed. `ok` is true only for "ok". */
+export interface TrailVerification {
+  ok: boolean;
+  status: string;
+  entries: number;
+  legacy_entries: number;
+  first_broken_index: number | null;
+  keyed: boolean;
+  anchored: boolean;
+  head_hash: string | null;
+  changed_since_approval: string[];
+  detail: string;
 }
 
 export interface SessionDetail extends SessionSummary {
@@ -39,6 +65,7 @@ export interface SessionDetail extends SessionSummary {
   final_report: Record<string, unknown> | null;
   approval_trail: TrailEntry[];
   qa_rejection_reason: string | null;
+  trail_verification: TrailVerification | null;
 }
 
 export interface AppConfig {
@@ -147,6 +174,7 @@ export interface CreateSessionBody {
   business_context: string;
   frameworks: string[];
   name?: string;
+  prepared_by: string;
 }
 
 export const api = {
@@ -165,6 +193,7 @@ export const api = {
       form.append("business_context", body.business_context);
       body.frameworks.forEach((f) => form.append("frameworks", f));
       if (body.name) form.append("name", body.name);
+      form.append("prepared_by", body.prepared_by);
       form.append("document", document);
       // No Content-Type header: the browser sets the multipart boundary.
       const res = await raiseForStatus(
@@ -191,6 +220,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ phase, human_id, reason }),
       }),
+    returnForRework: (id: string, phase: number, human_id: string, notes: string) =>
+      request<SessionSummary>(`/api/sessions/${id}/return`, {
+        method: "POST",
+        body: JSON.stringify({ phase, human_id, notes }),
+      }),
+    verifyTrail: (id: string) =>
+      request<TrailVerification>(`/api/sessions/${id}/trail/verify`),
     delete: async (id: string) => {
       await raiseForStatus(
         await fetch(`${API_URL}/api/sessions/${id}`, {

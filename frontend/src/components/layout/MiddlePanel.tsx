@@ -41,21 +41,40 @@ export function MiddlePanel({ session, events, onDeleted }: Props) {
     problem?.kind === "qa_rejected" &&
     session[DRAFT_FIELD[problem.phase as 1 | 2 | 3]] !== null;
 
+  // Mirrors the backend's _has_sign_off (src/api/routers/sessions.py): once
+  // any gate has been approved, or the audit is completed, deletion is
+  // refused so the approved work and its trail are kept.
+  const hasSignOff =
+    status === "COMPLETED" ||
+    phase >= 2 ||
+    session.approval_trail.some((e) => e.action === "gate_approval");
+  const deleteDisabled = del.isPending || status.startsWith("RUNNING_PHASE") || hasSignOff;
+  const deleteTitle = hasSignOff
+    ? "Cannot delete: a gate has been approved (or the audit is complete), so this audit and its approval trail are kept."
+    : "Delete this audit";
+
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-4 border-b border-[var(--color-border)] px-6 py-3">
-        <h2 className="flex-1 truncate text-sm font-semibold text-[var(--color-text-primary)]">
-          {session.name}
-        </h2>
+        <div className="flex-1 min-w-0">
+          <h2 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+            {session.name}
+          </h2>
+          {session.prepared_by && (
+            <p className="truncate text-[10px] text-[var(--color-text-muted)]">
+              Prepared by {session.prepared_by}
+            </p>
+          )}
+        </div>
         <PhaseBar phase={phase} status={status} />
         <button
-          title="Delete this audit"
+          title={deleteTitle}
           onClick={() => {
             if (window.confirm(`Delete "${session.name}"? This cannot be undone.`)) {
               del.mutate();
             }
           }}
-          disabled={del.isPending || status.startsWith("RUNNING_PHASE")}
+          disabled={deleteDisabled}
           className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-red-400 disabled:opacity-30"
         >
           <Trash2 size={14} />

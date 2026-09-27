@@ -79,7 +79,7 @@ class TestGenerateReportingPhase3Retry:
         assert flow.state.final_report is not None
         assert mock_crew.kickoff.call_count == 1
 
-        flow.finalize_audit("auditor@co.com")
+        flow.finalize_audit("manager@co.com")
         assert flow.state.status == "COMPLETED"
 
     def test_qa_rejection_triggers_single_retry(self, tmp_path, monkeypatch):
@@ -104,7 +104,7 @@ class TestGenerateReportingPhase3Retry:
         assert flow.state.status == "WAITING_HUMAN_GATE_3"
         assert mock_crew.kickoff.call_count == 2
 
-        flow.finalize_audit("auditor@co.com")
+        flow.finalize_audit("manager@co.com")
         assert flow.state.status == "COMPLETED"
 
     def test_retry_injects_tone_feedback_into_inputs(self, tmp_path, monkeypatch):

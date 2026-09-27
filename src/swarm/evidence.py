@@ -8,7 +8,7 @@ import os
 import datetime
 import base64
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +72,23 @@ def _build_fernet(key_b64: str):
 _HMAC_KEY_LABEL = b"grc-audit-swarm/evidence-vault/hmac-sha256/v1"
 
 
-def _derive_hmac_key(key_b64: str) -> bytes:
-    """Derive the vault's HMAC key from the base64 VAULT_ENCRYPTION_KEY."""
+def _derive_hmac_key(key_b64: str, label: bytes = _HMAC_KEY_LABEL) -> bytes:
+    """Derive a purpose-specific HMAC key from the base64 VAULT_ENCRYPTION_KEY.
+
+    ``label`` separates the purposes: the evidence vault and the approval
+    trail (see ``swarm.trail``) each get their own key, so a digest made for
+    one can never be replayed as a valid digest for the other.
+    """
     raw_key = base64.urlsafe_b64decode(key_b64.encode())
-    return hmac.new(raw_key, _HMAC_KEY_LABEL, hashlib.sha256).digest()
+    return hmac.new(raw_key, label, hashlib.sha256).digest()
+
+
+def derive_labelled_key(label: bytes) -> Optional[bytes]:
+    """HMAC key for ``label`` derived from VAULT_ENCRYPTION_KEY, or None if unset."""
+    key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
+    if not key_b64:
+        return None
+    return _derive_hmac_key(key_b64, label)
 
 
 def _keyed_digest(payload: str, key_b64: str) -> str:
@@ -295,6 +308,50 @@ class EvidenceAssuranceProtocol:
                 counts["failed"] += 1
 
         return counts
+
+
+_NOT_TESTED = "not tested"
+# Finding fields that may carry the "Not tested" conclusion (schema-version
+# tolerant: read defensively, whichever the working-paper schema defines).
+_NOT_TESTED_FIELDS = ("result", "toe_conclusion")
+
+
+def _normalised_label(value: Any) -> str:
+    raw = getattr(value, "value", value)  # Enum members → their value
+    if not isinstance(raw, str):
+        return ""
+    return " ".join(raw.replace("_", " ").replace("-", " ").split()).casefold()
+
+
+def finding_marked_not_tested(finding: Any) -> bool:
+    """True if the finding records that the control was not tested."""
+    return any(
+        _normalised_label(getattr(finding, name, None)) == _NOT_TESTED
+        for name in _NOT_TESTED_FIELDS
+    )
+
+
+def unverified_findings(findings: Iterable[Any]) -> list[str]:
+    """Control IDs of findings whose evidence quote is not found in the vault.
+
+    Deterministic, no model involved. Every finding with a quote must pass
+    :meth:`EvidenceAssuranceProtocol.verify_exact_quote`. A finding without a
+    quote passes only if it says the control was not tested (``result`` or
+    ``toe_conclusion`` equal to "Not tested"); a tested conclusion must be
+    backed by a verifiable quote.
+    """
+    unverified: list[str] = []
+    for index, finding in enumerate(findings):
+        control_id = getattr(finding, "control_id", None) or f"finding #{index + 1}"
+        quote = getattr(finding, "exact_quote_from_evidence", None) or ""
+        vault_id = getattr(finding, "vault_id_reference", None) or ""
+        if not quote.strip():
+            if not finding_marked_not_tested(finding):
+                unverified.append(str(control_id))
+            continue
+        if not EvidenceAssuranceProtocol.verify_exact_quote(str(vault_id), quote):
+            unverified.append(str(control_id))
+    return unverified
 
 
 if __name__ == "__main__":

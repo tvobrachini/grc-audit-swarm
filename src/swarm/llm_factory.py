@@ -86,3 +86,36 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
         + ", ".join(_PROVIDER_ENV_VARS)
         + " (or run with DEMO_MODE=1 to bypass the crews)."
     )
+
+
+def qa_llm_configured() -> bool:
+    """True when a separate QA reviewer model is configured (QA_LLM_MODEL)."""
+    return bool(os.environ.get("QA_LLM_MODEL", "").strip())
+
+
+def get_qa_llm(temperature: float = 0.0) -> LLM:
+    """The LLM for the QA reviewer agents.
+
+    A reviewer running on the same model as the preparer shares its blind
+    spots and training biases, so its approval is not an independent check.
+    Set ``QA_LLM_MODEL`` (a LiteLLM model string such as
+    ``openai/gpt-4o-mini`` or ``ollama/qwen2.5``) to give the QA agents a
+    different provider/model; ``QA_LLM_API_KEY`` and ``QA_LLM_BASE_URL`` are
+    passed to that client only (the process environment is not changed).
+
+    Without ``QA_LLM_MODEL`` this is exactly :func:`get_crew_llm` (the
+    default, unchanged behaviour). A different model is still not a human
+    reviewer: the human gates remain the sign-off.
+    """
+    model = os.environ.get("QA_LLM_MODEL", "").strip()
+    if not model:
+        return get_crew_llm(temperature=temperature)
+    kwargs: dict = {"model": model, "temperature": temperature, "timeout": 120}
+    api_key = os.environ.get("QA_LLM_API_KEY")
+    if api_key:
+        kwargs["api_key"] = api_key
+    base_url = os.environ.get("QA_LLM_BASE_URL")
+    if base_url:
+        kwargs["base_url"] = base_url
+    logger.info(f"[LLM Factory] QA reviewers bound to separate model: {model}.")
+    return LLM(**kwargs)

@@ -8,21 +8,39 @@ interface Props {
   onCreated: (sessionId: string) => void;
 }
 
-const DEFAULT_FRAMEWORKS = ["COSO", "PCAOB", "IIA"];
+// Mirrors src/api/models.py DEFAULT_FRAMEWORKS: control frameworks the RACM
+// maps to. Auditing standards (e.g. IIA, PCAOB) govern the auditor, not the
+// entity's controls, so they are offered separately, not as defaults here.
+const DEFAULT_FRAMEWORKS = ["COSO 2013", "NIST SP 800-53", "CIS Controls"];
+const SELECTABLE_FRAMEWORKS = [
+  "COSO 2013",
+  "NIST SP 800-53",
+  "CIS Controls",
+  "ISO 27001",
+  "SOC 2",
+];
 // Mirrors the API limit (src/api/scope_document.py); the server enforces it.
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+// Mirrors CreateSessionRequest.prepared_by (src/api/models.py).
+const MAX_PREPARED_BY = 200;
 
 export function NewAuditModal({ onClose, onCreated }: Props) {
   const qc = useQueryClient();
   const [theme, setTheme] = useState("");
   const [context, setContext] = useState("");
+  const [preparedBy, setPreparedBy] = useState("");
   const [frameworks, setFrameworks] = useState(DEFAULT_FRAMEWORKS);
   const [scopeFile, setScopeFile] = useState<File | null>(null);
   const documentTooLarge = scopeFile !== null && scopeFile.size > MAX_DOCUMENT_BYTES;
 
   const mutation = useMutation({
     mutationFn: () => {
-      const body = { theme, business_context: context, frameworks };
+      const body = {
+        theme,
+        business_context: context,
+        frameworks,
+        prepared_by: preparedBy.trim(),
+      };
       return scopeFile
         ? api.sessions.createWithDocument(body, scopeFile)
         : api.sessions.create(body);
@@ -87,6 +105,26 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
 
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
+              Prepared by
+            </label>
+            <input
+              type="text"
+              value={preparedBy}
+              onChange={(e) => setPreparedBy(e.target.value)}
+              maxLength={MAX_PREPARED_BY}
+              placeholder="e.g. J. Rivera, IT Auditor"
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-violet-500"
+            />
+            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              The declared preparer of this audit. Segregation of duties: the
+              preparer cannot approve gates, override a QA rejection, or
+              return work for rework on this audit — a different reviewer must
+              act at each gate.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">
               Scope document (optional — PDF, .txt or .md, max 5 MB)
             </label>
             <input
@@ -108,10 +146,10 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
 
           <div>
             <label className="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]">
-              Frameworks
+              Control frameworks
             </label>
-            <div className="flex gap-2">
-              {["COSO", "PCAOB", "IIA", "ISO 27001", "SOC 2"].map((fw) => (
+            <div className="flex flex-wrap gap-2">
+              {SELECTABLE_FRAMEWORKS.map((fw) => (
                 <button
                   key={fw}
                   type="button"
@@ -141,6 +179,7 @@ export function NewAuditModal({ onClose, onCreated }: Props) {
             disabled={
               !theme.trim() ||
               (!context.trim() && !scopeFile) ||
+              !preparedBy.trim() ||
               documentTooLarge ||
               mutation.isPending
             }

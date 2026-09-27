@@ -1,0 +1,92 @@
+{
+  "theme": "AWS S3 Public Exposure Risk",
+  "business_context": "Fintech analytics portal; check S3 exposure.",
+  "frameworks": ["CIS AWS Foundations Benchmark v3.0"],
+  "racm_plan": {
+    "theme": "AWS S3 Public Exposure Risk",
+    "risks": [
+      {
+        "risk_id": "RISK-01",
+        "description": "Buckets exposed publicly",
+        "regulatory_mapping": ["COSO", "PCAOB AS 2201"],
+        "controls": [
+          {
+            "control_id": "CTRL-01",
+            "description": "Block public access on S3 buckets.",
+            "testing_procedures": {
+              "test_of_design": [
+                {"step_description": "Check BPA", "expected_result": "On"}
+              ],
+              "test_of_effectiveness": [
+                {"step_description": "List buckets", "expected_result": "Private"}
+              ],
+              "substantive_testing": null
+            }
+          },
+          {
+            "control_id": "CTRL-02",
+            "description": "IAM password policy.",
+            "testing_procedures": {
+              "test_of_design": [
+                {"step_description": "Read policy", "expected_result": "Set"}
+              ],
+              "test_of_effectiveness": [
+                {"step_description": "Read policy", "expected_result": "14 chars"}
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "working_papers": {
+    "theme": "AWS S3 Public Exposure Risk",
+    "findings": [
+      {
+        "control_id": "CTRL-01",
+        "vault_id_reference": "11111111-1111-1111-1111-111111111111",
+        "exact_quote_from_evidence": "BlockPublicAcls: false",
+        "test_conclusion": "One bucket allows public ACLs.",
+        "severity": "Material Weakness"
+      },
+      {
+        "control_id": "CTRL-02",
+        "vault_id_reference": "22222222-2222-2222-2222-222222222222",
+        "exact_quote_from_evidence": "MinimumPasswordLength: 14",
+        "test_conclusion": "Policy meets the benchmark.",
+        "severity": "Pass"
+      },
+      {
+        "control_id": "CTRL-03",
+        "vault_id_reference": "33333333-3333-3333-3333-333333333333",
+        "exact_quote_from_evidence": "MFA: false",
+        "test_conclusion": "One user without MFA.",
+        "severity": "Control Deficiency"
+      }
+    ]
+  },
+  "final_report": {
+    "executive_summary": "One material weakness.",
+    "detailed_report": "CTRL-01 is a material weakness.",
+    "compliance_tone_approved": true,
+    "oscal_sar": null
+  },
+  "current_human_dossier": "Reporting complete.",
+  "status": "WAITING_HUMAN_GATE_3",
+  "qa_rejection_reason": null,
+  "active_skill_ids": ["aws_cloud_security"],
+  "approval_trail": [
+    {
+      "gate": "Gate 1 (Planning)",
+      "human": "alice",
+      "timestamp": "2026-01-01T00:00:00+00:00",
+      "action": "gate_approval"
+    },
+    {
+      "gate": "Gate 2 (Fieldwork)",
+      "human": "alice",
+      "timestamp": "2026-01-02T00:00:00+00:00",
+      "action": "gate_approval"
+    }
+  ]
+}

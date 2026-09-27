@@ -23,6 +23,7 @@ from api.job_store import get_flow, remove_flow, set_flow
 from swarm import session_manager
 from swarm.audit_flow import AuditFlow
 from swarm.demo import demo_final_report
+from swarm.schema import WorkingPaperSchema
 from swarm.state.repository import FlowRepository
 
 AUTH = {"Authorization": "Bearer test-token"}
@@ -111,12 +112,25 @@ class TestRacmExport:
         assert wb.sheetnames == ["Controls", "Export Info"]
         rows = _rows(wb["Controls"])
         assert rows[0] == RACM_HEADERS
-        assert rows[1][0] == "RISK-01"
-        assert rows[1][3] == "CTRL-01"
-        assert rows[1][4] == "'" + EVIL
-        assert rows[1][1] == "'@SUM(1,2)"
-        assert "Inspect policy (Expect: OK)" in rows[1][5]
-        assert rows[1][7]  # substantive steps included
+        row = dict(zip(RACM_HEADERS, rows[1]))
+        assert row["Risk ID"] == "RISK-01"
+        assert row["Control ID"] == "CTRL-01"
+        assert row["Control Description"] == "'" + EVIL
+        assert row["Risk Description"] == "'@SUM(1,2)"
+        assert "Inspect policy (Expect: OK)" in row["ToD Steps"]
+        assert row["Substantive Steps"]  # substantive steps included
+        # Control attributes and test design.
+        assert row["Control Owner"] == "Cloud Platform Lead"
+        assert row["Frequency"] == "Continuous"
+        assert row["Nature"] == "Automated"
+        assert row["Type"] == "Preventive"
+        assert row["Key Control"] == "Yes"
+        assert row["Assertions / Objectives"] == "Confidentiality"
+        assert row["Population Source"] == "All S3 buckets"
+        assert row["Population Completeness"] == "Agree to console count"
+        assert row["Sample Size"] == "1"
+        assert row["Sampling Method"] == "Test of one"
+        assert row["Period of Reliance"] == "FY2026"
         # No cell is stored as a formula.
         for row in wb["Controls"].iter_rows():
             for cell in row:
@@ -154,12 +168,49 @@ class TestWorkingPapersExport:
         assert "working-papers-" in r.headers["content-disposition"]
         rows = _rows(_open(r.content)["Findings"])
         assert rows[0] == WORKING_PAPER_HEADERS
-        assert rows[1][0] == "CTRL-01"
-        assert rows[1][1] == "Pass"
-        assert rows[1][2] == "'" + EVIL
-        assert rows[1][3] == "'-2+3"
-        assert rows[1][4] == "vault-abc123"
-        assert rows[1][5] == "No"  # not a real vault record
+        row = dict(zip(WORKING_PAPER_HEADERS, rows[1]))
+        assert row["Control ID"] == "CTRL-01"
+        assert row["ToD Conclusion"] == "Effective"
+        assert row["ToE Conclusion"] == "Effective"
+        assert row["Result"] == "No exception"
+        assert row["Preliminary Deficiency"] == "No"
+        assert row["Conclusion"] == "'" + EVIL
+        assert row["Evidence Quote"] == "'-2+3"
+        assert row["Vault ID"] == "vault-abc123"
+        assert row["Quote Verified in Vault"] == "No"  # not a real vault record
+
+    def test_not_tested_and_legacy_findings(self, client):
+        papers = WorkingPaperSchema.model_validate(
+            {
+                "theme": "S3",
+                "findings": [
+                    {
+                        "control_id": "CTRL-09",
+                        "tod_conclusion": "Not tested",
+                        "toe_conclusion": "Not tested",
+                        "test_conclusion": "No tool covers this control.",
+                    },
+                    {
+                        "control_id": "CTRL-01",
+                        "vault_id_reference": "vault-old",
+                        "exact_quote_from_evidence": "BlockPublicAcls: false",
+                        "test_conclusion": "Old-format finding.",
+                        "severity": "Significant Deficiency",
+                    },
+                ],
+            }
+        )
+        sid = _session("WAITING_HUMAN_GATE_2", racm=make_racm(), papers=papers)
+        r = client.get(f"/api/sessions/{sid}/export/working-papers.xlsx", headers=AUTH)
+        wb = _open(r.content)
+        rows = [dict(zip(WORKING_PAPER_HEADERS, x)) for x in _rows(wb["Findings"])[1:]]
+        assert rows[0]["Result"] == "Not tested"
+        assert rows[0]["Quote Verified in Vault"] == "n/a (no evidence)"
+        assert rows[1]["Result"] == "Exception"
+        assert rows[1]["Preliminary Deficiency"] == "Yes"
+        assert rows[1]["Legacy Severity"] == "Significant Deficiency"
+        notes = [v for k, v in _rows(wb["Export Info"])[1:] if k == "Note"]
+        assert any("Legacy Severity" in n for n in notes)
 
     def test_404_before_fieldwork(self, client):
         sid = _session("WAITING_HUMAN_GATE_1", racm=make_racm())
@@ -184,6 +235,26 @@ class TestReportExport:
         assert "## Executive Summary\n\nNo exceptions." in body
         assert "evil.example" not in body
         assert "**Gate 1 (Planning)** — alice" in body
+
+    def test_deficiency_evaluation_section(self, client):
+        report = demo_final_report("S3")
+        report.deficiency_evaluations[0].rationale = "A | B ![x](http://evil.example/)"
+        sid = _session("WAITING_HUMAN_GATE_3", report=report)
+        body = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH).text
+        assert "## Deficiency Evaluation (proposed)" in body
+        assert "for the auditor's judgement at Gate 3. Scale: Risk rating." in body
+        row = next(line for line in body.splitlines() if line.startswith("| DEF-01"))
+        assert "| CTRL-02 | RISK-02 | Medium | High | High |" in row
+        assert "A \\| B" in row  # a pipe in model text cannot break the table
+        assert "evil.example" not in body
+        assert body.index("## Deficiency Evaluation") < body.index("## Approval Trail")
+
+    def test_report_without_evaluations_says_so(self, client):
+        sid = _session("COMPLETED", report=make_report())
+        body = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH).text
+        assert "No deficiencies were proposed." in body
+        assert "was approved at Gate 3 (see Approval Trail)" in body
+        assert "Scale: not stated." in body
 
     def test_rejected_report_is_labelled(self, client):
         sid = _session("QA_REJECTED_PHASE_3", report=make_report())

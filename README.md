@@ -4,12 +4,18 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 
+Give it a scope such as "AWS IAM and S3 access controls": it drafts the RACM, tests the controls against read-only AWS evidence, and drafts the report — a named reviewer approves, returns or overrides each phase, and every action is recorded in a hash-chained trail.
+
 An IT audit engagement has a shape: plan the risks and controls, test them against evidence, report the results, and have a supervisor review each step before the next one starts. GRC Audit Swarm is a personal project that drafts that work with language-model agents while keeping the audit structure in place. It takes a plain-language scope and produces a Risk and Control Matrix (RACM), working papers built from read-only AWS evidence, and a draft report. A person must approve each phase before the next one runs, and every approval, retry and override is written to an approval trail. The output is a draft for a qualified auditor to review, not an audit opinion.
 
 > [!IMPORTANT]
 > **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by or endorsed by any current or past employer.
 
 Design notes: [CASE_STUDY.md](CASE_STUDY.md) (the audit reasoning behind the design) and [DECISIONS.md](DECISIONS.md) (architecture decision records).
+
+![Demo: creating an audit, working through the three approval gates in DEMO_MODE, and reaching a completed audit with an intact trail and exports](docs/demo.gif)
+
+The GIF above is a `DEMO_MODE=1` walk-through: a preparer starts an audit, Gate 1 is returned for rework with reviewer notes and then approved, Gate 2 shows a fieldwork finding with its evidence quote verified against the vault, Gate 3 shows the draft deficiency evaluation awaiting the auditor's judgement, and the completed audit shows an intact approval trail and the export buttons. All content in it is fixed demo data, not language-model output.
 
 ---
 
@@ -99,21 +105,30 @@ The workflow runs three CrewAI crews in sequence. Each crew ends with a QA revie
 
 | Phase | Agents | Output |
 |---|---|---|
-| 1. Planning | Audit Director, Regulatory & Threat Analyst, Risk & Threat Specialist, Senior IT Auditor, Quality & Pushback Reviewer | RACM: risks, controls, and for every control test-of-design, test-of-effectiveness and substantive steps |
-| 2. Fieldwork | Field Evidence Collector (AWS tools), IT Field Auditor, Execution QA & Pushback Reviewer | Working papers: one finding per control, with severity, test conclusion, an exact evidence quote and a vault ID |
-| 3. Reporting | Lead Report Writer, Chief Audit Executive (executive summary), Reporting Tone & QA Reviewer, Compliance Documentation Engineer; 5 tasks, the writer also assembles the final report | Report narrative, executive summary and an OSCAL-inspired results structure |
+| 1. Planning | Audit Director, Regulatory & Threat Analyst, Risk & Threat Specialist, Senior IT Auditor, Quality & Pushback Reviewer | RACM: 3-8 risks rated for likelihood and impact; per control its owner, frequency, nature, type, key-control flag, assertions / IT objectives and IPE; test-of-design, test-of-effectiveness and substantive steps, plus population, sample size, sampling method and period of reliance |
+| 2. Fieldwork | Field Evidence Collector (AWS tools), IT Field Auditor, Execution QA & Pushback Reviewer | Working papers: one finding per control, with separate test-of-design and operating-effectiveness conclusions (Effective / Exceptions noted / Ineffective / Not tested), exceptions, a result, a preliminary-deficiency flag, an exact evidence quote and a vault ID. "Not tested" when no evidence tool covers the control; a point-in-time configuration read counts as design evidence only |
+| 3. Reporting | Audit Engagement Manager (deficiency evaluation), Lead Report Writer, Chief Audit Executive (executive summary), Reporting Tone & QA Reviewer, Compliance Documentation Engineer; 6 tasks, the writer also assembles the final report | A draft engagement-level deficiency evaluation (aggregation, compensating controls, likelihood x magnitude; control deficiency / significant deficiency / material weakness for SOX / ICFR scopes, otherwise Low / Medium / High) for the auditor to judge at Gate 3, the report narrative, executive summary and an OSCAL-inspired results structure |
 
-**What each phase receives.** The RACM drafter works from the Risk Specialist's ranked risk list. Fieldwork receives the approved RACM. Reporting receives the scope, a summary of the RACM (risks and controls) and the approved working papers. The OSCAL task receives a `control_id | severity | vault_id` index so it copies IDs instead of inventing them. `tests/test_prompt_inputs.py` checks that every placeholder in the crews' YAML prompts is filled by the inputs the flow passes.
+**What each phase receives.** The RACM drafter works from the Risk Specialist's ranked risk list. Fieldwork receives a compact per-control test plan from the approved RACM; the field auditor also sees the collector's raw tool output with vault IDs, and fieldwork QA checks the working papers against both. Reporting receives the scope, a summary of the RACM (risks and controls) and the approved working papers; the deficiency evaluation runs first and the writer, tone QA and final assembly work from it. The OSCAL task receives a `control_id | result (ToD; ToE) | vault_id` index so it copies IDs instead of inventing them. `tests/test_prompt_inputs.py` checks that every placeholder in the crews' YAML prompts is filled by the inputs the flow passes.
 
 **QA gates (automatic).** QA reviewers run at temperature 0. The other agents run at 0.1. If QA rejects the output, or its answer cannot be parsed, the phase counts as rejected: QA fails closed. The flow then re-runs the crew once with the rejection reason added to the drafting prompt. This happens in all three phases. A second rejection stops the phase in `QA_REJECTED_PHASE_n` and keeps the rejected draft for review. A crew error stops it in `ERROR_PHASE_n`.
 
+**Deterministic evidence check (Fieldwork).** After the QA agent, every finding's quote is checked in code against the evidence vault record it cites; no model is involved. A finding with an empty quote passes only if it concludes the control was "Not tested". A quote that does not verify counts as a QA rejection whose reason lists the control IDs, so it goes through the same automatic retry and, if it fails again, stops in `QA_REJECTED_PHASE_2`. A supervisor can still override it with a written reason; the override records which controls were accepted unverified and a digest of the working papers it applies to. Approving Gate 2 re-runs the check and is refused (409) if a quote no longer verifies and was not accepted by an override of those exact working papers.
+
+**QA independence (optional).** By default the QA reviewers use the same provider and model as the agents whose work they check, so they share its blind spots: a QA approval from the same model is not an independent review. `QA_LLM_MODEL` (with optional `QA_LLM_API_KEY` and `QA_LLM_BASE_URL`) gives the QA reviewers a different model through `get_qa_llm()` in `src/swarm/llm_factory.py`. A different model is still not a human reviewer.
+
 **Human gates.** An explicit state machine (`src/swarm/state/machine.py`) decides which moves are allowed. Any other move raises `InvalidTransitionError`, which the API returns as HTTP 409 (for example, approving the same gate twice). At each gate a reviewer can:
 
-- **Approve.** Gates 1 and 2 start the next phase. Gate 3 marks the audit `COMPLETED`.
+- **Approve.** Gates 1 and 2 start the next phase. Gate 3 marks the audit `COMPLETED`. A gate with no artifact to approve is refused.
+- **Return for rework** (`POST /api/sessions/{id}/return`) with required review notes. The phase re-runs, and the notes are passed to the crew the same way a QA rejection reason is.
 - **Retry** a QA-rejected or failed phase. After a QA rejection, the stored rejection reason is passed back to the crew.
 - **Approve despite the QA rejection** (supervisor override). This requires a written reason and does not skip anything: the phase moves to its normal human gate, which still has to be approved.
 
-Each action is recorded in the approval trail with the gate, the reviewer's name as entered, a UTC timestamp, the action (`gate_approval`, `retry` or `qa_override`) and, where relevant, the override reason and the QA rejection it overrode.
+**Segregation of duties.** Every audit records who prepared it (`prepared_by`, required when the audit is created). The preparer cannot approve a gate, return work or override a QA rejection on that audit; the preparer may retry a phase. The Gate 3 (report) approver must be a different person from the Gate 2 (fieldwork) approver. Names are compared ignoring case and extra whitespace. The policy is in `src/swarm/review_policy.py`. These checks work on names as typed: the API has one shared token and cannot tell people apart, so they prevent accidental self-review and make it visible, but they do not stop someone who types another name. Audits created before `prepared_by` existed have no preparer, so only the Gate 2 / Gate 3 rule applies to them.
+
+**Approval trail.** Each action is recorded with the gate, the reviewer's name as entered, a UTC timestamp, the action (`audit_created`, `gate_approval`, `return_for_rework`, `retry` or `qa_override`) and, where relevant, the notes, the override reason, the QA rejection it overrode and a SHA-256 digest of the artifact approved or accepted. Entries are only appended, and each one is hash-chained to the one before it (`prev_hash`, `entry_hash`); with `VAULT_ENCRYPTION_KEY` set the chain uses HMAC-SHA256 with a key derived from it for this purpose. `GET /api/sessions/{id}/trail/verify` (also shown in the session detail) recomputes the chain. It detects an edited entry, reordered entries, a removed entry other than the last one, and an approved artifact that changed after approval. With the key, it also detects an editor who recomputed every hash without the key. On its own it does not detect entries cut from the end of the trail. For that, the entry count and last hash are also written to a separate anchor file (`TRAIL_ANCHORS_PATH`), which only helps if whoever can edit the sessions file cannot also edit the anchor file. Without the key, someone who can edit both files can rewrite the trail undetected. Trails from before chaining are reported as "unchained (legacy)".
+
+**Deleting audits.** `DELETE /api/sessions/{id}` only deletes drafts. Once any gate has been approved or the audit is completed it returns 409, so signed-off work and its trail are kept.
 
 ```mermaid
 flowchart TD
@@ -123,6 +138,7 @@ flowchart TD
     qa1 -- "rejected: one automatic retry with the reason" --> p1
     qa1 -- "rejected again" --> r1["QA rejected phase 1"]
     qa1 -- "approved" --> g1{{"Human gate 1"}}
+    g1 -- "return for rework with review notes" --> p1
     r1 -- "human retry with stored QA reason" --> p1
     r1 -- "supervisor override with written reason" --> g1
 
@@ -131,6 +147,7 @@ flowchart TD
     qa2 -- "rejected: one automatic retry with the reason" --> p2
     qa2 -- "rejected again" --> r2["QA rejected phase 2"]
     qa2 -- "approved" --> g2{{"Human gate 2"}}
+    g2 -- "return for rework with review notes" --> p2
     r2 -- "human retry with stored QA reason" --> p2
     r2 -- "supervisor override with written reason" --> g2
 
@@ -139,6 +156,7 @@ flowchart TD
     qa3 -- "rejected: one automatic retry with the reason" --> p3
     qa3 -- "rejected again" --> r3["QA rejected phase 3"]
     qa3 -- "approved" --> g3{{"Human gate 3"}}
+    g3 -- "return for rework with review notes" --> p3
     r3 -- "human retry with stored QA reason" --> p3
     r3 -- "supervisor override with written reason" --> g3
 
@@ -240,6 +258,9 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `VAULT_ENCRYPTION_KEY` | Base64-encoded 32-byte key. Turns on Fernet encryption and keyed digests in the vault. |
 | `EVIDENCE_VAULT_PATH` | Vault directory (default `evidence_vault/` at the repo root; Compose uses `/app/data/evidence_vault` in the `app-data` volume). |
 | `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
+| `TRAIL_ANCHORS_PATH` | Approval-trail anchor file: entry count and last hash per audit (default `trail_anchors.json` next to the sessions file). It only adds protection if it is stored where someone who can edit the sessions file cannot edit it. |
+| `QA_LLM_MODEL` | Optional LiteLLM model string (for example `openai/gpt-4o-mini`) for the QA reviewer agents. Unset: QA uses the same provider as the other agents. |
+| `QA_LLM_API_KEY`, `QA_LLM_BASE_URL` | Optional key and endpoint passed only to the QA model's client. |
 | `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. `run_monitor.py`'s environment check also accepts `AWS_REGION` in place of `AWS_DEFAULT_REGION`. |
 
@@ -272,7 +293,7 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 371 tests, 90% line coverage of `src/`.
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evaluation below). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, and the API (gates, retry and override, exports, scope upload, DEMO_MODE). At the time of writing: 597 Python tests (93% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 20 frontend tests (Vitest and React Testing Library).
 
 ### Evidence-layer evaluation
 
@@ -300,7 +321,18 @@ PYTHONPATH=. uv run pytest tests/eval -v      # add -s to print the scenario sco
 
 moto does not implement everything faithfully. `GetBucketPolicyStatus` returns no `IsPublic` value, moto accepts public ACLs and policies that Block Public Access would reject, it returns only one grant for the `public-read-write` canned ACL, and it does not paginate `ListUsers`. The test module lists how each gap is handled, and `tests/test_aws_checks.py` covers those branches (policy status, access denied on each read, pagination markers) with botocore Stubber against the real AWS API models. For policy scenarios, the scenario states the `IsPublic` value AWS returns for the planted policy, so those rows test how the tool combines that value with the ACL and Block Public Access, not AWS's policy evaluation.
 
-This does not evaluate the LLM agents: whether they draw the right conclusion from the evidence, and the quality of the working papers and report, are still unmeasured.
+This does not evaluate the LLM agents. That is the job of the harness below.
+
+### LLM-layer evaluation
+
+`evals/` measures whether the agents draw the right audit conclusions. It runs 13 scenarios through the real pipeline (Planning, gates, Fieldwork, Reporting) against moto-seeded accounts with your LLM provider, maps findings to control areas and scores them against a versioned answer key. The metrics are false-pass rate, false-fail rate, "Not tested" correctness, ToE basis for configuration reads, citation faithfulness, coverage, QA catch rate on seeded bad working papers, deficiency-classification agreement and run-to-run consistency. Raw JSON is saved so every number can be traced back.
+
+```bash
+uv run python -m evals.run --runs 3 --scenarios all --out evals/results/     # real model calls: costs money, never in CI
+uv run python -m evals.run --replay evals/fixtures/replay --out /tmp/replay  # offline; tested in CI
+```
+
+**No results are published yet.** The answer key is an AI-assisted draft awaiting the owner's review, and the runner prints that status at the top of every report. Metric definitions, the scenario list, cost and limitations are in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
 
@@ -349,6 +381,7 @@ src/
 frontend/                # React + Vite UI, served by nginx in Compose (nginx.conf.template)
 skills/                  # Domain skill prompts (AWS, ITGC, PCI DSS, HIPAA, GDPR)
 tests/                   # pytest suite; tests/eval/ holds the moto evidence-layer evaluation
+evals/                   # LLM-layer evaluation: scenarios, draft answer key, runner, metrics, replay fixtures
 run_monitor.py           # Headless run of all three crews
 aws_safety_heartbeat.py  # Checks a lab AWS account for running EC2 / RDS resources
 Dockerfile, docker-compose.yml
@@ -359,9 +392,10 @@ Dockerfile, docker-compose.yml
 ## Limitations and accuracy
 
 - **Decision support only.** The output is a draft for a qualified auditor. It is not an audit opinion and does not replace engagement supervision.
-- **Not benchmarked.** There are no measured accuracy, precision, time-saving or cost figures.
+- **Not benchmarked yet.** There are no measured accuracy, precision, time-saving or cost figures. The LLM-layer evaluation harness ([docs/EVALUATION.md](docs/EVALUATION.md)) defines the metrics and scenarios, but no real-model run has been published, and its answer key is still an unreviewed draft.
 - **QA is another LLM.** Temperature 0 lowers variance on hosted models but does not remove it. A QA approval does not show the output is correct.
-- **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity.
+- **Reviewer identity is self-declared.** The API uses one shared token. The name in the approval trail is what the reviewer typed, not an authenticated identity, so the segregation-of-duties checks compare typed names only.
+- **Approval trail.** The hash chain makes edits to the stored trail detectable; it does not prevent them. Without `VAULT_ENCRYPTION_KEY`, anyone who can write the sessions file and the anchor file can rebuild a consistent trail. With the key, they also need the key. Entries cut from the end are only detected against the anchor file.
 - **Evidence vault.** Each record's digest is stored in the same writable JSON file as the payload. Without encryption the digest detects accidental corruption only. With encryption, editing a record without the key is detected, but deleting a record or replacing it with an unencrypted one is not. The vault does not prove the absence of tampering. A verified quote shows the words are in the evidence; it does not show the conclusion drawn from them is right. Matching is exact, so paraphrases show as not verified.
 - **AWS coverage.** Live collection covers the IAM account password policy, IAM user MFA, and S3 bucket public access. The Fieldwork crew has no other evidence tools, so controls outside these reads have no collected evidence behind them. Within them:
   - The S3 verdict combines the bucket policy status, bucket ACL grants to `AllUsers` / `AuthenticatedUsers`, and account- and bucket-level Block Public Access. Whether a policy is public is AWS's own evaluation (`GetBucketPolicyStatus`); the tool does not parse policies. It does not cover S3 access points (or their policies), Multi-Region Access Points, object-level ACLs, or presigned URLs. A policy that grants access to specific other AWS accounts is not "public" in AWS's sense, so cross-account sharing is not flagged. Per-bucket reads use one S3 client and rely on botocore's automatic region redirect for buckets in other regions; this is tested with stubs and moto only, not against a live multi-region account.
@@ -378,4 +412,4 @@ Dockerfile, docker-compose.yml
 
 Developed by **Tiago Brachini**. The code in this repository is released under the [MIT License](LICENSE).
 
-Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. This repository maps to SCF control IDs only. It does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.
+Control IDs refer to the Secure Controls Framework (SCF), © SCF Council, licensed under CC BY-ND 4.0. Prompts may reference SCF control IDs alongside other frameworks. This repository does not include or redistribute SCF data files (they are git-ignored), and the MIT License does not cover SCF content. Other frameworks referenced here (CIS Benchmarks, NIST SP 800-53, PCI-DSS) belong to their respective owners.
