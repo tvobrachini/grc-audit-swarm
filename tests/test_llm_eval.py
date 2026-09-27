@@ -10,11 +10,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from evals import run as eval_run  # noqa: E402
 from evals.answer_key import (  # noqa: E402
+    Expectation,
     UNREVIEWED_BANNER,
     AnswerKey,
     load_answer_key,
@@ -374,3 +376,12 @@ def test_raw_run_keeps_the_mapping_step(replay_results):
         "AC-03": "access_review",
     }
     assert all("scores" in m and "text" in m for m in mapping)
+
+
+def test_answer_key_rejects_unknown_fields():
+    # A misspelled field (e.g. "acceptable_tod" as "acceptabe_tod") must fail
+    # loudly instead of silently turning an area into "accept anything".
+    with pytest.raises(ValidationError):
+        Expectation.model_validate(
+            {"expected_result": "Exception", "acceptabe_tod": ["Ineffective"]}
+        )

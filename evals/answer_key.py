@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import evals  # noqa: F401  (puts src/ on sys.path)
 from swarm.schema import (
@@ -31,6 +31,8 @@ EvidenceKind = Literal["point_in_time_config", "none"]
 
 
 class Keyword(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     pattern: str
     weight: float = 1.0
 
@@ -44,6 +46,8 @@ class Keyword(BaseModel):
 class Expectation(BaseModel):
     """Expected fieldwork outcome for one control area in one scenario."""
 
+    model_config = ConfigDict(extra="forbid")
+
     in_scope: bool = False
     expected_result: FindingResult
     acceptable_tod: Optional[list[DesignConclusion]] = None
@@ -54,6 +58,8 @@ class Expectation(BaseModel):
 
 
 class Area(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     label: str
     evidence_kind: EvidenceKind
     evidence_sources: list[str] = Field(default_factory=list)
@@ -75,6 +81,8 @@ class Area(BaseModel):
 
 
 class Scenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     title: str
     theme: str
@@ -86,6 +94,8 @@ class Scenario(BaseModel):
 
 
 class AnswerKey(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     version: str
     status: str
     reviewed_by: Optional[str] = None
