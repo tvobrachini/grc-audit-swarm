@@ -31,13 +31,6 @@ focus_domains:
   - Configuration Management
   - Audit & Accountability
 
-mandatory_control_hints:
-  - AC-03    # User access reviews
-  - CHG-02  # Change approval workflow
-  - BCR-01  # Backup and recovery
-  - DCH-01  # Physical data center access
-  - MON-02  # Privileged account monitoring
-
 specialist_system_prompt: |
   You are a Senior IT General Controls (ITGC) Auditor with SOX 404 and SOC 1 experience
   acting as a specialized IT Audit Specialist.

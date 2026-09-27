@@ -137,16 +137,3 @@ def get_focus_domains(matched_skills: List[Dict[str, Any]]) -> List[str]:
                 seen.add(d)
                 domains.append(d)
     return domains
-
-
-def get_mandatory_control_hints(matched_skills: List[Dict[str, Any]]) -> List[str]:
-    """Return a flat list of control IDs that should always be included for matched skills."""
-    seen = set()
-    controls = []
-    for skill in matched_skills:
-        for c in skill.get("mandatory_control_hints", []):
-            cid = c.split()[0]  # strip inline comments
-            if cid not in seen:
-                seen.add(cid)
-                controls.append(cid)
-    return controls
