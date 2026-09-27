@@ -227,7 +227,7 @@ class TestDemoMethodology:
         [evaluation] = report.deficiency_evaluations
         assert evaluation.related_findings == ["CTRL-02"]
         assert evaluation.related_risks == ["RISK-02"]
-        assert evaluation.classification == DeficiencyClassification.HIGH
+        assert evaluation.classification == DeficiencyClassification.MEDIUM
         assert "Gate 3" in evaluation.rationale
         assert DEMO_LABEL in evaluation.rationale
         assert "Scope limitations (not tested): CTRL-03" in report.detailed_report
@@ -420,3 +420,32 @@ def test_api_demo_run_end_to_end(client):
         assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
     finally:
         remove_flow(sid)
+
+
+def _finding(control_id):
+    papers = demo_working_papers("x")
+    return next(f for f in papers.findings if f.control_id == control_id)
+
+
+class TestDemoAuditQuality:
+    """Regression tests for audit-quality issues a reviewer found in the demo."""
+
+    def test_password_quote_covers_length_and_complexity(self):
+        finding = _finding("CTRL-01")
+        quote = finding.exact_quote_from_evidence
+        for attribute in ("MinimumPasswordLength=14", "RequireSymbols=true"):
+            assert attribute in quote
+        assert "complexity" in finding.test_conclusion
+
+    def test_s3_finding_is_full_population_and_does_not_assume_data_class(self):
+        finding = _finding("CTRL-02")
+        assert "sample" not in finding.test_conclusion
+        assert "full population" in finding.test_conclusion
+        report = demo_final_report("x")
+        rationale = report.deficiency_evaluations[0].rationale
+        assert "not assessed" in rationale
+
+    def test_report_states_toe_not_tested_separately(self):
+        report = demo_final_report("x")
+        assert "Operating effectiveness was not tested for" in report.executive_summary
+        assert "extend testing" in report.detailed_report
