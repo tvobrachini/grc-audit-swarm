@@ -62,6 +62,10 @@ To run a real audit, set one LLM provider (see [Configuration](docs/CONFIGURATIO
 
 Three CrewAI crews run in sequence — **Planning** drafts a Risk and Control Matrix (RACM), **Fieldwork** tests those controls against read-only AWS evidence and writes working papers, **Reporting** writes the draft report and deficiency evaluation. Each crew ends with an automatic QA reviewer that fails closed and gets one retry with its rejection reason, then each phase stops at a **human gate**, where a named reviewer can **approve** (starts the next phase), **return for rework** with required notes, or **approve despite a QA rejection** with a written override reason. The preparer of an audit cannot approve, return or override its own gates, and the Gate 3 approver must differ from the Gate 2 approver (segregation of duties, by declared name, or by per-reviewer token if configured — see [Limitations](docs/LIMITATIONS.md)).
 
+At Gates 2 and 3 the reviewer records their own decisions beside the AI draft (sign-off or challenge per finding, a scope limitation for untested key controls, a classification and five-part write-up per deficiency, management's response, and an engagement conclusion); the gate will not open until the required ones exist, and exports show the reviewer's **conclusion of record** next to the AI draft where they differ ([ADR-011](DECISIONS.md)).
+
+Besides its own read-only AWS reads, Fieldwork can import Prowler JSON exports and AWS Security Hub findings as point-in-time evidence ([docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)).
+
 Every finding's quoted evidence is checked in code, not by a model, against a redacted evidence vault, and shown in the UI as verified or not. Every gate action is appended to a hash-chained approval trail, along with which model, prompt version and run produced the artifact under review. Exports include a real, schema-validated **OSCAL 1.2.1 Assessment Results** document alongside RACM/working-papers spreadsheets and the Markdown report.
 
 Full phase/agent breakdown, the state-machine diagram, generation provenance and the OSCAL export details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

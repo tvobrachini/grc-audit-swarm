@@ -2,6 +2,24 @@
 
 This file summarises what GRC Audit Swarm does at each tagged version. It is not a line-by-line commit log; the full history is in `git log`.
 
+## Unreleased
+
+**Reviewer decisions (ADR-011)**
+- At Gates 2 and 3 a reviewer records decisions beside the AI draft: sign-off or challenge per finding, a scope limitation for untested controls, a classification, five-part write-up and management response per deficiency, and an engagement conclusion. Gates 2 and 3 refuse approval until the required decisions exist, and list what is missing.
+- Each decision is appended to the approval trail; Gate 2 and 3 approvals also record a digest of that phase's decisions, so a decision edited, removed or added afterwards is reported by trail verification.
+- Exports (report, working papers, OSCAL) show the reviewer's conclusion of record, with the AI draft beside it where they differ.
+- The UI has decision controls on the findings board and the report view, and a checklist of missing decisions at each gate.
+
+**Per-reviewer tokens (ADR-012)**
+- Optional `REVIEWER_TOKENS_FILE`: when set, creating an audit, gate actions and decisions need a personal `X-Reviewer-Token`, the token's owner is recorded as the person acting, and trail entries record `identity_source` (declared or authenticated). Only hashes are stored; a CLI issues tokens. Not SSO and no MFA — see docs/SECURITY-AND-DATA.md.
+
+**Evidence imports**
+- Read-only import of Prowler JSON (OCSF and legacy) and AWS Security Hub (ASFF) findings as vault evidence, labelled as point-in-time results rather than operating effectiveness (docs/INTEGRATIONS.md).
+
+**Evaluation**
+- Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
+- The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.
+
 ## v0.1.0 — 2026-09-27
 
 First tagged version. Summary of what the project does at this point:
