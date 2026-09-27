@@ -202,6 +202,8 @@ export interface SessionDetail extends SessionSummary {
 
 export interface AppConfig {
   demo_mode: boolean;
+  /** True when the server requires per-reviewer tokens (ADR-012). */
+  reviewer_tokens?: boolean;
 }
 
 export interface AuditEvent {
@@ -239,8 +241,8 @@ function authHeaders(): Record<string, string> {
 // A per-reviewer personal token (a parallel change is adding per-reviewer
 // authentication on the backend). Kept only in this tab's sessionStorage —
 // never localStorage — and sent as X-Reviewer-Token on decision and
-// gate-action requests when the reviewer has one. The backend may not accept
-// it yet; that is fine, it is simply not checked.
+// gate-action requests, and on audit creation, when the reviewer has one. The
+// server checks it only when REVIEWER_TOKENS_FILE is configured (ADR-012).
 const REVIEWER_TOKEN_KEY = "grc.reviewerToken";
 
 export function getReviewerToken(): string {
@@ -359,10 +361,11 @@ export const api = {
     list: () => request<SessionSummary[]>("/api/sessions"),
     get: (id: string) => request<SessionDetail>(`/api/sessions/${id}`),
     create: (body: CreateSessionBody) =>
-      request<SessionSummary>("/api/sessions", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      request<SessionSummary>(
+        "/api/sessions",
+        { method: "POST", body: JSON.stringify(body) },
+        reviewerHeaders()
+      ),
     createWithDocument: async (body: CreateSessionBody, document: File) => {
       const form = new FormData();
       form.append("theme", body.theme);
@@ -375,7 +378,7 @@ export const api = {
       const res = await raiseForStatus(
         await fetch(`${API_URL}/api/sessions/with-document`, {
           method: "POST",
-          headers: authHeaders(),
+          headers: { ...authHeaders(), ...reviewerHeaders() },
           body: form,
         })
       );

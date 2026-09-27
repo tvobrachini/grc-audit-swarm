@@ -58,6 +58,21 @@ describe("reviewer token header", () => {
     expect(headers["X-Reviewer-Token"]).toBe("secret-token");
   });
 
+  it("is sent when creating an audit once the reviewer has a token", async () => {
+    setReviewerToken("secret-token");
+
+    await api.sessions.create({
+      theme: "IAM",
+      business_context: "ctx",
+      frameworks: [],
+      prepared_by: "J. Rivera",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Reviewer-Token"]).toBe("secret-token");
+  });
+
   it("stores the token in sessionStorage only, never localStorage", () => {
     setReviewerToken("secret-token");
     expect(sessionStorage.getItem("grc.reviewerToken")).toBe("secret-token");
