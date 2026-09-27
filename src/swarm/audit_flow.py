@@ -44,7 +44,7 @@ from swarm.review_decisions import (
     effective_view,
 )
 from swarm import trail as audit_trail
-from swarm.schema import DeficiencyScale, ReviewDecision
+from swarm.schema import DeficiencyScale, IdentitySource, ReviewDecision
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +204,17 @@ def _require_text(value: str, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{what} is required")
     return value.strip()
+
+
+def _identity_source(value: str) -> str:
+    """Validated ``identity_source`` (declared | authenticated; ADR-012)."""
+    try:
+        return IdentitySource(value).value
+    except ValueError as exc:
+        raise ValueError(
+            "identity_source must be one of: "
+            + ", ".join(s.value for s in IdentitySource)
+        ) from exc
 
 
 def _control_attributes(control: Any) -> str:
@@ -412,13 +423,27 @@ class AuditFlow:
 
     # ── Gate helpers (call synchronously before the phase thread) ────────────
 
-    def _stamp_trail(self, gate: str, human_id: str, action: str, **extra: str) -> None:
-        """Append a hash-chained entry to the approval trail (append-only)."""
+    def _stamp_trail(
+        self,
+        gate: str,
+        human_id: str,
+        action: str,
+        *,
+        identity_source: str = IdentitySource.DECLARED.value,
+        **extra: str,
+    ) -> None:
+        """Append a hash-chained entry to the approval trail (append-only).
+
+        ``identity_source`` says whether ``human`` was typed by the caller
+        (``declared``) or taken from a reviewer token (``authenticated``,
+        ADR-012); like every field, it is covered by the entry's hash.
+        """
         entry = {
             "gate": gate,
             "human": human_id,
             "timestamp": _now(),
             "action": action,
+            "identity_source": _identity_source(identity_source),
         }
         entry.update(extra)
         audit_trail.append_entry(self.state.approval_trail, entry)
@@ -509,7 +534,11 @@ class AuditFlow:
         )
 
     def record_preparer(
-        self, prepared_by: str, *, require_review_decisions: bool = False
+        self,
+        prepared_by: str,
+        *,
+        require_review_decisions: bool = False,
+        identity_source: str = IdentitySource.DECLARED.value,
     ) -> None:
         """Set the audit's preparer and record it as the trail's first entry.
 
@@ -517,12 +546,14 @@ class AuditFlow:
         ``require_review_decisions`` turns on the reviewer-decision gate
         preconditions for this audit (ADR-011); the API always sets it. It
         is recorded in the chained ``audit_created`` entry, so editing the
-        stored flag does not lift it.
+        stored flag does not lift it. ``identity_source`` records whether
+        the preparer's name was typed or taken from a reviewer token.
 
         Raises:
             ValueError: if ``prepared_by`` is blank or a preparer is already set.
         """
         prepared_by = _require_text(prepared_by, "prepared_by")
+        identity_source = _identity_source(identity_source)
         if self.state.prepared_by:
             raise ValueError("prepared_by is already set for this audit")
         self.state.prepared_by = prepared_by
@@ -530,7 +561,13 @@ class AuditFlow:
             {"review_decisions_required": "true"} if require_review_decisions else {}
         )
         self.state.review_decisions_required = require_review_decisions
-        self._stamp_trail("Audit created", prepared_by, "audit_created", **extra)
+        self._stamp_trail(
+            "Audit created",
+            prepared_by,
+            "audit_created",
+            identity_source=identity_source,
+            **extra,
+        )
 
     # ── Reviewer decisions (ADR-011) ─────────────────────────────────────────
 
@@ -577,12 +614,15 @@ class AuditFlow:
         rationale: str = "",
         subject_type: Optional[str] = None,
         supersedes: Optional[str] = None,
+        identity_source: str = IdentitySource.DECLARED.value,
     ) -> ReviewDecision:
         """Append one reviewer decision and stamp it in the trail.
 
         Validation and policy are in
         :func:`swarm.review_decisions.build_decision`; nothing is stored or
         stamped when it raises. The AI drafts are never changed.
+        ``identity_source`` (declared | authenticated) is stored on the
+        decision and on its trail entry.
 
         Raises:
             DecisionValidationError: bad input (HTTP 422).
@@ -602,6 +642,7 @@ class AuditFlow:
             rationale=rationale,
             subject_type=subject_type,
             supersedes=supersedes,
+            identity_source=identity_source,
             now=_now(),
         )
         self.state.review_decisions.append(decision)
@@ -612,7 +653,6 @@ class AuditFlow:
             "decision_type": str(decision.decision_type),
             "subject": f"{decision.subject_type}:{decision.subject_id}",
             "artifact": decision.artifact,
-            "identity_source": str(decision.identity_source),
         }
         if decision.supersedes:
             extra["supersedes"] = decision.supersedes
@@ -620,6 +660,7 @@ class AuditFlow:
             f"Review decision ({_PHASE_LABELS[decision.phase]})",
             decision.decided_by,
             "review_decision",
+            identity_source=str(decision.identity_source),
             **extra,
         )
         return decision
@@ -707,12 +748,18 @@ class AuditFlow:
                 "fieldwork for rework, or have the evidence restored."
             )
 
-    def _approve_gate(self, gate: int, human_id: str) -> None:
+    def _approve_gate(
+        self,
+        gate: int,
+        human_id: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Validate, apply policy, transition, then stamp — in that order.
 
         Nothing is transitioned or stamped when any check fails.
         """
         human_id = _require_text(human_id, "human_id")
+        identity_source = _identity_source(identity_source)
         target = {
             1: AuditStatus.RUNNING_PHASE_2,
             2: AuditStatus.RUNNING_PHASE_3,
@@ -752,6 +799,7 @@ class AuditFlow:
             _GATE_LABELS[gate],
             human_id,
             "gate_approval",
+            identity_source=identity_source,
             artifact=field,
             artifact_digest=audit_trail.artifact_digest(artifact),
             **sealed,
@@ -774,7 +822,9 @@ class AuditFlow:
         self._commit_status()
         self.state.current_human_dossier = "Planning is running."
 
-    def begin_phase_2(self, human_id: str) -> None:
+    def begin_phase_2(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 1 approval: transition to RUNNING_PHASE_2, then stamp the trail.
 
         Raises:
@@ -784,9 +834,11 @@ class AuditFlow:
             PhaseArtifactMissingError: if there is no RACM to approve.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(1, human_id)
+        self._approve_gate(1, human_id, identity_source)
 
-    def begin_phase_3(self, human_id: str) -> None:
+    def begin_phase_3(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 2 approval: transition to RUNNING_PHASE_3, then stamp the trail.
 
         Re-runs the deterministic evidence check first, then (when the audit
@@ -801,9 +853,11 @@ class AuditFlow:
             MissingReviewDecisionsError: if required sign-offs are missing.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(2, human_id)
+        self._approve_gate(2, human_id, identity_source)
 
-    def finalize_audit(self, human_id: str) -> None:
+    def finalize_audit(
+        self, human_id: str, identity_source: str = IdentitySource.DECLARED.value
+    ) -> None:
         """Gate 3 approval: mark the audit COMPLETED, then stamp the trail.
 
         Raises:
@@ -814,9 +868,14 @@ class AuditFlow:
                 limitations or the engagement conclusion are missing.
             ValueError: if ``human_id`` is blank.
         """
-        self._approve_gate(3, human_id)
+        self._approve_gate(3, human_id, identity_source)
 
-    def retry_phase(self, phase: int, human_id: str) -> None:
+    def retry_phase(
+        self,
+        phase: int,
+        human_id: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Re-open a QA-rejected or errored phase: → RUNNING_PHASE_n.
 
         The caller then runs the matching ``generate_*`` method. The retry is
@@ -831,6 +890,7 @@ class AuditFlow:
         if phase not in _PHASE_LABELS:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
+        identity_source = _identity_source(identity_source)
         previous = self.machine.status.value
         self.machine.retry_phase(phase)
         self._commit_status()
@@ -838,6 +898,7 @@ class AuditFlow:
             f"Retry ({_PHASE_LABELS[phase]})",
             human_id,
             "retry",
+            identity_source=identity_source,
             previous_status=previous,
             previous_reason=self.state.qa_rejection_reason or "",
             **self._run_provenance_extra(phase),
@@ -847,7 +908,13 @@ class AuditFlow:
             "running again."
         )
 
-    def return_for_rework(self, phase: int, human_id: str, notes: str) -> None:
+    def return_for_rework(
+        self,
+        phase: int,
+        human_id: str,
+        notes: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Reviewer returns the phase at its gate: WAITING_HUMAN_GATE_n → RUNNING_PHASE_n.
 
         The review notes are recorded in the approval trail and fed to the
@@ -863,6 +930,7 @@ class AuditFlow:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
         notes = _require_text(notes, "notes")
+        identity_source = _identity_source(identity_source)
         self._require_transition(
             AuditStatus(f"RUNNING_PHASE_{phase}"),
             AuditStatus(f"WAITING_HUMAN_GATE_{phase}"),
@@ -880,6 +948,7 @@ class AuditFlow:
             f"Return for rework ({_PHASE_LABELS[phase]})",
             human_id,
             "return_for_rework",
+            identity_source=identity_source,
             **extra,
         )
         self.state.qa_rejection_reason = None
@@ -888,7 +957,13 @@ class AuditFlow:
             "The phase is re-running with these review notes."
         )
 
-    def override_qa_rejection(self, phase: int, human_id: str, reason: str) -> None:
+    def override_qa_rejection(
+        self,
+        phase: int,
+        human_id: str,
+        reason: str,
+        identity_source: str = IdentitySource.DECLARED.value,
+    ) -> None:
         """Supervisor override: accept a QA-rejected artifact as-is.
 
         Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n, so the normal human
@@ -907,6 +982,7 @@ class AuditFlow:
             raise ValueError("phase must be 1, 2, or 3")
         human_id = _require_text(human_id, "human_id")
         reason = _require_text(reason, "reason")
+        identity_source = _identity_source(identity_source)
         target = AuditStatus(f"WAITING_HUMAN_GATE_{phase}")
         self._require_transition(target, AuditStatus(f"QA_REJECTED_PHASE_{phase}"))
         self._check_sod("qa_override", human_id)
@@ -930,7 +1006,11 @@ class AuditFlow:
         self.machine.override_qa(phase)
         self._commit_status()
         self._stamp_trail(
-            f"QA Override ({_PHASE_LABELS[phase]})", human_id, "qa_override", **extra
+            f"QA Override ({_PHASE_LABELS[phase]})",
+            human_id,
+            "qa_override",
+            identity_source=identity_source,
+            **extra,
         )
         self.state.qa_rejection_reason = None
         note = (

@@ -350,7 +350,7 @@ def _drain(sid):
 def test_config_reports_demo_mode(client):
     r = client.get("/api/config", headers=AUTH)
     assert r.status_code == 200
-    assert r.json() == {"demo_mode": True}
+    assert r.json() == {"demo_mode": True, "reviewer_tokens": False}
 
 
 def test_config_requires_auth(client):
@@ -359,7 +359,10 @@ def test_config_requires_auth(client):
 
 def test_config_reports_off(client, monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "0")
-    assert client.get("/api/config", headers=AUTH).json() == {"demo_mode": False}
+    assert client.get("/api/config", headers=AUTH).json() == {
+        "demo_mode": False,
+        "reviewer_tokens": False,
+    }
 
 
 def test_api_demo_run_end_to_end(client):

@@ -89,7 +89,7 @@ For Fieldwork, a deterministic check (`swarm.evidence.unverified_findings`) veri
 - Fieldwork, and therefore the AWS calls, does not run until a person approves the plan. No report is marked complete without a final sign-off.
 - The workflow waits at each gate until someone acts. A reviewer who disagrees can send the work back with notes instead of choosing between approving and abandoning it.
 - A Fieldwork result whose quotes are not in the vault cannot reach Gate 2 approval without a named supervisor's written justification.
-- The reviewer identifier is free text supplied by the client. The API has one shared token and does not authenticate individual reviewers, so the trail records who the reviewer said they were, and the segregation-of-duties rules (ADR-009) compare those declared names.
+- The reviewer identifier is free text supplied by the client. The API has one shared token and does not authenticate individual reviewers, so the trail records who the reviewer said they were, and the segregation-of-duties rules (ADR-009) compare those declared names. ADR-012 adds optional per-reviewer tokens that replace the typed name.
 
 **Inspiration.** IIA Standard 12.3, formerly 2340 (supervision of engagements). This is design inspiration, not a compliance claim.
 
@@ -170,7 +170,7 @@ Custom props all use the namespace `https://github.com/tvobrachini/grc-audit-swa
 
 **Consequences.**
 - The token does not appear in the browser. Anyone who can reach the frontend's port can still use the API through the proxy, which is why Compose binds ports to `127.0.0.1`.
-- One shared token means there is no per-user identity or authorization (see ADR-004).
+- One shared token means there is no per-user identity or authorization (see ADR-004); ADR-012 adds an optional per-reviewer token on top of it.
 - In the Vite dev setup the agent feed's `EventSource` request has no token and gets 401. Status still refreshes through polling.
 
 ---
@@ -192,7 +192,7 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 
 **Consequences.**
 - A self-review or a single person signing off both fieldwork and the report is refused with a 409 that names the rule, and the owner can change the policy in one place.
-- Identity is declared, not authenticated (ADR-008): the checks stop honest mistakes and make self-review visible; they do not stop someone typing another name. Real enforcement needs per-user authentication.
+- Identity is declared, not authenticated (ADR-008): the checks stop honest mistakes and make self-review visible; they do not stop someone typing another name. Real enforcement needs per-user authentication; ADR-012 adds an opt-in form of it.
 - The anchor file only adds protection if it is kept where the people who can edit the sessions file cannot edit it (separate storage or an append-only store); by default it sits next to the sessions file.
 
 ---
@@ -264,7 +264,7 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 9. The five-part write-up is per deficiency and written by a person; no AI drafting in this change. *Alternative:* per finding, or AI-drafted for confirmation.
 10. Exports show the conclusion of record and the AI draft alongside when they differ (`SHOW_AI_DRAFT_WHEN_DIFFERENT`). *Alternative:* record only.
 11. A decision can be superseded while its type is still recordable: phase-2 decisions until Gate 2 is approved, phase-3 decisions until COMPLETED, management responses afterwards too (`DECISION_RECORDABLE_STATUSES`). This is stricter than "until COMPLETED" for sign-offs so that a Gate 2 approval seals them. *Alternative:* allow post-approval corrections and report them as changes.
-12. Built now with `identity_source: "declared"` on every decision (`DEFAULT_IDENTITY_SOURCE`); per-user authentication will set `authenticated`. *Alternative:* wait for authentication.
+12. Built now with `identity_source: "declared"` on every decision (`DEFAULT_IDENTITY_SOURCE`); per-user authentication will set `authenticated`. *Alternative:* wait for authentication. *Update:* ADR-012 sets `authenticated` when per-reviewer tokens are configured.
 13. The reviewer change rate (share of reviewed findings and classified deficiencies where the reviewer challenged or changed the draft) is computed per session and exposed in `effective.reviewer_change_rate`, not published as a claim (`REVIEWER_CHANGE_RATE_PUBLISHED = False`). *Alternative:* publish it from real runs.
 14. The preparer may not record `sign_off`, `challenge`, `classify`, `scope_limitation` or `engagement_conclusion` (`PREPARER_EXCLUDED_DECISIONS`); they may draft a write-up and transcribe a management response. *Alternative:* exclude the preparer from all decisions.
 15. A key control whose conclusion of record is Not tested needs a `scope_limitation` decision before Gate 3 (`GATE_3_SCOPE_LIMITATION_FOR_UNTESTED_KEY_CONTROLS`); added because the demo already told the auditor to decide this before Gate 3. *Alternative:* optional.
@@ -272,7 +272,39 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 **Consequences.**
 - The report of a completed audit states the reviewer's conclusions, marked as the reviewer's, instead of "proposed" drafts, and a reader can still see what the AI proposed.
 - Two sources of truth: every renderer must use the effective view. The report, spreadsheet, OSCAL export and API all do, and the tests check each.
-- Identities are still declared (ADR-004, ADR-008, ADR-009): a decision records who someone said they were. The SoD rules stop honest mistakes and make self-review visible; they do not stop someone typing another name.
+- Identities are still declared (ADR-004, ADR-008, ADR-009) unless per-reviewer tokens are configured (ADR-012): a decision records who someone said they were. The SoD rules stop honest mistakes and make self-review visible; they do not stop someone typing another name.
 - The trail makes an edited, removed or injected decision detectable, with the same limits as ADR-009 (an editor who can rewrite the sessions file and the anchor, and holds the key or none is set, can recompute everything).
 - The eval harness (`evals/pipeline.py`) builds its flows without the flag, so its synthetic reviewer still approves gates without decisions and the model metrics are unchanged. Follow-up: have the synthetic reviewer record decisions, which would let the harness measure the reviewer change rate too.
 - The existing UI does not yet record decisions; the API contract above is what it will build on. `scripts/capture_screenshots.mjs` still only approves gates, so on API-created audits it now stops at Gate 2 until it records sign-offs.
+
+---
+
+## ADR-012: Opt-in per-reviewer tokens
+
+**Status:** Accepted (opt-in; off by default).
+
+**Context.** One shared API token guards the API (ADR-008), so every reviewer identity is typed by the caller and the segregation-of-duties rules (ADR-009, ADR-011) compare typed names. Anyone who can reach the UI can approve a gate or sign off a finding under a colleague's name. A full identity provider (OIDC single sign-on through the reverse proxy) is the proper fix, but it needs infrastructure this project does not ship. This record adds the smallest step that ties an action to a person the operator issued a credential to.
+
+**Decision (tokens file and CLI).** `REVIEWER_TOKENS_FILE` names a JSON file: `{"version": 1, "reviewers": [{"name", "token_hash", "created_at"}]}`. `python -m api.reviewer_tokens add "Name"` (`src/api/reviewer_tokens.py`) generates a token with `secrets.token_urlsafe(32)` (256 bits, prefixed `grcrt_`), prints it once and writes only `sha256:<hex>` of it, atomically and with mode 0600; `--replace` rotates, `remove` revokes, `list` prints names only. The file is validated as a whole: a wrong version, a blank or over-long name, two names equal after case and whitespace normalisation (the SoD checks could not tell them apart), a malformed digest or a digest under two names makes it unusable. The API re-reads it when its mtime or size changes.
+
+**Decision (hashing).** A plain SHA-256 of the token, with no salt and no server key. A salt or a slow KDF protects low-entropy secrets (passwords) from dictionary and precomputed attacks; these tokens are 256 bits from the OS CSPRNG, so a leaked digest cannot be inverted or matched against a precomputed table either way. An HMAC keyed by a server secret would only add protection against someone who can read the file but not the key; in this deployment both sit in the same container and environment, and the key would become one more secret to rotate, with every token invalidated when it changes. The `sha256:` prefix leaves room for another scheme later. Lookup hashes the presented token and compares it with every stored digest using `hmac.compare_digest`, without stopping at a match, so neither the timing nor the response depends on which names exist; the request carries only the token, never a name to look up.
+
+**Decision (API contract).** The personal token arrives in the `X-Reviewer-Token` header, in addition to the shared API token (nginx still injects the shared one; the reviewer's own passes through). With the file configured, these routes require it: `POST /api/sessions` and `/api/sessions/with-document` (the preparer), `PATCH …/approve`, `POST …/return`, `POST …/retry`, `POST …/qa-override` and `POST …/decisions`. The token's name replaces the typed `prepared_by` / `human_id` / `decided_by`, which may be omitted; a typed name that names someone else (compared ignoring case and spacing) is refused with 403 rather than silently replaced, so a client that shows one name and sends another finds out. Refusals are JSON with `detail` (a string, as elsewhere) and `code`: 401 `reviewer_token_missing`, 401 `reviewer_token_invalid`, 403 `reviewer_name_mismatch`, 429 `reviewer_token_rate_limited` (with `Retry-After`; 10 invalid tokens from one client address within 60 seconds, in memory), 503 `reviewer_tokens_unavailable` (the file is set but missing or malformed; the API never falls back to declared names). The shared token is checked first, so a missing API token is still a 401 with `WWW-Authenticate: Bearer`. `GET /api/config` gains `reviewer_tokens` (bool) and `GET /api/reviewer` returns `{name, identity_source}` for the presented token so a client can check it. Without the file, the header is ignored and behaviour is unchanged, except that a missing name is now reported by the flow (422, as before) rather than by request validation (also 422).
+
+Preparers need a token too: taking the preparer from the token closes the gap in which a reviewer could create an audit under someone else's name and then approve it themselves. Reads, exports, evidence, imports and deleting an unapproved draft need only the shared token.
+
+**Decision (record).** `AuditFlow`'s reviewer methods (`record_preparer`, `begin_phase_2/3`, `finalize_audit`, `retry_phase`, `return_for_rework`, `override_qa_rejection`, `record_decision`) take `identity_source` (`declared` by default, or `authenticated`). It is stored on each `ReviewDecision` (the field existed since ADR-011) and, new here, on every trail entry a person causes. The entry hash covers every field, so changing `identity_source` afterwards is detected as an edited entry. Trails written before the field existed have entries without it; they verify as before and read as declared, and a trail may mix both. Exports say which: the report's trail lines mark authenticated entries, the report and spreadsheet notes describe identities as declared, authenticated or mixed according to the decisions shown, the spreadsheet's reviewer column is headed accordingly, and in OSCAL each assessment-log entry carries an `identity-source` prop and each party's remarks say how its identity was established.
+
+**Alternatives considered.**
+- OIDC single sign-on at the reverse proxy, passing a verified identity header: the right answer for a shared deployment, but it needs an identity provider and proxy configuration this repository does not include.
+- Mutual TLS client certificates: strong, but certificate issuance and browser installation are heavy for the intended single-team use.
+- HMAC-keyed or salted slow hashes: see "Decision (hashing)".
+- Keep declared identities only: leaves impersonation by typing a name as the easiest attack.
+
+**Consequences.**
+- With tokens on, a reviewer cannot act under a colleague's name by typing it, and the SoD checks compare issued identities.
+- It is not single sign-on, has no MFA, and a token is a long-lived bearer secret: whoever holds it acts as that reviewer until it is rotated or removed. How the browser stores it is the UI's choice.
+- Anyone who can write the tokens file, or run the CLI on the server, can issue a token under any name. Server access remains the ability to impersonate reviewers.
+- The rate limit is per client address and per process: behind the Compose nginx every browser shares one address, so one client sending bad tokens delays everyone for up to a minute. The tokens' entropy, not the limit, is what keeps them from being guessed.
+- Tokens cross the network in a header on every reviewer action; beyond the default `127.0.0.1` binding the deployment needs TLS.
+- Identities recorded before tokens were enabled remain declared, and the record says so per entry.

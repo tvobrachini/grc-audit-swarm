@@ -1,10 +1,14 @@
 """
 Review policy: segregation of duties (SoD) between preparer and reviewers.
 
-Identities here are *declared* by the caller (the API has one shared bearer
-token, so it cannot tell users apart). These checks stop honest mistakes and
-make a self-review visible; they do not stop someone who types a different
-name. Adjust the policy by editing the constants below; every check goes
+By default identities here are *declared* by the caller (the API has one
+shared bearer token, so it cannot tell users apart). These checks then stop
+honest mistakes and make a self-review visible; they do not stop someone who
+types a different name. With per-reviewer tokens configured
+(``REVIEWER_TOKENS_FILE``, ADR-012) the API passes the name a reviewer's
+token belongs to instead, so the same name comparisons stop a reviewer from
+acting under another reviewer's name — but not someone who can issue
+tokens. Adjust the policy by editing the constants below; every check goes
 through :func:`sod_violation`.
 """
 
@@ -117,8 +121,9 @@ class MissingReviewDecisionsError(ReviewBlockedError):
         self.missing = missing
 
 
-# Default 12: until per-user authentication exists, every decision records
-# the identity as typed by the caller and says so.
+# Default 12: a decision records the identity as typed by the caller and says
+# so, unless per-reviewer tokens are configured (ADR-012), in which case the
+# API records the token's name as "authenticated".
 DEFAULT_IDENTITY_SOURCE = "declared"
 
 # Decision types the preparer of the audit may not record on it: they are the

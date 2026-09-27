@@ -192,20 +192,50 @@ class _Parties:
             self.by_name[name] = element_uuid(self._sid, "party", name)
         return self.by_name[name]
 
-    def as_oscal(self) -> list[dict]:
+    def as_oscal(self, sources: Optional[Mapping[str, set[str]]] = None) -> list[dict]:
+        """``sources``: name -> identity sources of that party's trail entries."""
         return [
             {
                 "uuid": party_uuid,
                 "type": "person",
                 "name": name,
-                "remarks": (
-                    "Declared identity as entered in the application. The API "
-                    "does not authenticate individual reviewers; see the "
-                    "hash-chained assessment log for what this party did."
-                ),
+                "remarks": _party_remarks((sources or {}).get(name, set())),
             }
             for name, party_uuid in self.by_name.items()
         ]
+
+
+def _party_remarks(sources: set[str]) -> str:
+    log = " See the hash-chained assessment log for what this party did."
+    if sources == {"authenticated"}:
+        return (
+            "Identity authenticated by a per-reviewer token issued for this "
+            "application (not single sign-on, no MFA)." + log
+        )
+    if "authenticated" in sources:
+        return (
+            "Some of this party's actions were authenticated by a per-reviewer "
+            "token (not single sign-on, no MFA), others used a declared name; "
+            "each assessment-log entry says which." + log
+        )
+    return (
+        "Declared identity as entered in the application. The API did not "
+        "authenticate this reviewer." + log
+    )
+
+
+def _identity_sources_by_name(
+    trail: Sequence[Mapping[str, Any]],
+) -> dict[str, set[str]]:
+    """Name -> identity sources of their trail entries (missing = declared)."""
+    out: dict[str, set[str]] = {}
+    for e in trail:
+        name = _line(e.get("human"))
+        if name:
+            out.setdefault(name, set()).add(
+                _line(e.get("identity_source")) or "declared"
+            )
+    return out
 
 
 def _occurrence_keys(findings: Sequence[AuditFindingSchema]) -> list[str]:
@@ -811,6 +841,7 @@ def build_assessment_results(
                 ("decision-subject", e.get("subject")),
                 ("supersedes-decision", e.get("supersedes")),
                 ("decisions-digest", e.get("decisions_digest")),
+                ("identity-source", e.get("identity_source")),
             ),
         }
         details = [
@@ -965,7 +996,7 @@ def build_assessment_results(
     if roles:
         metadata["roles"] = roles
     if parties.by_name:
-        metadata["parties"] = parties.as_oscal()
+        metadata["parties"] = parties.as_oscal(_identity_sources_by_name(trail))
     if responsible:
         metadata["responsible-parties"] = responsible
     metadata["remarks"] = markup(

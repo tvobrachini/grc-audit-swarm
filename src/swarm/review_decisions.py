@@ -343,6 +343,7 @@ def build_decision(
     rationale: str = "",
     subject_type: Optional[str] = None,
     supersedes: Optional[str] = None,
+    identity_source: str = policy.DEFAULT_IDENTITY_SOURCE,
     now: Optional[str] = None,
 ) -> ReviewDecision:
     """Validate a decision request against policy and the current drafts.
@@ -368,6 +369,13 @@ def build_decision(
     if not decided_by:
         raise DecisionValidationError("decided_by is required")
     rationale = _text(rationale)
+    try:
+        source = IdentitySource(identity_source)
+    except ValueError as exc:
+        raise DecisionValidationError(
+            "identity_source must be one of: "
+            + ", ".join(s.value for s in IdentitySource)
+        ) from exc
 
     violation = policy.decision_status_violation(dtype.value, status)
     if violation:
@@ -498,7 +506,7 @@ def build_decision(
         values=stored,
         rationale=rationale,
         decided_by=decided_by,
-        identity_source=IdentitySource(policy.DEFAULT_IDENTITY_SOURCE),
+        identity_source=source,
         decided_at=now or _now(),
         supersedes=supersedes,
     )

@@ -6,7 +6,7 @@
 - **API token.** Every `/api/*` route requires `API_AUTH_TOKEN` (the API returns 503 if it is not set, and 401 for a wrong or missing token). `/health` is open. In Compose, nginx injects the token server-side.
 - **Deployment defaults.** Compose publishes ports on `127.0.0.1` only. The API container runs as a non-root user. nginx sets a Content-Security-Policy and other hardening headers. The API refuses to start with `DEMO_MODE=1` when `ENVIRONMENT` is `production` or `staging`.
 - **Untrusted input.** Scope documents are size-limited and wrapped as untrusted content — see [Architecture](ARCHITECTURE.md#how-it-works).
-- **Reviewer identity is self-declared.** The API uses one shared token, not per-person accounts. The name recorded against a gate action is whatever the reviewer typed, not an authenticated identity. The segregation-of-duties checks (preparer vs. approver, Gate 2 vs. Gate 3 approver) compare typed names only; they catch accidental self-review and make it visible in the trail, but they do not stop someone who deliberately types a different name.
+- **Reviewer identity: declared by default, per-reviewer tokens optional.** By default the API uses one shared token, not per-person accounts: the name recorded against a gate action or decision is whatever the reviewer typed (`identity_source: "declared"`), and the segregation-of-duties checks (preparer vs. approver, Gate 2 vs. Gate 3 approver, preparer vs. reviewer decisions) compare typed names only. They catch accidental self-review and make it visible in the trail, but they do not stop someone who deliberately types a different name. With `REVIEWER_TOKENS_FILE` set, audit creation and every reviewer action also need the person's own token in `X-Reviewer-Token`; the name comes from the token (`identity_source: "authenticated"`) and a typed name that differs is refused. See [Per-reviewer tokens](#per-reviewer-tokens) for what that does and does not give you.
 
 <details>
 <summary>Minimal read-only AWS IAM policy</summary>
@@ -59,13 +59,35 @@ None of these are configured by this repository out of the box; they are deploym
 
 It detects: an edited entry's content, entries reordered, an entry removed from the middle, and an artifact that changed after it was approved (via digest mismatch). With `VAULT_ENCRYPTION_KEY` set, it also detects a rebuild of the whole chain by someone who does not have the key.
 
-It does not detect: entries removed from the end (without an anchor file kept separately, as above); a person typing someone else's name in the reviewer field (identity is declared, not authenticated); or that a human genuinely read and considered the artifact before approving it — the trail records that an approval action happened, not the quality of the review behind it.
+It does not detect: entries removed from the end (without an anchor file kept separately, as above); a person typing someone else's name in the reviewer field when per-reviewer tokens are not configured (the entry then says `identity_source: "declared"`), or, when they are, someone using another reviewer's token or issuing a token under someone else's name; or that a human genuinely read and considered the artifact before approving it — the trail records that an approval action happened, not the quality of the review behind it.
 
 ## Vault crypto and token handling
 
 Without `VAULT_ENCRYPTION_KEY`, evidence records are plain JSON with a SHA-256 digest: this detects accidental corruption, not deliberate tampering, since anyone who can write the file can recompute a matching digest. With the key set, records are Fernet-encrypted and digests are HMAC-SHA256 keyed from it: editing a record without the key is now detectable, but deleting a record, or replacing it with an unencrypted one, is not — there is nothing to compare against once the record is simply gone.
 
 `API_AUTH_TOKEN` is one shared bearer token for every `/api/*` route; it identifies a client as authorized, not a specific person. `VITE_API_AUTH_TOKEN` exists only so `npm run dev` can call a local API directly — it is compiled into the built JavaScript bundle, so it must never be set for a Compose or production build (use nginx's server-side token injection instead, as Compose already does).
+
+## Per-reviewer tokens
+
+Opt-in (`REVIEWER_TOKENS_FILE`, DECISIONS.md ADR-012). The file lists reviewer names, each with the SHA-256 digest of a random 256-bit token; it never holds a token. `PYTHONPATH=src uv run python -m api.reviewer_tokens add "Name"` issues a token, prints it once and stores only the digest (`--replace` rotates it, `remove` revokes it, `list` shows names only). The API re-reads the file when it changes.
+
+When the file is configured:
+
+- Creating an audit, approving a gate, returning work, retrying a phase, overriding a QA rejection and recording a reviewer decision each need a valid `X-Reviewer-Token` header **in addition to** the shared API token. Reading sessions, exports and evidence, deleting an unapproved draft and uploading imports need only the shared token.
+- The token's name replaces the typed name (`prepared_by`, `human_id`, `decided_by`). A typed name may be left out; if it is present and names someone else, the request is refused with 403 rather than silently rewritten.
+- Decisions and every new trail entry carry `identity_source: "authenticated"`. The entry hash covers it, so changing it later is detected as an edit.
+- Refusals: 401 `reviewer_token_missing` or `reviewer_token_invalid`, 403 `reviewer_name_mismatch`, 429 `reviewer_token_rate_limited` (with `Retry-After`) after 10 invalid tokens from one client address in 60 seconds, 503 `reviewer_tokens_unavailable` if the file is missing or malformed. The API never falls back to declared names when the file is set but unusable.
+- A token is looked up by its digest against every entry in constant time, so a failed attempt says nothing about which names exist. Tokens are not logged.
+
+What this gives you: the name on an approval or decision is the name the server issued a token to, so a reviewer cannot act under a colleague's name by typing it, and the segregation-of-duties checks compare issued identities instead of typed text.
+
+What it does not give you:
+
+- **Not single sign-on and no MFA.** A token is a long-lived bearer secret. Whoever holds it acts as that reviewer until it is replaced or removed. How the browser keeps it is up to the UI.
+- **Whoever can issue tokens can be anyone.** Anyone who can write the tokens file, or run the CLI on the server, can issue a token under any name, including a second identity for themselves under a colleague's name. Protect the file (the CLI writes it with mode 0600) and treat server access as the ability to impersonate reviewers.
+- **The rate limit is per client address and per process.** Behind the Compose nginx proxy every browser shares the proxy's address, so one client sending bad tokens makes everyone wait out the window. Tokens are 256-bit random values, so the limit is a brake on noise, not what keeps them from being guessed.
+- **Transport.** Compose binds to `127.0.0.1` and serves plain HTTP. If you expose the app further, put TLS in front of it: the token travels in a header on every reviewer action.
+- **Earlier entries stay as they were.** Entries and decisions recorded before tokens were configured keep `declared` (or no field, for trails written before the field existed; read those as declared). Verification accepts both; exports label identities by their source.
 
 ## Localhost binding
 

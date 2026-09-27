@@ -240,6 +240,33 @@ _REVIEW_STATUS_TEXT = {
 }
 
 
+def identity_sources(view: Optional[EffectiveView]) -> set[str]:
+    """``identity_source`` of every active decision in ``view``."""
+    if view is None:
+        return set()
+    refs: list[Optional[DecisionRef]] = [view.engagement_conclusion]
+    for f in view.findings:
+        refs += [f.review, f.scope_limitation]
+    for d in view.deficiencies:
+        refs += [d.classification_decision, d.writeup, d.management_response]
+    return {str(r.identity_source) for r in refs if r is not None}
+
+
+def identity_note(sources: set[str]) -> str:
+    """How the reviewer identities shown were established (ADR-012)."""
+    if sources == {"authenticated"}:
+        return (
+            "Reviewer identities were authenticated with per-reviewer tokens "
+            "(this application only: not single sign-on, no MFA)."
+        )
+    if "authenticated" in sources:
+        return (
+            "Each reviewer identity is marked declared (typed by the reviewer) "
+            "or authenticated (per-reviewer token; not single sign-on, no MFA)."
+        )
+    return "Identities are declared, not authenticated."
+
+
 def decided_by_text(ref: DecisionRef) -> str:
     """``Name (declared identity), 2026-09-27``."""
     return (
@@ -264,6 +291,13 @@ def working_papers_xlsx(
 
     wb = Workbook()
     wb.remove(wb.active)  # type: ignore[arg-type]
+    sources = identity_sources(view)
+    mixed = len(sources) > 1
+    headers = list(WORKING_PAPER_HEADERS)
+    if sources == {"authenticated"}:
+        headers[headers.index("Reviewed By (declared)")] = "Reviewed By (authenticated)"
+    elif mixed:
+        headers[headers.index("Reviewed By (declared)")] = "Reviewed By"
     rows = []
     for f in papers.findings:
         if f.vault_id_reference and f.exact_quote_from_evidence:
@@ -297,7 +331,15 @@ def working_papers_xlsx(
                 verified_text,
                 _text(f.legacy_severity),
                 _REVIEW_STATUS_TEXT[fv.review_status] if fv else "Not reviewed",
-                review.decided_by if review else "",
+                (
+                    (
+                        f"{review.decided_by} ({review.identity_source})"
+                        if mixed
+                        else review.decided_by
+                    )
+                    if review
+                    else ""
+                ),
                 review.decided_at if review else "",
                 review.rationale if review else "",
                 _draft_text(fv) if fv else "",
@@ -313,8 +355,7 @@ def working_papers_xlsx(
         "classified at engagement level in the report's deficiency evaluation.",
         "ToD / ToE / Result show the conclusion of record: the AI draft, unless "
         "a reviewer's challenge withdrew a conclusion (the draft is then shown "
-        "under 'AI Draft'). Reviewer identities are declared, not "
-        "authenticated.",
+        "under 'AI Draft'). " + identity_note(sources),
     ]
     if any(f.legacy_severity for f in papers.findings):
         notes.append(
@@ -322,7 +363,7 @@ def working_papers_xlsx(
             "conclusions existed; their conclusions were derived from the old "
             "severity label on load."
         )
-    _write_sheet(wb, "Findings", WORKING_PAPER_HEADERS, rows)
+    _write_sheet(wb, "Findings", headers, rows)
     _write_sheet(
         wb,
         "Export Info",
@@ -363,9 +404,12 @@ def _deficiency_section(
         if complete
         else "## Deficiency Evaluation (conclusion of record where decided)"
     )
+    identities = identity_note(identity_sources(view)).rstrip(".")
     note = (
-        "Classifications are the reviewer's decisions (identities are declared, "
-        "not authenticated). Where the reviewer departed from the AI-drafted "
+        "Classifications are the reviewer's decisions ("
+        + identities[:1].lower()
+        + identities[1:]
+        + "). Where the reviewer departed from the AI-drafted "
         "evaluation, the draft is shown alongside."
     )
     if not complete:
@@ -492,7 +536,7 @@ def _finding_review_section(view: EffectiveView) -> list[str]:
         "## Reviewer Sign-off of Findings",
         "",
         "> Per-finding review recorded before Gate 2 (and scope limitations "
-        "recorded before Gate 3). Identities are declared, not authenticated.",
+        "recorded before Gate 3). " + identity_note(identity_sources(view)),
         "",
         "| Control | Result of record | Review | Reviewer | Rationale |",
         "|---|---|---|---|---|",
@@ -601,6 +645,8 @@ def _trail_line(e: dict[str, str]) -> str:
         f"- **{_one_line(e.get('gate'))}** — {_one_line(e.get('human'))} "
         f"at {_one_line(e.get('timestamp'))}"
     )
+    if e.get("identity_source") == "authenticated":
+        entry += " [authenticated reviewer token]"
     if e.get("action"):
         entry += f" ({_one_line(e['action'])})"
     if e.get("action") == "review_decision":

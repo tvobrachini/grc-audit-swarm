@@ -787,7 +787,8 @@ class DecisionSubjectType(StrEnum):
 class IdentitySource(StrEnum):
     # Typed by the caller; the API cannot tell users apart (ADR-004/008).
     DECLARED = "declared"
-    # Reserved for per-user authentication (not implemented yet).
+    # The name a valid X-Reviewer-Token belongs to (REVIEWER_TOKENS_FILE,
+    # ADR-012). Authenticated to this application only: not SSO, no MFA.
     AUTHENTICATED = "authenticated"
 
 

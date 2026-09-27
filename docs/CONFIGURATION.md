@@ -29,6 +29,7 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 |---|---|
 | `API_AUTH_TOKEN` | Shared bearer token for all `/api/*` routes. Required. |
 | `VITE_API_AUTH_TOKEN` | Dev only: lets `npm run dev` send the token. It is built into the JS bundle, so never set it for a Compose or production build. |
+| `REVIEWER_TOKENS_FILE` | Optional. Path to the per-reviewer tokens file (names and SHA-256 digests of their tokens; see below). When set, audit creation and every reviewer action need the person's token in the `X-Reviewer-Token` header, and their name is recorded as authenticated. Unset: names are declared, as typed. |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated origin allow-list (default `http://localhost:5173`; `*` is ignored). |
 | `DEMO_MODE` | `1` (or `true`, `yes`, `on`) replaces the crews with fixed demo artifacts. |
 | `DEMO_QA_REJECT_PHASE` | `1`, `2` or `3`: in demo mode, QA rejects that phase until a person retries it. |
@@ -46,6 +47,18 @@ Generate a vault key:
 ```bash
 python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
+
+Issue a per-reviewer token (the token is printed once; the file stores only its digest):
+
+```bash
+export REVIEWER_TOKENS_FILE=data/reviewer_tokens.json
+PYTHONPATH=src uv run python -m api.reviewer_tokens add "Ivan In-Charge"
+PYTHONPATH=src uv run python -m api.reviewer_tokens add --replace "Ivan In-Charge"   # rotate
+PYTHONPATH=src uv run python -m api.reviewer_tokens remove "Ivan In-Charge"          # revoke
+PYTHONPATH=src uv run python -m api.reviewer_tokens list                             # names only
+```
+
+In Compose, keep the file on the `app-data` volume, set `REVIEWER_TOKENS_FILE` for the API service, and run the same commands with `docker compose exec api python -m api.reviewer_tokens …`. Everyone who creates or reviews audits needs a token, preparers included. The file is re-read when it changes, so no restart is needed. If the variable is set but the file is missing or malformed, reviewer actions return 503 rather than falling back to declared names. See [Security and data handling](SECURITY-AND-DATA.md#per-reviewer-tokens) for what this does and does not protect against.
 
 If you enabled encryption before keyed digests were introduced, re-seal older encrypted records. The command exits non-zero if any record fails its integrity check, and it never re-seals a record whose payload no longer matches its stored hash.
 

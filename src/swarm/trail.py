@@ -37,7 +37,13 @@ What it does not detect on its own
       editor cannot also rewrite the anchor file (ship it to separate storage
       for that);
     * with the unkeyed variant, an editor who recomputes the whole chain;
-    * anything about *who* acted: identities are self-declared.
+    * anything about *who* acted. Each entry written since ADR-012 carries
+      ``identity_source``: ``declared`` (the name was typed by the caller)
+      or ``authenticated`` (the name a reviewer token belongs to). The hash
+      covers that field like any other, so changing it is detected as an
+      edit; it records what the API was told, not proof of who was at the
+      keyboard. Entries written before the field existed have none and
+      verify as before; read them as declared.
 """
 
 from __future__ import annotations

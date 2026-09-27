@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.auth import require_api_auth
+from api.auth import ReviewerAuthError, require_api_auth
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
 from api.routers import config, evidence, exports, imports, phases, sessions
@@ -80,6 +80,17 @@ async def limit_upload_size(request: Request, call_next):
                 status_code=413, content={"detail": "Upload is too large."}
             )
     return await call_next(request)
+
+
+@app.exception_handler(ReviewerAuthError)
+async def reviewer_auth_error(request: Request, exc: ReviewerAuthError):
+    """Reviewer-token refusals: ``detail`` (a string, like every other error)
+    plus a machine-readable ``code`` (see ``api.auth``)."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": exc.code},
+        headers=exc.headers,
+    )
 
 
 _api_auth = [Depends(require_api_auth)]

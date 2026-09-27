@@ -13,10 +13,17 @@ _MAX_IDENTITY = 200
 _MAX_NOTES = 4000
 
 
-def _not_blank(value: str) -> str:
-    if not value.strip():
-        raise ValueError("must not be blank")
+def _strip(value: str) -> str:
     return value.strip()
+
+
+# Identity fields (prepared_by, human_id, decided_by) may be omitted: with
+# per-reviewer tokens configured (REVIEWER_TOKENS_FILE, ADR-012) the API takes
+# the identity from the X-Reviewer-Token header and refuses (403) a typed name
+# that differs. Without tokens the typed name is the declared identity and a
+# blank one is refused with 422, as before.
+def _identity_field() -> Any:
+    return Field(default="", max_length=_MAX_IDENTITY)
 
 
 class CreateSessionRequest(BaseModel):
@@ -24,29 +31,29 @@ class CreateSessionRequest(BaseModel):
     business_context: str
     frameworks: list[str] = list(DEFAULT_FRAMEWORKS)
     name: Optional[str] = None
-    # Declared (not authenticated) identity of the preparer; the preparer may
-    # not approve gates, override QA or return work on this audit.
-    prepared_by: str = Field(min_length=1, max_length=_MAX_IDENTITY)
+    # Identity of the preparer (declared, or from the reviewer token); the
+    # preparer may not approve gates, override QA or return work on this audit.
+    prepared_by: str = _identity_field()
 
-    _prepared_by_not_blank = field_validator("prepared_by")(_not_blank)
+    _prepared_by_strip = field_validator("prepared_by")(_strip)
 
 
 class ApproveGateRequest(BaseModel):
-    human_id: str
+    human_id: str = _identity_field()
     gate_number: int  # 1, 2, or 3
 
 
 class RetryPhaseRequest(BaseModel):
     """Re-run a phase that is QA_REJECTED_PHASE_n or ERROR_PHASE_n."""
 
-    human_id: str = Field(min_length=1)
+    human_id: str = _identity_field()
     phase: int = Field(ge=1, le=3)
 
 
 class QAOverrideRequest(BaseModel):
     """Supervisor accepts a QA-rejected artifact (→ WAITING_HUMAN_GATE_n)."""
 
-    human_id: str = Field(min_length=1)
+    human_id: str = _identity_field()
     phase: int = Field(ge=1, le=3)
     reason: str = Field(min_length=1)
 
@@ -54,7 +61,7 @@ class QAOverrideRequest(BaseModel):
 class ReturnForReworkRequest(BaseModel):
     """Reviewer returns WAITING_HUMAN_GATE_n → RUNNING_PHASE_n with notes."""
 
-    human_id: str = Field(min_length=1, max_length=_MAX_IDENTITY)
+    human_id: str = _identity_field()
     phase: int = Field(ge=1, le=3)
     notes: str = Field(min_length=1, max_length=_MAX_NOTES)
 
@@ -146,12 +153,12 @@ class RecordDecisionRequest(BaseModel):
     subject_type: Optional[str] = Field(default=None, max_length=32)
     values: dict[str, Any] = Field(default_factory=dict)
     rationale: str = Field(default="", max_length=_MAX_NOTES)
-    # Declared (not authenticated) identity of the reviewer.
-    decided_by: str = Field(min_length=1, max_length=_MAX_IDENTITY)
+    # Identity of the reviewer (declared, or from the reviewer token).
+    decided_by: str = _identity_field()
     # decision_id of the active decision this one corrects.
     supersedes: Optional[str] = Field(default=None, max_length=64)
 
-    _decided_by_not_blank = field_validator("decided_by")(_not_blank)
+    _decided_by_strip = field_validator("decided_by")(_strip)
 
     @field_validator("values")
     @classmethod

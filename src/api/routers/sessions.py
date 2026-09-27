@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from api.auth import ReviewerIdentity, reviewer_identity
 from api.executor import get_executor
 from api.job_store import (
     get_flow,
@@ -403,9 +404,13 @@ def _run_phase_3(session_id: str, job_id: str) -> None:
 
 
 @router.post("", response_model=SessionSummary, status_code=201)
-def create_session(req: CreateSessionRequest) -> SessionSummary:
+def create_session(
+    req: CreateSessionRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
+    prepared_by, source = who.resolve(req.prepared_by, "prepared_by")
     return _create_and_launch(
-        req.theme, req.business_context, req.frameworks, req.name, req.prepared_by
+        req.theme, req.business_context, req.frameworks, req.name, prepared_by, source
     )
 
 
@@ -415,14 +420,16 @@ def create_session_with_document(
     business_context: str = Form(""),
     frameworks: list[str] = Form(default_factory=lambda: list(DEFAULT_FRAMEWORKS)),
     name: Optional[str] = Form(None),
-    prepared_by: str = Form(..., min_length=1, max_length=200),
+    prepared_by: str = Form("", max_length=200),
     document: UploadFile = File(...),
+    who: ReviewerIdentity = Depends(reviewer_identity),
 ) -> SessionSummary:
     """Create an audit with a scope document (PDF, .txt or .md, ≤ 5 MB).
 
     The extracted text is appended to the business context inside delimiters
     that label it as untrusted, user-supplied document content.
     """
+    prepared_by, source = who.resolve(prepared_by, "prepared_by")
     if not prepared_by.strip():
         raise HTTPException(status_code=422, detail="prepared_by must not be blank")
     data = document.file.read(MAX_UPLOAD_BYTES + 1)
@@ -436,6 +443,7 @@ def create_session_with_document(
         [f for f in frameworks if f.strip()],
         name or None,
         prepared_by,
+        source,
     )
 
 
@@ -445,6 +453,7 @@ def _create_and_launch(
     frameworks: list[str],
     name: Optional[str],
     prepared_by: str,
+    identity_source: str = "declared",
 ) -> SessionSummary:
     session_id = str(uuid.uuid4())
     name = name or f"{theme[:40]} audit"
@@ -457,7 +466,11 @@ def _create_and_launch(
     try:
         # Audits created through the API require reviewer decisions at
         # Gates 2 and 3 (ADR-011).
-        flow.record_preparer(prepared_by, require_review_decisions=True)
+        flow.record_preparer(
+            prepared_by,
+            require_review_decisions=True,
+            identity_source=identity_source,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -603,7 +616,11 @@ def _blocked(action: str, exc: Exception) -> HTTPException:
 
 
 @router.patch("/{session_id}/approve", response_model=SessionSummary)
-def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
+def approve_gate(
+    session_id: str,
+    req: ApproveGateRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Approve human gate 1, 2 or 3.
 
     Gates 1/2 start the next phase crew; gate 3 completes the audit. Returns
@@ -612,6 +629,7 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
     """
     if req.gate_number not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="gate_number must be 1, 2, or 3")
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
 
     # check-transition-submit is atomic per session: a concurrent duplicate
@@ -624,7 +642,7 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             3: flow.finalize_audit,
         }[req.gate_number]
         try:
-            approve(req.human_id)
+            approve(human_id, identity_source=source)
         except InvalidTransitionError as exc:
             raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
         except MissingReviewDecisionsError as exc:
@@ -676,17 +694,22 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
 
 
 @router.post("/{session_id}/retry", response_model=SessionSummary)
-def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
+def retry_phase(
+    session_id: str,
+    req: RetryPhaseRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Re-run a phase that ended QA_REJECTED_PHASE_n or ERROR_PHASE_n.
 
     The retry is stamped in the approval trail. 409 if the phase is not in a
     retryable state.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.retry_phase(req.phase, req.human_id)
+            flow.retry_phase(req.phase, human_id, identity_source=source)
         except InvalidTransitionError as exc:
             raise _conflict(f"retry phase {req.phase}", flow, exc) from exc
         except ValueError as exc:
@@ -699,18 +722,25 @@ def retry_phase(session_id: str, req: RetryPhaseRequest) -> SessionSummary:
 
 
 @router.post("/{session_id}/qa-override", response_model=SessionSummary)
-def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSummary:
+def override_qa_rejection(
+    session_id: str,
+    req: QAOverrideRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Supervisor override: accept a QA-rejected artifact with a justification.
 
     Moves QA_REJECTED_PHASE_n → WAITING_HUMAN_GATE_n (the normal gate approval
     still follows) and records approver + reason in the approval trail.
     409 if the phase is not QA-rejected or produced no artifact.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.override_qa_rejection(req.phase, req.human_id, req.reason)
+            flow.override_qa_rejection(
+                req.phase, human_id, req.reason, identity_source=source
+            )
         except (InvalidTransitionError, PhaseArtifactMissingError) as exc:
             raise _conflict(
                 f"override QA rejection for phase {req.phase}", flow, exc
@@ -726,7 +756,11 @@ def override_qa_rejection(session_id: str, req: QAOverrideRequest) -> SessionSum
 
 
 @router.post("/{session_id}/return", response_model=SessionSummary)
-def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSummary:
+def return_for_rework(
+    session_id: str,
+    req: ReturnForReworkRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
+) -> SessionSummary:
     """Reviewer returns a phase waiting at its gate for rework.
 
     WAITING_HUMAN_GATE_n → RUNNING_PHASE_n: the phase crew re-runs with the
@@ -734,11 +768,14 @@ def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSu
     the approval trail. 409 if the session is not waiting at that gate or the
     reviewer is the preparer; 422 for blank notes.
     """
+    human_id, source = who.resolve(req.human_id, "human_id")
     data = _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
         try:
-            flow.return_for_rework(req.phase, req.human_id, req.notes)
+            flow.return_for_rework(
+                req.phase, human_id, req.notes, identity_source=source
+            )
         except InvalidTransitionError as exc:
             raise _conflict(f"return phase {req.phase}", flow, exc) from exc
         except ReviewBlockedError as exc:
@@ -756,7 +793,9 @@ def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSu
     "/{session_id}/decisions", response_model=ReviewDecisionRecord, status_code=201
 )
 def record_decision(
-    session_id: str, req: RecordDecisionRequest
+    session_id: str,
+    req: RecordDecisionRequest,
+    who: ReviewerIdentity = Depends(reviewer_identity),
 ) -> ReviewDecisionRecord:
     """Append one reviewer decision (append-only; see DECISIONS.md, ADR-011).
 
@@ -771,6 +810,7 @@ def record_decision(
     422: unknown decision type or subject, invalid values, a required
     rationale is missing.
     """
+    decided_by, source = who.resolve(req.decided_by, "decided_by")
     _require_session(session_id)
     with session_lock(session_id):
         flow = _require_flow(session_id)
@@ -781,8 +821,9 @@ def record_decision(
                 subject_type=req.subject_type,
                 values=req.values,
                 rationale=req.rationale,
-                decided_by=req.decided_by,
+                decided_by=decided_by,
                 supersedes=req.supersedes,
+                identity_source=source,
             )
         except DecisionValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
