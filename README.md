@@ -4,12 +4,18 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 
+Give it a scope such as "AWS IAM and S3 access controls": it drafts the RACM, tests the controls against read-only AWS evidence, and drafts the report — a named reviewer approves, returns or overrides each phase, and every action is recorded in a hash-chained trail.
+
 An IT audit engagement has a shape: plan the risks and controls, test them against evidence, report the results, and have a supervisor review each step before the next one starts. GRC Audit Swarm is a personal project that drafts that work with language-model agents while keeping the audit structure in place. It takes a plain-language scope and produces a Risk and Control Matrix (RACM), working papers built from read-only AWS evidence, and a draft report. A person must approve each phase before the next one runs, and every approval, retry and override is written to an approval trail. The output is a draft for a qualified auditor to review, not an audit opinion.
 
 > [!IMPORTANT]
 > **Disclaimer:** This repository is an independent, personal open-source research and engineering project developed on personal time. It is not affiliated with, sponsored by or endorsed by any current or past employer.
 
 Design notes: [CASE_STUDY.md](CASE_STUDY.md) (the audit reasoning behind the design) and [DECISIONS.md](DECISIONS.md) (architecture decision records).
+
+![Demo: creating an audit, working through the three approval gates in DEMO_MODE, and reaching a completed audit with an intact trail and exports](docs/demo.gif)
+
+The GIF above is a `DEMO_MODE=1` walk-through: a preparer starts an audit, Gate 1 is returned for rework with reviewer notes and then approved, Gate 2 shows a fieldwork finding with its evidence quote verified against the vault, Gate 3 shows the draft deficiency evaluation awaiting the auditor's judgement, and the completed audit shows an intact approval trail and the export buttons. All content in it is fixed demo data, not language-model output.
 
 ---
 
