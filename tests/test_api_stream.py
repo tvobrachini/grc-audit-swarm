@@ -18,12 +18,13 @@ import sys
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from api import job_store
-from api.job_store import get_queue, push_event, remove_flow
+from api.job_store import get_queue, push_event, remove_flow, set_flow
 from api.routers.phases import stream_events
 
 AUTH = {"Authorization": "Bearer test-token"}
@@ -84,7 +85,7 @@ class TestStreamDeliversEvents:
         ]
 
     def test_unknown_session_id_still_streams_pushed_events(self):
-        """The endpoint has no notion of a "real" session: any id works."""
+        """An id with events already queued internally can be streamed."""
         sid = f"never-created-{uuid.uuid4()}"
         push_event(sid, {"type": "status", "status": "RUNNING_PHASE_1"})
 
@@ -103,34 +104,27 @@ class TestStreamQueueCleanup:
 
         assert get_queue(sid) is not original_queue
 
-    def test_opening_the_stream_registers_a_queue_for_the_session(self):
+    def test_opening_the_stream_registers_a_queue_for_a_known_session(self):
         sid = f"sess-{uuid.uuid4()}"
-        assert sid not in job_store._event_queues
+        set_flow(sid, object())  # a live session held in memory
+        try:
+            assert sid not in job_store._event_queues
 
-        asyncio.run(_collect_events(sid, 0))
+            asyncio.run(_collect_events(sid, 0))
 
-        assert sid in job_store._event_queues
+            assert sid in job_store._event_queues
+        finally:
+            remove_flow(sid)
 
 
 class TestStreamUnboundedQueueGrowth:
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG: GET /api/stream/{session_id} (src/api/routers/phases.py:22, "
-            "via api.job_store.get_queue) creates and permanently retains an "
-            "asyncio.Queue for ANY session_id an authenticated caller names, "
-            "with no size cap, TTL, or check that the session actually "
-            "exists. Only session deletion (remove_flow) ever reclaims one. "
-            "A caller can grow api.job_store._event_queues without bound by "
-            "requesting the stream for a series of random ids, which is an "
-            "unbounded-memory-growth vector this test expects to be guarded "
-            "against."
-        ),
-    )
     def test_streaming_random_session_ids_does_not_grow_the_queue_table(self):
+        """Unknown ids get a 404 and never create a queue (unbounded growth)."""
         before = len(job_store._event_queues)
         for _ in range(10):
             sid = f"scratch-{uuid.uuid4()}"
-            asyncio.run(_collect_events(sid, 0))
+            with pytest.raises(HTTPException) as exc:
+                asyncio.run(_collect_events(sid, 0))
+            assert exc.value.status_code == 404
         after = len(job_store._event_queues)
-        assert after <= before
+        assert after == before
