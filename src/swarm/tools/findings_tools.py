@@ -107,9 +107,9 @@ UNTRUSTED_BEGIN = (
 UNTRUSTED_END = "<<<END UNTRUSTED SCANNER OUTPUT>>>"
 
 
-def _register_and_format(raw_output: str, source: str, *, metadata: dict) -> str:
+def _register_and_format(raw_output: str, source: str, *, metadata: dict, session_id: str | None = None) -> str:
     vault_record = EvidenceAssuranceProtocol.register_evidence(
-        raw_output, source, metadata=metadata
+        raw_output, source, metadata=metadata, session_id=session_id
     )
     return (
         f"Vault ID: {vault_record['vault_id']}\n"
@@ -122,96 +122,103 @@ def _register_and_format(raw_output: str, source: str, *, metadata: dict) -> str
 # ─── Prowler ──────────────────────────────────────────────────────────────────
 
 
-@tool("Import Prowler Findings")
-def import_prowler_findings(context: str = "") -> str:
-    """Reads a Prowler JSON findings file (current OCSF format or the older
-    flat "json" format) from the path in the PROWLER_FINDINGS_PATH
-    environment variable, and registers a compact, quotable summary
-    (findings grouped by check ID, with status/severity/region/resource and
-    compliance mappings) as evidence. A PASS/FAIL is Prowler's own
-    classification of what it found at scan time — configuration and
-    implementation evidence, not proof of operating effectiveness over a
-    period. If PROWLER_FINDINGS_PATH is not set, says so and does not
-    register anything (there is nothing to import)."""
-    path = os.environ.get("PROWLER_FINDINGS_PATH")
-    if not path:
-        return (
-            "Prowler findings import skipped: PROWLER_FINDINGS_PATH is not "
-            "set, so there is no findings file to import."
-        )
-    if len(path) > MAX_PROWLER_PATH_LENGTH:
-        raw_output = (
-            "Error importing Prowler findings: configured path is implausibly long."
-        )
-    elif not path.lower().endswith(".json"):
-        raw_output = (
-            "Error importing Prowler findings: PROWLER_FINDINGS_PATH must "
-            "point to a .json file (Prowler's JSON or OCSF-JSON output)."
-        )
-    else:
-        try:
-            size = os.path.getsize(path)
-            check_prowler_file_size(size)
-            with open(path, "r", encoding="utf-8") as f:
-                raw_text = f.read()
-            result = parse_prowler_findings(raw_text)
-        except OSError as exc:
-            raw_output = f"Error reading Prowler findings file: {exc.strerror or exc}"
-        except FindingsImportError as exc:
-            raw_output = f"Error importing Prowler findings: {exc}"
+def make_findings_tools(session_id: str):
+    @tool("Import Prowler Findings")
+    def import_prowler_findings(context: str = "") -> str:
+        """Reads a Prowler JSON findings file (current OCSF format or the older
+        flat "json" format) from the path in the PROWLER_FINDINGS_PATH
+        environment variable, and registers a compact, quotable summary
+        (findings grouped by check ID, with status/severity/region/resource and
+        compliance mappings) as evidence. A PASS/FAIL is Prowler's own
+        classification of what it found at scan time — configuration and
+        implementation evidence, not proof of operating effectiveness over a
+        period. If PROWLER_FINDINGS_PATH is not set, says so and does not
+        register anything (there is nothing to import)."""
+        path = os.environ.get("PROWLER_FINDINGS_PATH")
+        if not path:
+            return (
+                "Prowler findings import skipped: PROWLER_FINDINGS_PATH is not "
+                "set, so there is no findings file to import."
+            )
+        if len(path) > MAX_PROWLER_PATH_LENGTH:
+            return (
+                "Error importing Prowler findings: configured path is implausibly long."
+            )
+        elif not path.lower().endswith(".json"):
+            return (
+                "Error importing Prowler findings: PROWLER_FINDINGS_PATH must "
+                "point to a .json file (Prowler's JSON or OCSF-JSON output)."
+            )
         else:
+            try:
+                size = os.path.getsize(path)
+                check_prowler_file_size(size)
+                with open(path, "r", encoding="utf-8") as f:
+                    raw_text = f.read()
+                result = parse_prowler_findings(raw_text)
+            except OSError as exc:
+                return f"Error reading Prowler findings file: {exc.strerror or exc}"
+            except FindingsImportError as exc:
+                return f"Error importing Prowler findings: {exc}"
+            
             raw_output = build_prowler_summary(result)
 
-    source = "prowler.findings_import"
-    metadata = _collection_metadata(
-        "import_prowler_findings",
-        "local_file_read",
-        parameters={"source_path_basename": os.path.basename(path)},
-    )
-    return _register_and_format(raw_output, source, metadata=metadata)
-
-
-# ─── AWS Security Hub ─────────────────────────────────────────────────────────
-
-
-@tool("Get Security Hub Findings")
-def get_securityhub_findings(context: str = "") -> str:
-    """Reads active, non-suppressed AWS Security Hub findings via the
-    read-only securityhub:GetFindings API (paginated), optionally narrowed
-    by the SECURITYHUB_PRODUCT_NAME, SECURITYHUB_GENERATOR_ID and
-    SECURITYHUB_COMPLIANCE_STATUS environment variables, and registers a
-    compact, quotable summary as evidence. A PASSED compliance status is
-    what the finding's generator reported at read time — configuration and
-    implementation evidence, not proof of operating effectiveness over a
-    period."""
-    region = None
-    filters = build_securityhub_filters(
-        product_name=os.environ.get("SECURITYHUB_PRODUCT_NAME"),
-        generator_id=os.environ.get("SECURITYHUB_GENERATOR_ID"),
-        compliance_status=os.environ.get("SECURITYHUB_COMPLIANCE_STATUS"),
-    )
-    try:
-        max_findings = int(os.environ.get("SECURITYHUB_MAX_FINDINGS", "1000"))
-    except ValueError:
-        max_findings = 1000
-    try:
-        client = _boto_client("securityhub")
-        region = _region_of(client)
-        raw_findings, truncated = collect_securityhub_findings(
-            client, filters, max_findings=max_findings
+        source = "prowler.findings_import"
+        metadata = _collection_metadata(
+            "import_prowler_findings",
+            "local_file_read",
+            parameters={"source_path_basename": os.path.basename(path)},
         )
-        parsed = parse_asff_records(raw_findings)
-        raw_output = build_securityhub_summary(
-            parsed, filters=filters, truncated=truncated
-        )
-    except (ClientError, BotoCoreError) as e:
-        raw_output = f"Error fetching Security Hub findings: {describe_error(e)}"
+        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
 
-    source = "aws.securityhub.get_findings"
-    metadata = _collection_metadata(
-        "get_securityhub_findings",
-        "securityhub:GetFindings",
-        region=region,
-        parameters={"filters": filters, "max_findings": max_findings},
-    )
-    return _register_and_format(raw_output, source, metadata=metadata)
+
+
+
+    @tool("Get Security Hub Findings")
+    def get_securityhub_findings(context: str = "") -> str:
+        """Reads active, non-suppressed AWS Security Hub findings via the
+        read-only securityhub:GetFindings API (paginated), optionally narrowed
+        by the SECURITYHUB_PRODUCT_NAME, SECURITYHUB_GENERATOR_ID and
+        SECURITYHUB_COMPLIANCE_STATUS environment variables, and registers a
+        compact, quotable summary as evidence. A PASSED compliance status is
+        what the finding's generator reported at read time — configuration and
+        implementation evidence, not proof of operating effectiveness over a
+        period."""
+        region = None
+        filters = build_securityhub_filters(
+            product_name=os.environ.get("SECURITYHUB_PRODUCT_NAME"),
+            generator_id=os.environ.get("SECURITYHUB_GENERATOR_ID"),
+            compliance_status=os.environ.get("SECURITYHUB_COMPLIANCE_STATUS"),
+        )
+        try:
+            max_findings = int(os.environ.get("SECURITYHUB_MAX_FINDINGS", "1000"))
+        except ValueError:
+            max_findings = 1000
+        try:
+            client = _boto_client("securityhub")
+            region = _region_of(client)
+            raw_findings, truncated = collect_securityhub_findings(
+                client, filters, max_findings=max_findings
+            )
+            parsed = parse_asff_records(raw_findings)
+            raw_output = build_securityhub_summary(
+                parsed, filters=filters, truncated=truncated
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error fetching Security Hub findings: {describe_error(e)}"
+
+        source = "aws.securityhub.get_findings"
+        metadata = _collection_metadata(
+            "get_securityhub_findings",
+            "securityhub:GetFindings",
+            region=region,
+            parameters={"filters": filters, "max_findings": max_findings},
+        )
+        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
+
+    return [import_prowler_findings, get_securityhub_findings]
+
+# Module-level exports for tests and MCP server
+_test_tools = make_findings_tools(None)
+import_prowler_findings = _test_tools[0]
+get_securityhub_findings = _test_tools[1]

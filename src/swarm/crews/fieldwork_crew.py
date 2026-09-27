@@ -2,20 +2,14 @@ import yaml
 from pathlib import Path
 from crewai import Agent, Crew, Process, Task
 from swarm.schema import WorkingPaperSchema, QA_PushbackSchema
-from swarm.tools.aws_tools import (
-    get_iam_password_policy,
-    list_iam_users_with_mfa,
-    list_public_s3_buckets,
-)
-from swarm.tools.findings_tools import (
-    get_securityhub_findings,
-    import_prowler_findings,
-)
+from swarm.tools.aws_tools import make_aws_tools
+from swarm.tools.findings_tools import make_findings_tools
 from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class FieldworkCrew:
-    def __init__(self, event_callback=None, skill_context=None):
+    def __init__(self, session_id: str, event_callback=None, skill_context=None):
+        self.session_id = session_id
         self._event_callback = event_callback
         self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent
@@ -31,13 +25,7 @@ class FieldworkCrew:
             verbose=True,
             llm=base_llm,
             max_iter=5,
-            tools=[
-                get_iam_password_policy,
-                list_iam_users_with_mfa,
-                list_public_s3_buckets,
-                import_prowler_findings,
-                get_securityhub_findings,
-            ],
+            tools=make_aws_tools(self.session_id) + make_findings_tools(self.session_id),
         )
 
         # Augment field auditor backstory with domain skill prompts if detected

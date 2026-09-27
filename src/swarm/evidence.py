@@ -44,7 +44,7 @@ _UUID_RE = re.compile(
 
 # A quote shorter than this proves little: it would match almost any payload
 # by chance (e.g. a lone word or punctuation).
-_MIN_QUOTE_LENGTH = 8
+_MIN_QUOTE_LENGTH = 15
 
 # Repo root: src/swarm/evidence.py -> src/swarm -> src -> repo root.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,20 +61,10 @@ def app_version() -> str:
     available.
     """
     try:
+        from importlib.metadata import version as _pkg_version, PackageNotFoundError
         return _pkg_version("grc-audit-swarm")
-    except PackageNotFoundError:
-        pass
-    try:
-        import tomllib
-
-        with open(_REPO_ROOT / "pyproject.toml", "rb") as f:
-            data = tomllib.load(f)
-        version = data.get("project", {}).get("version")
-        if isinstance(version, str) and version:
-            return version
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
-        pass
-    return "unknown"
+    except (ImportError, PackageNotFoundError):
+        return os.environ.get("APP_VERSION", "unknown")
 
 
 def _get_fernet():

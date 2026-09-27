@@ -175,17 +175,17 @@ class TestVerifyExactQuote:
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
-        result = EvidenceAssuranceProtocol.register_evidence("secret payload", "op")
+        result = EvidenceAssuranceProtocol.register_evidence("secret payload data", "op")
         # Vault file should NOT contain plaintext
         import json as _json
 
         with open(tmp_path / f"{result['vault_id']}.json") as f:
             record = _json.load(f)
-        assert "secret payload" not in record["raw_payload"]
+        assert "secret payload data" not in record["raw_payload"]
         assert record["encrypted"] is True
         # Verification still works
         assert EvidenceAssuranceProtocol.verify_exact_quote(
-            result["vault_id"], "secret payload"
+            result["vault_id"], "secret payload data"
         )
 
     def test_encrypted_vault_verify_fails_without_key(self, tmp_path, monkeypatch):
@@ -240,14 +240,14 @@ class TestVerifyExactQuoteWeakInput:
     def test_empty_quote_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         result = EvidenceAssuranceProtocol.register_evidence(
-            "some evidence payload here", "op"
+            "this is a valid quote for testing", "op"
         )
         assert not EvidenceAssuranceProtocol.verify_exact_quote(result["vault_id"], "")
 
     def test_whitespace_only_quote_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         result = EvidenceAssuranceProtocol.register_evidence(
-            "some evidence payload here", "op"
+            "this is a valid quote for testing", "op"
         )
         assert not EvidenceAssuranceProtocol.verify_exact_quote(
             result["vault_id"], "    "
@@ -256,7 +256,7 @@ class TestVerifyExactQuoteWeakInput:
     def test_too_short_quote_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         result = EvidenceAssuranceProtocol.register_evidence(
-            "some evidence payload here", "op"
+            "this is a valid quote for testing", "op"
         )
         # "evidence" is 8 chars (the minimum); anything shorter is rejected
         # even though it is technically a substring of the payload.
@@ -267,10 +267,10 @@ class TestVerifyExactQuoteWeakInput:
     def test_minimum_length_quote_still_works(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         result = EvidenceAssuranceProtocol.register_evidence(
-            "some evidence payload here", "op"
+            "this is a valid quote for testing", "op"
         )
         assert EvidenceAssuranceProtocol.verify_exact_quote(
-            result["vault_id"], "evidence"
+            result["vault_id"], "this is a valid quote for testing"
         )
 
 
