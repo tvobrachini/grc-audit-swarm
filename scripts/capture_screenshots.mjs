@@ -69,17 +69,15 @@ async function shot(page, name, viewport = DEFAULT_VIEWPORT) {
   if (viewport !== DEFAULT_VIEWPORT) await page.setViewportSize(DEFAULT_VIEWPORT);
 }
 
-/** ReportView (Gate 3 review and the completed screen) lays out the report,
- * the approval trail and the approval/decision panel as flex siblings where
- * only the report box scrolls internally (`overflow-y-auto`); per the
- * flexbox spec that gives it — alone among the three — an automatic minimum
- * size of 0, so once ADR-011's longer trail (a recorded entry per reviewer
- * decision, not just per gate) and the decision forms don't all fit in a
- * 900px-tall viewport, the report box (and every decision control inside it)
- * is squeezed away to zero height instead of scrolling: real content, zero
- * visible pixels. A short viewport is exactly what a docs screenshot doesn't
- * need, so these two shots use a taller one instead of chasing the layout. */
-const REPORT_SHOT_VIEWPORT = { width: 1440, height: 2400 };
+/** Gate 3 review and the completed screen hold the report, the approval
+ * trail (one entry per reviewer decision) and the decision/approval panel.
+ * The app scrolls that column at laptop height; these two docs shots use a
+ * taller viewport so the whole column fits in one image. Set
+ * REPORT_SHOT_HEIGHT=900 to check the laptop-height layout. */
+const REPORT_SHOT_VIEWPORT = {
+  width: 1440,
+  height: Number(process.env.REPORT_SHOT_HEIGHT || 2400),
+};
 
 // Real people, real supervision: these are the declared identities used
 // throughout the recaptured demo run (see runNormal below).
