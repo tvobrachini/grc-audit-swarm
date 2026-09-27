@@ -17,7 +17,6 @@ from swarm.skill_loader import (
     get_specialist_prompt,
     get_researcher_context_hints,
     get_focus_domains,
-    get_mandatory_control_hints,
 )
 
 
@@ -129,11 +128,6 @@ class TestSkillHelpers:
         skills = detect_skills_from_scope("AWS EKS IAM")
         domains = get_focus_domains(skills)
         assert len(domains) >= 1
-
-    def test_mandatory_control_hints_non_empty(self):
-        skills = detect_skills_from_scope("AWS")
-        controls = get_mandatory_control_hints(skills)
-        assert len(controls) >= 1
 
     def test_empty_skills_returns_generic_prompt(self):
         prompt = get_specialist_prompt([])

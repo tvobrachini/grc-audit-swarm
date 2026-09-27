@@ -17,7 +17,7 @@
       "observations": [
         {
           "observation_id": "demo-obs-1",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] Design and implementation: at the time of the read, the sample password policy meets the length requirement in the test step. Operating effectiveness over the period was not tested.",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] Design and implementation: at the time of the read, the password policy meets the minimum length (14) and the complexity rules in the test step (symbols, numbers, uppercase). Operating effectiveness over the period was not tested.",
           "methods": [
             "test"
           ],
@@ -25,12 +25,12 @@
             "CTRL-01"
           ],
           "relevant_evidence": [
-            "9e5fdde5-c99c-4b48-b195-02c5c43d737e"
+            "be449040-284b-424f-a401-a02198a85193"
           ]
         },
         {
           "observation_id": "demo-obs-2",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. This is a scope limitation, not a deficiency.",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 no evidence] No available evidence tool covers this control (review sign-offs are held outside AWS), so it was not tested. It is a key control: before Gate 3 the auditor must either extend testing (for example, inspect the review sign-offs) or report it as a scope limitation.",
           "methods": [
             "examine"
           ],
@@ -41,7 +41,7 @@
         },
         {
           "observation_id": "demo-obs-3",
-          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] One of three sample buckets does not block public ACLs; the control is not implemented as designed.",
+          "description": "[DEMO DATA] [DEMO DATA \u2014 synthetic evidence] All three buckets in the population were tested (full population from ListBuckets). One bucket is public through an ACL granting AllUsers READ, with Block Public Access off at both account and bucket level; for that bucket the control is not implemented as designed.",
           "methods": [
             "test"
           ],
@@ -49,7 +49,7 @@
             "CTRL-02"
           ],
           "relevant_evidence": [
-            "e475844d-75b6-4bd3-9a24-1dfe63ab9967"
+            "93d469c5-13ea-4718-8767-e554d2a60b7e"
           ]
         }
       ]

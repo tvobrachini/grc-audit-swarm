@@ -37,8 +37,8 @@ _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
-# A quote shorter than this is too weak an anti-hallucination check — it would
-# match almost any payload by chance (e.g. a lone word or punctuation).
+# A quote shorter than this proves little: it would match almost any payload
+# by chance (e.g. a lone word or punctuation).
 _MIN_QUOTE_LENGTH = 8
 
 
@@ -168,8 +168,12 @@ class EvidenceAssuranceProtocol:
     @staticmethod
     def verify_exact_quote(vault_id: str, exact_quote_claim: str) -> bool:
         """
-        Deterministic Anti-Hallucination check.
-        Returns True ONLY if the exact_quote mathematically exists within the hashed raw payload.
+        Check that a cited quote appears verbatim in a stored evidence record.
+
+        Returns True only if the record exists inside the vault directory, its
+        digest still matches the payload, and the quote is an exact substring
+        of that payload. It shows the words exist in the evidence, not that the
+        conclusion drawn from them is right.
         """
         if not _UUID_RE.fullmatch(vault_id):
             return False

@@ -30,13 +30,6 @@ focus_domains:
   - Privacy
   - Risk Management
 
-mandatory_control_hints:
-  - PRI-01   # Privacy program governance
-  - CRY-01   # ePHI encryption
-  - AC-01    # Minimum necessary access
-  - IR-01    # Breach notification process
-  - RSK-01   # Risk analysis (required by HIPAA Security Rule)
-
 specialist_system_prompt: |
   You are a HIPAA Security Officer and Certified HIPAA Professional (CHP) acting as a
   specialized IT Audit Specialist.

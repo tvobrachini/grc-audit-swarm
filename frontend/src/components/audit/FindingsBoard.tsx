@@ -229,6 +229,9 @@ export function FindingsBoard({ session }: Props) {
     {} as Record<string, number>
   );
   const deficiencyCount = findings.filter((f) => f.preliminary_deficiency).length;
+  // "No exception" says nothing about operating effectiveness, so the ToE gap
+  // is shown on its own and can't hide behind a clean result.
+  const toeNotTested = findings.filter((f) => f.toe_conclusion === "Not tested").length;
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -254,6 +257,17 @@ export function FindingsBoard({ session }: Props) {
                 {counts["No exception"] ?? 0}
               </p>
               <p className="text-[10px] text-[var(--color-text-muted)]">no exception</p>
+            </div>
+            <div title="Controls whose operating effectiveness was not tested: the evidence covers design and implementation only, even where the result is No exception.">
+              <p
+                className={clsx(
+                  "text-lg font-bold",
+                  toeNotTested ? "text-amber-400" : "text-[var(--color-text-muted)]"
+                )}
+              >
+                {toeNotTested}
+              </p>
+              <p className="text-[10px] text-[var(--color-text-muted)]">ToE not tested</p>
             </div>
             <div>
               <p
