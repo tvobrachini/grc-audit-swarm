@@ -47,4 +47,7 @@ dev = [
     "pyright>=1.1.0",
     "ruff>=0.15.5",
     "moto[iam,s3,s3control,sts]>=5.1",
+    # OSCAL schema validation in tests (regex: OSCAL patterns use \p{L}).
+    "jsonschema>=4.23.0",
+    "regex>=2024.11.6",
 ]
