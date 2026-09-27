@@ -235,6 +235,17 @@ class TestSessionsDelete:
             resp = client.delete("/api/sessions/sess-del", headers=_auth_headers())
         assert resp.status_code == 204
 
+    def test_delete_drops_session_lock(self, client):
+        import api.job_store as job_store
+
+        with (
+            patch("api.routers.sessions.get_session", return_value=None),
+            patch("api.routers.sessions.delete_session"),
+        ):
+            resp = client.delete("/api/sessions/sess-lock", headers=_auth_headers())
+        assert resp.status_code == 204
+        assert "sess-lock" not in job_store._session_locks
+
 
 class TestSessionsCreate:
     def test_create_launches_phase_1(self, client):

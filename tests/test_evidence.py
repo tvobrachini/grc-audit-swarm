@@ -8,12 +8,18 @@ import hashlib
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
+from swarm.evidence import (
+    EvidenceAssuranceProtocol,
+    _redact_account_ids,
+    evidence_session,
+    unverified_findings,
+)
 
 
 # ─── Account ID Redaction ─────────────────────────────────────────────────────
@@ -504,3 +510,126 @@ class TestMigrateLegacyDigests:
 
         assert proc.returncode == 0, proc.stderr
         assert json.loads(proc.stdout.strip().splitlines()[-1])["migrated"] == 1
+
+
+# ─── Session binding (a record of one session cannot back another's quote) ───
+
+SID_A = "11111111-1111-4111-8111-111111111111"
+SID_B = "22222222-2222-4222-8222-222222222222"
+QUOTE = "MinimumPasswordLength: 14"
+
+
+def _cites(vault_id: str, quote: str = QUOTE) -> SimpleNamespace:
+    return SimpleNamespace(
+        control_id="CTRL-1",
+        vault_id_reference=vault_id,
+        exact_quote_from_evidence=quote,
+    )
+
+
+class TestSessionBinding:
+    def test_session_id_is_recorded_and_digested(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        rec = EvidenceAssuranceProtocol.register_evidence(QUOTE, "op", session_id=SID_A)
+        path = tmp_path / f"{rec['vault_id']}.json"
+        stored = json.loads(path.read_text())
+        assert stored["metadata"]["session_id"] == SID_A
+        # Rebinding the record to another session breaks its digest.
+        stored["metadata"]["session_id"] = SID_B
+        path.write_text(json.dumps(stored))
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            rec["vault_id"], QUOTE, session_id=SID_B
+        )
+
+    def test_other_sessions_record_fails_gate_2_check(self, tmp_path, monkeypatch):
+        """Adversarial: evidence registered for session B cited by session A."""
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        rec = EvidenceAssuranceProtocol.register_evidence(QUOTE, "op", session_id=SID_B)
+        finding = _cites(rec["vault_id"])
+        assert unverified_findings([finding], session_id=SID_A) == ["CTRL-1"]
+        assert unverified_findings([finding], session_id=SID_B) == []
+
+    def test_legacy_unbound_record_still_verifies(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        vault_id = "33333333-3333-4333-8333-333333333333"
+        (tmp_path / f"{vault_id}.json").write_text(
+            json.dumps(
+                {
+                    "vault_id": vault_id,
+                    "sha256": hashlib.sha256(QUOTE.encode()).hexdigest(),
+                    "mcp_source": "op",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "raw_payload": QUOTE,
+                    "encrypted": False,
+                }
+            )
+        )
+        assert unverified_findings([_cites(vault_id)], session_id=SID_A) == []
+
+    def test_import_record_bound_via_parameters(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        payload = "prowler summary: s3_bucket_public_access FAIL"
+        rec = EvidenceAssuranceProtocol.register_evidence(
+            payload, "import", metadata={"parameters": {"session_id": SID_B}}
+        )
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            rec["vault_id"], payload, session_id=SID_A
+        )
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            rec["vault_id"], payload, session_id=SID_B
+        )
+
+    def test_evidence_session_context_binds_records(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        with evidence_session(SID_A):
+            rec = EvidenceAssuranceProtocol.register_evidence("payload text", "op")
+        outside = EvidenceAssuranceProtocol.register_evidence("payload text", "op")
+        bound = json.loads((tmp_path / f"{rec['vault_id']}.json").read_text())
+        unbound = json.loads((tmp_path / f"{outside['vault_id']}.json").read_text())
+        assert bound["metadata"]["session_id"] == SID_A
+        assert "metadata" not in unbound
+
+    def test_flow_gate_2_check_uses_its_session(self, tmp_path, monkeypatch):
+        from swarm.audit_flow import AuditFlow
+
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        rec = EvidenceAssuranceProtocol.register_evidence(QUOTE, "op", session_id=SID_B)
+        artifact = SimpleNamespace(findings=[_cites(rec["vault_id"])])
+        flow = AuditFlow()
+        flow.session_id = SID_A
+        assert flow._evidence_rejection(2, artifact) is not None
+        flow.session_id = SID_B
+        assert flow._evidence_rejection(2, artifact) is None
+
+    def test_cached_and_loaded_flows_are_bound_to_their_session(
+        self, tmp_path, monkeypatch
+    ):
+        from api.job_store import remove_flow, set_flow
+        from swarm import session_manager
+        from swarm.audit_flow import AuditFlow
+        from swarm.state.repository import FlowRepository
+
+        monkeypatch.setattr(
+            session_manager, "SESSIONS_PATH", str(tmp_path / "sessions.json")
+        )
+        flow = AuditFlow()
+        set_flow(SID_A, flow)
+        assert flow.session_id == SID_A
+        remove_flow(SID_A)
+        session_manager.save_session(SID_A, "n", "ctx")
+        FlowRepository().save(SID_A, flow)
+        loaded = FlowRepository().load(SID_A)
+        assert loaded is not None and loaded.flow.session_id == SID_A
+
+
+class TestAtomicVaultWrite:
+    def test_failed_write_leaves_no_partial_record(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+
+        def fail_replace(*_args, **_kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("swarm.evidence.os.replace", fail_replace)
+        with pytest.raises(OSError):
+            EvidenceAssuranceProtocol.register_evidence("payload", "op")
+        assert list(tmp_path.iterdir()) == []

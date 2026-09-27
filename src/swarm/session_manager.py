@@ -15,13 +15,14 @@ Schema: {
 }
 """
 
+import hmac
 import json
 import logging
 import os
 import tempfile
 import threading
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -226,17 +227,35 @@ def get_trail_anchor(thread_id: str) -> Optional[Dict]:
     return anchor if isinstance(anchor, dict) else None
 
 
-def save_trail_anchor(thread_id: str, count: int, head_hash: str) -> bool:
-    """Record the trail head. Refuses to move the anchor backwards.
+def save_trail_anchor(thread_id: str, trail: Sequence[Mapping[str, Any]]) -> bool:
+    """Record the head of ``trail`` as the session's anchor.
 
-    The trail is append-only, so a lower count than the one recorded means
-    the trail being saved was truncated: that is logged and not recorded.
+    The anchor only moves forward along the same chain. It is refused (logged,
+    nothing written, returns False) when
+
+    * the trail's chain does not verify on its own (an entry was edited,
+      removed or reordered, or keyed entries cannot be checked here), or
+    * the trail is shorter than the anchored count (truncated), or
+    * the entry at the anchored position is not the anchored head — the
+      trail was rewritten, or cut back and extended again.
+
+    A refused anchor stays where it was, so :func:`swarm.trail.verify_trail`
+    keeps reporting ``truncated`` / ``anchor_mismatch`` for such a trail.
     Returns True when the anchor was written (or already current).
     """
+    from swarm import trail as audit_trail
+
+    count, head_hash = audit_trail.head(list(trail))
+    if not head_hash:
+        return False
     with _LOCK:
         anchors = _load_anchors()
         current = anchors.get(thread_id) or {}
-        current_count = int(current.get("count", 0) or 0)
+        try:
+            current_count = max(int(current.get("count", 0) or 0), 0)
+        except (TypeError, ValueError):
+            current_count = 0
+        current_head = str(current.get("head_hash", "") or "")
         if count < current_count:
             logger.error(
                 "Not moving trail anchor for %s back from %d to %d entries",
@@ -245,8 +264,30 @@ def save_trail_anchor(thread_id: str, count: int, head_hash: str) -> bool:
                 count,
             )
             return False
-        if count == current_count and current.get("head_hash") == head_hash:
+        if current_count and not hmac.compare_digest(
+            str(trail[current_count - 1].get("entry_hash", "") or ""), current_head
+        ):
+            logger.error(
+                "Not moving trail anchor for %s: entry %d is not the anchored "
+                "head (the trail was rewritten or cut back and extended)",
+                thread_id,
+                current_count - 1,
+            )
+            return False
+        if count == current_count:
             return True
+        check = audit_trail.verify_trail(list(trail))
+        if check["status"] in (
+            audit_trail.STATUS_BROKEN,
+            audit_trail.STATUS_KEY_UNAVAILABLE,
+        ):
+            logger.error(
+                "Not moving trail anchor for %s: the trail does not verify (%s: %s)",
+                thread_id,
+                check["status"],
+                check["detail"],
+            )
+            return False
         anchors[thread_id] = {
             "count": count,
             "head_hash": head_hash,

@@ -25,6 +25,7 @@ from swarm.audit_flow import AuditFlow
 from swarm.demo import demo_final_report
 from swarm.schema import WorkingPaperSchema
 from swarm.state.repository import FlowRepository
+from swarm.trail import append_entry, artifact_digest
 
 AUTH = {"Authorization": "Bearer test-token"}
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -306,3 +307,118 @@ class TestAccess:
     def test_unknown_session_404(self, client):
         r = client.get("/api/sessions/nope/export/racm.xlsx", headers=AUTH)
         assert r.status_code == 404
+
+
+# ── Trail verification at export ────────────────────────────────────────────
+
+ALL_EXPORTS = ["racm.xlsx", "working-papers.xlsx", "report.md", "oscal.json"]
+
+
+def _chained_session(*, cache: bool = True) -> tuple[str, AuditFlow]:
+    """A completed session whose trail is hash-chained and anchored."""
+    sid = str(uuid.uuid4())
+    flow = AuditFlow(initial_status="COMPLETED")
+    flow.state.theme = "S3"
+    flow.state.racm_plan = make_racm()
+    flow.state.working_papers = make_papers()
+    flow.state.final_report = demo_final_report("S3")
+    for i in (1, 2, 3):
+        append_entry(
+            flow.state.approval_trail,
+            {
+                "gate": f"Note {i}",
+                "human": "alice",
+                "timestamp": f"2026-01-0{i}T00:00:00+00:00",
+                "action": "note",
+            },
+        )
+    session_manager.save_session(sid, "S3 audit", "ctx")
+    FlowRepository().save(sid, flow)
+    assert session_manager.get_trail_anchor(sid)["count"] == 3
+    if cache:
+        set_flow(sid, flow)
+    else:
+        remove_flow(sid)
+    return sid, flow
+
+
+class TestTrailVerificationAtExport:
+    def test_report_states_trail_status(self, client):
+        sid, _ = _chained_session()
+        r = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH)
+        assert r.status_code == 200
+        text = r.text
+        trail_section = text.split("## Approval Trail", 1)[1]
+        assert trail_section.lstrip().startswith("> Trail verification at export: ok")
+
+    def test_legacy_trail_exports_with_its_status(self, client):
+        sid = _session("COMPLETED", papers=make_papers(), report=make_report())
+        r = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH)
+        assert r.status_code == 200
+        assert "Trail verification at export: legacy_unchained" in r.text
+
+    def test_oscal_carries_status_prop_and_stays_schema_valid(self, client):
+        from test_oscal_ar import (  # type: ignore[import-not-found]
+            _FORMATS,
+            SCHEMA_PATH,
+            _OscalValidator,
+            assert_valid,
+        )
+
+        sid, _ = _chained_session()
+        r = client.get(f"/api/sessions/{sid}/export/oscal.json", headers=AUTH)
+        assert r.status_code == 200
+        document = json.loads(r.content)
+        props = document["assessment-results"]["results"][0]["props"]
+        status = [p for p in props if p["name"] == "trail-verification-status"]
+        assert [p["value"] for p in status] == ["ok"]
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        assert_valid(_OscalValidator(schema, format_checker=_FORMATS), document)
+
+    @pytest.mark.parametrize("path", ALL_EXPORTS)
+    def test_edited_trail_entry_refuses_export(self, client, path):
+        sid, flow = _chained_session()
+        flow.state.approval_trail[1]["human"] = "mallory"
+        r = client.get(f"/api/sessions/{sid}/export/{path}", headers=AUTH)
+        assert r.status_code == 409
+        assert "broken" in r.json()["detail"]
+
+    @pytest.mark.parametrize("path", ALL_EXPORTS)
+    def test_truncated_then_extended_trail_refuses_export(self, client, path):
+        """Adversarial: drop the last entry on disk, append a fresh one, save."""
+        sid, flow = _chained_session(cache=False)
+        forged = [dict(e) for e in flow.state.approval_trail[:2]]
+        append_entry(
+            forged,
+            {
+                "gate": "Note 3",
+                "human": "mallory",
+                "timestamp": "2026-01-03T00:00:00+00:00",
+                "action": "note",
+            },
+        )
+        flow.state.approval_trail = forged
+        FlowRepository().save(sid, flow)  # must not move the anchor
+        r = client.get(f"/api/sessions/{sid}/export/{path}", headers=AUTH)
+        assert r.status_code == 409
+        assert "anchor_mismatch" in r.json()["detail"]
+
+    def test_approved_artifact_changed_refuses_export(self, client):
+        sid, flow = _chained_session()
+        append_entry(
+            flow.state.approval_trail,
+            {
+                "gate": "Gate 3 (Reporting)",
+                "human": "bob",
+                "timestamp": "2026-01-04T00:00:00+00:00",
+                "action": "gate_approval",
+                "artifact": "final_report",
+                "artifact_digest": artifact_digest(flow.state.final_report),
+            },
+        )
+        ok = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH)
+        assert ok.status_code == 200
+        flow.state.final_report = make_report()
+        r = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH)
+        assert r.status_code == 409
+        assert "artifact_changed" in r.json()["detail"]

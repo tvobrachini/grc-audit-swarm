@@ -20,6 +20,9 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 - Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
 - The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.
 
+**Fixes**
+- Trail anchor: a trail cut back and extended again no longer moves the anchor; the save is refused and verification reports `anchor_mismatch`. Exports verify the trail and return 409 for a trail that shows a change, and state the verification status in the report and OSCAL. Vault records are bound to their audit session, and the Gate 2 quote check refuses another session's record. Vault records are written atomically.
+
 ## v0.1.0 — 2026-09-27
 
 First tagged version. Summary of what the project does at this point:
