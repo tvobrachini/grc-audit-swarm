@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 
 from api.executor import get_executor
 from api.job_store import (
@@ -20,8 +21,11 @@ from api.models import (
     CreateSessionRequest,
     GenerationRunSummary,
     QAOverrideRequest,
+    RecordDecisionRequest,
     RetryPhaseRequest,
     ReturnForReworkRequest,
+    ReviewDecisionRecord,
+    ReviewDecisionsResponse,
     SessionDetail,
     SessionSummary,
     TrailVerification,
@@ -36,9 +40,17 @@ from api.scope_document import (
 )
 from swarm.audit_flow import (
     AuditFlow,
+    DecisionValidationError,
     InvalidTransitionError,
+    MissingReviewDecisionsError,
     PhaseArtifactMissingError,
     ReviewBlockedError,
+)
+from swarm.review_decisions import (
+    DecisionContext,
+    EffectiveView,
+    decision_states,
+    effective_view,
 )
 from swarm.session_manager import (
     delete_session,
@@ -48,7 +60,12 @@ from swarm.session_manager import (
     save_session,
 )
 from swarm.trail import verify_trail
-from swarm.schema import FinalReportSchema, RiskControlMatrixSchema, WorkingPaperSchema
+from swarm.schema import (
+    FinalReportSchema,
+    ReviewDecision,
+    RiskControlMatrixSchema,
+    WorkingPaperSchema,
+)
 from swarm.state.repository import FlowRepository
 
 logger = logging.getLogger(__name__)
@@ -165,8 +182,74 @@ def _snapshot_verification(
                 f: snapshot.get(f)
                 for f in ("racm_plan", "working_papers", "final_report")
             },
+            decisions=snapshot.get("review_decisions") or [],
         )
     )
+
+
+def _decision_records(
+    decisions: list[ReviewDecision], states: dict[str, str]
+) -> list[ReviewDecisionRecord]:
+    return [
+        ReviewDecisionRecord(
+            **d.model_dump(mode="json"), state=states.get(d.decision_id, "active")
+        )
+        for d in decisions
+    ]
+
+
+def _flow_review(
+    flow: AuditFlow,
+) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView]]:
+    return (
+        _decision_records(flow.state.review_decisions, flow.decision_states()),
+        flow.effective_view(),
+    )
+
+
+def _typed(schema: type, raw: Any) -> Any:
+    if raw is None:
+        return None
+    try:
+        return schema.model_validate(raw)
+    except Exception:
+        return None
+
+
+def _snapshot_review(
+    snapshot: dict[str, Any],
+) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView], bool]:
+    """Decisions and effective view from a persisted snapshot.
+
+    Tolerant of a snapshot from before decisions existed (no decisions, an
+    effective view of the drafts). A decision that no longer validates is
+    skipped rather than 500ing the session detail.
+    """
+    decisions: list[ReviewDecision] = []
+    for raw in snapshot.get("review_decisions") or []:
+        try:
+            decisions.append(ReviewDecision.model_validate(raw))
+        except Exception:
+            logger.warning("Skipping unparseable review decision: %r", raw)
+    required = bool(snapshot.get("review_decisions_required")) or any(
+        e.get("action") == "audit_created"
+        and e.get("review_decisions_required") == "true"
+        for e in snapshot.get("approval_trail") or []
+    )
+    ctx = DecisionContext(
+        racm=_typed(RiskControlMatrixSchema, snapshot.get("racm_plan")),
+        papers=_typed(WorkingPaperSchema, snapshot.get("working_papers")),
+        report=_typed(FinalReportSchema, snapshot.get("final_report")),
+    )
+    try:
+        states = dict(decision_states(ctx, decisions))
+        view: Optional[EffectiveView] = effective_view(
+            ctx, decisions, decisions_required=required
+        )
+    except Exception:
+        logger.exception("Effective view could not be built from the snapshot")
+        states, view = {}, None
+    return _decision_records(decisions, states), view, required
 
 
 def _snapshot_generation_runs(snapshot: dict[str, Any]) -> list[GenerationRunSummary]:
@@ -188,6 +271,7 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
     if flow:
         s = flow.state
         status = s.status
+        records, view = _flow_review(flow)
         return SessionDetail(
             session_id=session_id,
             name=data.get("name", session_id),
@@ -211,10 +295,14 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
             generation_runs=[
                 GenerationRunSummary(**r.model_dump()) for r in s.generation_runs
             ],
+            review_decisions=records,
+            effective=view,
+            review_decisions_required=flow.review_decisions_required(),
         )
     # flow not in memory — return stored snapshot
     snapshot = data.get("state_snapshot", {})
     status = snapshot.get("status", "WAITING_FOR_SCOPE")
+    records, view, required = _snapshot_review(snapshot)
     return SessionDetail(
         session_id=session_id,
         name=data.get("name", session_id),
@@ -240,6 +328,9 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
         prepared_by=_prepared_by(data, None),
         trail_verification=_snapshot_verification(session_id, snapshot),
         generation_runs=_snapshot_generation_runs(snapshot),
+        review_decisions=records,
+        effective=view,
+        review_decisions_required=required,
     )
 
 
@@ -364,7 +455,9 @@ def _create_and_launch(
     flow.state.business_context = business_context
     flow.state.frameworks = frameworks
     try:
-        flow.record_preparer(prepared_by)
+        # Audits created through the API require reviewer decisions at
+        # Gates 2 and 3 (ADR-011).
+        flow.record_preparer(prepared_by, require_review_decisions=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -534,6 +627,16 @@ def approve_gate(session_id: str, req: ApproveGateRequest) -> SessionSummary:
             approve(req.human_id)
         except InvalidTransitionError as exc:
             raise _conflict(f"approve gate {req.gate_number}", flow, exc) from exc
+        except MissingReviewDecisionsError as exc:
+            # detail stays a string for existing clients; the structured
+            # list is alongside it.
+            return JSONResponse(  # type: ignore[return-value]
+                status_code=409,
+                content={
+                    "detail": f"Cannot approve gate {req.gate_number}: {exc}",
+                    "missing_decisions": exc.missing,
+                },
+            )
         except (ReviewBlockedError, PhaseArtifactMissingError) as exc:
             raise _blocked(f"approve gate {req.gate_number}", exc) from exc
         except ValueError as exc:
@@ -625,6 +728,59 @@ def return_for_rework(session_id: str, req: ReturnForReworkRequest) -> SessionSu
         next_status = flow.state.status
 
     return _summary(session_id, data, next_status)
+
+
+@router.post(
+    "/{session_id}/decisions", response_model=ReviewDecisionRecord, status_code=201
+)
+def record_decision(
+    session_id: str, req: RecordDecisionRequest
+) -> ReviewDecisionRecord:
+    """Append one reviewer decision (append-only; see DECISIONS.md, ADR-011).
+
+    The AI drafts are not changed: the decision is added to the session's
+    ``review_decisions`` and stamped in the approval trail, and the effective
+    view (``GET /sessions/{id}`` → ``effective``) renders it.
+
+    409: the decision cannot be recorded in the current status, the
+    preparer may not record this type, a conclusion change needs rework, or
+    the subject already has an active decision (correct it with
+    ``supersedes``) / the superseded decision is not the active one.
+    422: unknown decision type or subject, invalid values, a required
+    rationale is missing.
+    """
+    _require_session(session_id)
+    with session_lock(session_id):
+        flow = _require_flow(session_id)
+        try:
+            decision = flow.record_decision(
+                decision_type=req.decision_type,
+                subject_id=req.subject_id,
+                subject_type=req.subject_type,
+                values=req.values,
+                rationale=req.rationale,
+                decided_by=req.decided_by,
+                supersedes=req.supersedes,
+            )
+        except DecisionValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ReviewBlockedError as exc:
+            raise _blocked(f"record a {req.decision_type} decision", exc) from exc
+        _repo.save(session_id, flow)
+    return ReviewDecisionRecord(**decision.model_dump(mode="json"), state="active")
+
+
+@router.get("/{session_id}/decisions", response_model=ReviewDecisionsResponse)
+def list_decisions(session_id: str) -> ReviewDecisionsResponse:
+    """Every reviewer decision on the session, oldest first, with its state
+    (active / superseded / stale), and the effective view."""
+    data = _require_session(session_id)
+    flow = get_flow(session_id)
+    if flow is not None:
+        records, view = _flow_review(flow)
+    else:
+        records, view, _ = _snapshot_review(data.get("state_snapshot") or {})
+    return ReviewDecisionsResponse(decisions=records, effective=view)
 
 
 @router.get("/{session_id}/trail/verify", response_model=TrailVerification)

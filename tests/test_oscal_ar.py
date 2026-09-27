@@ -26,6 +26,7 @@ from jsonschema import Draft7Validator, FormatChecker, ValidationError, validato
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from flow_builders import make_racm  # type: ignore[import-not-found]
+from review_helpers import record_demo_decisions  # type: ignore[import-not-found]
 from api.exports import ExportContext, oscal_json
 from api.job_store import remove_flow, set_flow
 from swarm import session_manager
@@ -673,6 +674,8 @@ def test_demo_session_export_validates(demo_client, validator):
         path = f"/api/sessions/{sid}/export/oscal.json"
         assert c.get(path, headers=AUTH).status_code == 404  # no report yet
         for gate, who in ((1, "alice"), (2, "bob")):
+            if gate == 2:
+                record_demo_decisions(c, sid, "gate2", who, AUTH)
             r = c.patch(
                 f"/api/sessions/{sid}/approve",
                 headers=AUTH,
@@ -682,6 +685,7 @@ def test_demo_session_export_validates(demo_client, validator):
         draft = c.get(path, headers=AUTH)
         assert draft.status_code == 200
         assert_valid(validator, draft.json())
+        record_demo_decisions(c, sid, "gate3", "carol", AUTH)
         r = c.patch(
             f"/api/sessions/{sid}/approve",
             headers=AUTH,
@@ -726,3 +730,154 @@ def test_committed_sample_validates(validator):
     doc = json.loads(sample.read_text(encoding="utf-8"))
     assert_valid(validator, doc)
     assert _ar(doc)["metadata"]["oscal-version"] == OSCAL_VERSION
+
+
+# ── Reviewer decisions (ADR-011) ─────────────────────────────────────────────
+
+
+def _props_of(element) -> dict:
+    return {p["name"]: p["value"] for p in element.get("props", [])}
+
+
+def test_reviewer_decisions_render_as_conclusion_of_record(demo_client, validator):
+    c = demo_client
+    r = c.post(
+        "/api/sessions",
+        headers=AUTH,
+        json={
+            "theme": "S3 exposure",
+            "business_context": "Fintech",
+            "prepared_by": "Pat",
+        },
+    )
+    sid = r.json()["session_id"]
+    try:
+        for gate, who in ((1, "alice"), (2, "bob"), (3, "carol")):
+            if gate > 1:
+                record_demo_decisions(c, sid, f"gate{gate}", who, AUTH)
+            r = c.patch(
+                f"/api/sessions/{sid}/approve",
+                headers=AUTH,
+                json={"gate_number": gate, "human_id": who},
+            )
+            assert r.status_code == 200, r.text
+        record_demo_decisions(c, sid, "after_issue", "Pat", AUTH)
+        doc = c.get(f"/api/sessions/{sid}/export/oscal.json", headers=AUTH).json()
+        assert_valid(validator, doc)
+        ar = _ar(doc)
+        result = ar["results"][0]
+
+        [risk] = result["risks"]
+        props = _props_of(risk)
+        assert props["classification"] == "High"
+        assert props["classification-source"] == "reviewer"
+        assert props["classification-state"] == "reviewer-decision"
+        assert props["ai-draft-classification"] == "Medium"
+        assert props["ai-draft-magnitude"] == "Medium"
+        assert props["decided-by"] == "carol"
+        assert props["identity-source"] == "declared"
+        assert "AI draft: Medium" in risk["description"]
+        assert "Criteria:" in risk["description"]
+        lifecycles = [x["lifecycle"] for x in risk["remediations"]]
+        assert lifecycles == ["recommendation", "planned"]
+        assert risk["deadline"].startswith("2026-12-31")
+        log = risk["risk-log"]["entries"][0]
+        assert "transcribed by Pat" in log["description"]
+        assert any(a["type"] == "party" for o in risk["origins"] for a in o["actors"])
+
+        by_control = {_props_of(o)["control-id"]: o for o in result["observations"]}
+        assert _props_of(by_control["CTRL-02"])["reviewer-sign-off"] == "signed-off"
+        assert _props_of(by_control["CTRL-02"])["reviewed-by"] == "bob"
+        assert _props_of(by_control["CTRL-03"])["scope-limitation"] == "true"
+        for finding in result["findings"]:
+            assert _props_of(finding)["reviewer-sign-off"] == "signed-off"
+
+        [attestation] = result["attestations"]
+        assert attestation["parts"][0]["name"] == "engagement-conclusion"
+        assert "Needs improvement" in attestation["parts"][0]["title"]
+        assert _props_of(result)["engagement-conclusion"] == "Needs improvement"
+
+        decision_logs = [
+            e
+            for e in result["assessment-log"]["entries"]
+            if _props_of(e).get("trail-action") == "review_decision"
+        ]
+        assert decision_logs and all(
+            "decision-digest" in _props_of(e) for e in decision_logs
+        )
+        roles = {r["id"] for r in ar["metadata"]["roles"]}
+        assert "reviewer" in roles
+    finally:
+        remove_flow(sid)
+
+
+def test_withdrawn_conclusion_and_disagreement(monkeypatch, validator):
+    monkeypatch.setenv("DEMO_MODE", "1")
+    monkeypatch.setenv("DEMO_STEP_DELAY", "0")
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("DEMO_QA_REJECT_PHASE", raising=False)
+    flow = AuditFlow()
+    flow.state.theme = "S3 exposure"
+    flow.record_preparer("Pat", require_review_decisions=True)
+    flow.begin_phase_1()
+    flow.generate_planning()
+    flow.begin_phase_2("alice")
+    flow.generate_fieldwork()
+    flow.record_decision(
+        decision_type="challenge",
+        subject_id="CTRL-01",
+        decided_by="bob",
+        values={"tod_conclusion": "Not tested"},
+        rationale="The read predates the period.",
+    )
+    for control in ("CTRL-02", "CTRL-03"):
+        flow.record_decision(
+            decision_type="sign_off", subject_id=control, decided_by="bob"
+        )
+    flow.begin_phase_3("bob")
+    flow.generate_reporting()
+    flow.record_decision(
+        decision_type="management_response",
+        subject_id="DEF-01",
+        decided_by="Pat",
+        values={
+            "text": "The bucket is meant to be public.",
+            "agreement": "disagree",
+            "received_from": "CISO",
+            "received_on": "2026-10-01",
+        },
+        rationale="It holds customer exports.",
+    )
+    state = flow.state
+    assert state.final_report is not None and state.working_papers is not None
+    doc = json.loads(
+        oscal_json(
+            state.final_report,
+            state.working_papers,
+            state.racm_plan,
+            state.approval_trail,
+            ExportContext(SID, "Demo", state.status),
+            theme=state.theme,
+            prepared_by=state.prepared_by,
+            view=flow.effective_view(),
+            decisions=state.review_decisions,
+        )
+    )
+    assert_valid(validator, doc)
+    result = _ar(doc)["results"][0]
+    obs = {_props_of(o)["control-id"]: o for o in result["observations"]}
+    ctrl1 = _props_of(obs["CTRL-01"])
+    assert ctrl1["tod-conclusion"] == "Not tested"
+    assert ctrl1["ai-draft-tod-conclusion"] == "Effective"
+    assert ctrl1["reviewer-sign-off"] == "challenged"
+    assert "Reviewer challenge by bob" in obs["CTRL-01"]["remarks"]
+    # Withdrawn to "Not tested": no satisfied finding is claimed for CTRL-01.
+    assert [f["target"]["target-id"] for f in result["findings"]] == ["CTRL-02"]
+    [risk] = result["risks"]
+    assert _props_of(risk)["classification-source"] == "ai-draft"
+    assert "remediations" not in risk  # no action plan when management disagrees
+    assert (
+        "Auditor's rebuttal: It holds customer exports."
+        in (risk["risk-log"]["entries"][0]["description"])
+    )
+    assert "attestations" not in result

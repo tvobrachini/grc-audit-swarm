@@ -22,9 +22,21 @@ Mapping (see DECISIONS.md, ADR-005):
   ``observations`` (one per working-paper finding; ToD / ToE conclusions as
   namespaced props; evidence as back-matter resources),
   ``findings`` (one per *tested* control: satisfied / not-satisfied),
-  ``risks`` (one per proposed deficiency evaluation, classification as a
-  namespaced prop, marked as a draft until Gate 3 approval),
-  ``assessment-log`` (the approval trail, entry by entry).
+  ``risks`` (one per deficiency evaluation; the classification prop is the
+  conclusion of record — the reviewer's ``classify`` decision with
+  ``decided-by`` / ``decided-at`` / ``identity-source`` props, or the AI
+  draft marked as such — and the AI draft is always kept in
+  ``ai-draft-classification``; the reviewer's five-part write-up and
+  recommendation, and management's response as a planned remediation, a
+  deadline and a risk-log entry),
+  ``attestations`` (the reviewer's engagement conclusion),
+  ``assessment-log`` (the approval trail, entry by entry, including each
+  reviewer decision's id and digest).
+
+Observations and findings carry the reviewer's per-finding sign-off status
+(``reviewer-sign-off``, ``reviewed-by``) and use the conclusions of record; a
+conclusion a reviewer withdrew keeps the draft in an ``ai-draft-*`` prop
+(ADR-011).
 
 All UUIDs are version-5 UUIDs derived from the session ID and the element, so
 exporting the same session twice gives the same document.
@@ -40,6 +52,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
 
+from swarm.review_decisions import DecisionRef, EffectiveView, FindingView
 from swarm.schema import (
     AuditFindingSchema,
     DesignConclusion,
@@ -217,11 +230,11 @@ def _llm_narratives(report: FinalReportSchema) -> dict[str, str]:
     return out
 
 
-def _methods(f: AuditFindingSchema) -> list[str]:
+def _methods(tod: str, toe: str) -> list[str]:
     methods = []
-    if f.tod_conclusion != DesignConclusion.NOT_TESTED:
+    if tod != DesignConclusion.NOT_TESTED:
         methods.append(_METHOD_DESIGN)
-    if f.toe_conclusion != OperatingConclusion.NOT_TESTED:
+    if toe != OperatingConclusion.NOT_TESTED:
         methods.append(_METHOD_OPERATING)
     # Not tested at all: the auditor examined what evidence was available and
     # found none covering the control (recorded as a scope limitation).
@@ -243,17 +256,48 @@ def build_assessment_results(
     markup: Callable[[str], str] = lambda s: s,
     verify_quote: Optional[Callable[[str, str], bool]] = None,
     evidence_lookup: Callable[[str], Optional[EvidenceMeta]] = vault_metadata,
+    view: Optional[EffectiveView] = None,
+    decisions: Sequence[Any] = (),
 ) -> dict:
     """Build the OSCAL AR document (a JSON-ready dict).
 
     ``markup`` is applied to every Markdown (markup-line / markup-multiline)
     field; the API passes its image-stripping sanitiser. ``verify_quote``
     re-checks each cited quote against the vault, as the working-papers
-    export does.
+    export does. ``view`` is the session's effective view (AI drafts plus
+    active reviewer decisions); ``decisions`` are all recorded decisions,
+    folded into the document version.
     """
     sid = session_id
     approved = session_status == "COMPLETED"
     parties = _Parties(sid)
+    reviewers: list[str] = []
+
+    def _decided_props(ref: Optional[DecisionRef], prefix: str = "") -> list[dict]:
+        if ref is None:
+            return []
+        reviewers.append(_line(ref.decided_by))
+        return _props(
+            (f"{prefix}decided-by", ref.decided_by),
+            (f"{prefix}decided-at", oscal_datetime(ref.decided_at) or ""),
+            (f"{prefix}identity-source", ref.identity_source),
+            (f"{prefix}decision-id", ref.decision_id),
+        )
+
+    def _reviewer_origin(ref: Optional[DecisionRef]) -> list[dict]:
+        if ref is None:
+            return []
+        return [
+            {
+                "actors": [
+                    {
+                        "type": "party",
+                        "actor-uuid": parties.uuid_for(ref.decided_by),
+                        "role-id": "reviewer",
+                    }
+                ]
+            }
+        ]
 
     # ── Timestamps from recorded facts, never the clock ──────────────────────
     trail_times = [oscal_datetime(e.get("timestamp")) for e in trail]
@@ -385,44 +429,175 @@ def build_assessment_results(
         risk_uuid = element_uuid(
             sid, "risk", f"{e.deficiency_id}#{seen_def[e.deficiency_id]}"
         )
-        state = (
-            "Proposed by the reporting crew and approved with the report at "
-            "Gate 3; see the assessment log."
-            if approved
-            else "DRAFT proposed by the reporting crew for the auditor's "
-            "judgement at Gate 3 — not a final conclusion."
-        )
-        related_obs = [u for c in e.related_findings for u in obs_by_control.get(c, [])]
-        for c in e.related_findings:
-            risks_by_control.setdefault(c, []).append(risk_uuid)
-        risk = {
-            "uuid": risk_uuid,
-            "title": markup(_line(e.title) or e.deficiency_id),
-            "description": markup(
-                f"{state}\n\nFindings evaluated together: "
-                f"{', '.join(e.related_findings)}. RACM risks affected: "
-                f"{', '.join(e.related_risks) or 'none listed'}.\n\n"
-                f"Compensating controls considered: {e.compensating_controls}"
-            ),
-            "statement": markup(
+        dv = view.deficiency(e.deficiency_id) if view else None
+        ref = dv.classification_decision if dv else None
+        classification = dv.effective.classification if dv else str(e.classification)
+        likelihood = dv.effective.likelihood if dv else str(e.likelihood)
+        magnitude = dv.effective.magnitude if dv else str(e.magnitude)
+        if ref is not None:
+            state = (
+                f"Classification of record: decided by {_line(ref.decided_by)} "
+                f"({ref.identity_source} identity) on {_line(ref.decided_at)[:10]}"
+                + (
+                    "; the report was approved at Gate 3."
+                    if approved
+                    else "; the report awaits Gate 3 approval."
+                )
+            )
+            if dv is not None and dv.differs_from_draft:
+                state += (
+                    f" AI draft: {e.classification} (likelihood {e.likelihood}, "
+                    f"magnitude {e.magnitude})."
+                )
+            statement = (
+                f"Likelihood {likelihood}, magnitude {magnitude}. Classification "
+                f"of record: {classification} ({scale or 'scale not stated'}), "
+                f"reviewer decision. Reviewer rationale: "
+                f"{ref.rationale or 'agrees with the AI draft.'} AI draft "
+                f"({e.classification}) rationale: {e.rationale}"
+            )
+            classification_state = "reviewer-decision"
+        else:
+            state = (
+                "Proposed by the reporting crew and approved with the report at "
+                "Gate 3; see the assessment log."
+                if approved
+                else "DRAFT proposed by the reporting crew for the auditor's "
+                "judgement at Gate 3 — not a final conclusion."
+            )
+            statement = (
                 f"Likelihood {e.likelihood}, magnitude {e.magnitude}. "
                 f"Proposed classification: {e.classification} ({scale or 'scale not stated'}). "
                 f"Rationale: {e.rationale}"
-            ),
-            "props": _props(
-                ("deficiency-id", e.deficiency_id),
-                ("classification", e.classification),
-                ("deficiency-scale", scale),
-                (
-                    "classification-state",
-                    "approved-with-report" if approved else "draft",
-                ),
-                ("likelihood", e.likelihood),
-                ("magnitude", e.magnitude),
             )
+            classification_state = "approved-with-report" if approved else "draft"
+        related_obs = [u for c in e.related_findings for u in obs_by_control.get(c, [])]
+        for c in e.related_findings:
+            risks_by_control.setdefault(c, []).append(risk_uuid)
+        description = (
+            f"{state}\n\nFindings evaluated together: "
+            f"{', '.join(e.related_findings)}. RACM risks affected: "
+            f"{', '.join(e.related_risks) or 'none listed'}.\n\n"
+            f"Compensating controls considered: {e.compensating_controls}"
+        )
+        writeup = dv.writeup if dv else None
+        if writeup is not None:
+            parts = "\n".join(
+                f"- {k.capitalize()}: {_line(writeup.values.get(k))}"
+                for k in ("criteria", "condition", "cause", "effect")
+            )
+            description += (
+                f"\n\nFinding write-up by {_line(writeup.decided_by)} "
+                f"({writeup.identity_source} identity):\n\n{parts}"
+            )
+        props = _props(
+            ("deficiency-id", e.deficiency_id),
+            ("classification", classification),
+            ("deficiency-scale", scale),
+            ("classification-state", classification_state),
+            ("likelihood", likelihood),
+            ("magnitude", magnitude),
+        )
+        if dv is not None:
+            props += _props(
+                (
+                    "classification-source",
+                    "reviewer" if ref is not None else "ai-draft",
+                ),
+                ("ai-draft-classification", e.classification),
+            )
+            if dv.differs_from_draft:
+                props += _props(
+                    ("ai-draft-likelihood", e.likelihood),
+                    ("ai-draft-magnitude", e.magnitude),
+                )
+            props += _decided_props(ref)
+        risk: dict[str, Any] = {
+            "uuid": risk_uuid,
+            "title": markup(_line(e.title) or e.deficiency_id),
+            "description": markup(description),
+            "statement": markup(statement),
+            "props": props
             + [_prop("racm-risk-id", r) for r in e.related_risks if _line(r)],
             "status": "open",
         }
+        if dv is not None:
+            risk["origins"] = [
+                {
+                    "actors": [
+                        {"type": "assessment-platform", "actor-uuid": platform_uuid}
+                    ]
+                }
+            ] + _reviewer_origin(ref)
+        response = dv.management_response if dv else None
+        if response is not None and response.values.get("target_date"):
+            deadline = oscal_datetime(response.values["target_date"])
+            if deadline:
+                risk["deadline"] = deadline
+        remediations: list[dict] = []
+        if writeup is not None and _line(writeup.values.get("recommendation")):
+            remediations.append(
+                {
+                    "uuid": element_uuid(sid, "recommendation", risk_uuid),
+                    "lifecycle": "recommendation",
+                    "title": markup("Auditor's recommendation"),
+                    "description": markup(writeup.values["recommendation"]),
+                    "props": _decided_props(writeup),
+                    "origins": _reviewer_origin(writeup),
+                }
+            )
+        if response is not None:
+            v = response.values
+            response_props = _props(
+                ("management-agreement", v.get("agreement")),
+                ("action-owner-role", v.get("action_owner_role")),
+                ("target-date", v.get("target_date")),
+                ("received-from", v.get("received_from")),
+                ("received-on", v.get("received_on")),
+            ) + _props(
+                ("transcribed-by", response.decided_by),
+                ("transcribed-at", oscal_datetime(response.decided_at) or ""),
+                ("identity-source", response.identity_source),
+                ("decision-id", response.decision_id),
+            )
+            if v.get("agreement") in ("agree", "partial"):
+                remediations.append(
+                    {
+                        "uuid": element_uuid(sid, "action-plan", risk_uuid),
+                        "lifecycle": "planned",
+                        "title": markup("Management action plan"),
+                        "description": markup(v.get("text", "")),
+                        "props": response_props,
+                    }
+                )
+            log_description = (
+                f"Management response ({v.get('agreement')}), received from "
+                f"{_line(v.get('received_from'))} on {_line(v.get('received_on'))} "
+                f"and transcribed by {_line(response.decided_by)} "
+                f"({response.identity_source} identity):\n\n{v.get('text', '')}"
+            )
+            if response.rationale:
+                log_description += (
+                    f"\n\nAuditor's {'rebuttal' if v.get('agreement') == 'disagree' else 'note'}: "
+                    f"{response.rationale}"
+                )
+            risk["risk-log"] = {
+                "entries": [
+                    {
+                        "uuid": element_uuid(sid, "management-response", risk_uuid),
+                        "title": markup("Management response"),
+                        "description": markup(log_description),
+                        "start": oscal_datetime(v.get("received_on"))
+                        or oscal_datetime(response.decided_at)
+                        or last_modified,
+                        "props": response_props,
+                    }
+                ]
+            }
+        if remediations:
+            risk["remediations"] = [
+                {k: val for k, val in r.items() if val} for r in remediations
+            ]
         if related_obs:
             risk["related-observations"] = [
                 {"observation-uuid": u} for u in dict.fromkeys(related_obs)
@@ -442,20 +617,66 @@ def build_assessment_results(
             or (evidence_times[-1] if evidence_times else None)
             or last_modified
         )
+        fv: Optional[FindingView] = view.finding(f.control_id) if view else None
+        tod = fv.effective.tod_conclusion if fv else str(f.tod_conclusion)
+        toe = fv.effective.toe_conclusion if fv else str(f.toe_conclusion)
+        result_of_record = fv.effective.result if fv else str(f.result)
+        preliminary = (
+            fv.effective.preliminary_deficiency if fv else f.preliminary_deficiency
+        )
         props = _props(
             ("control-id", f.control_id),
-            ("tod-conclusion", f.tod_conclusion),
-            ("toe-conclusion", f.toe_conclusion),
-            ("result", f.result),
+            ("tod-conclusion", tod),
+            ("toe-conclusion", toe),
+            ("result", result_of_record),
             ("items-tested", f.items_tested),
             ("exceptions-noted", f.exceptions_noted),
-            ("preliminary-deficiency", _yes_no(f.preliminary_deficiency)),
+            ("preliminary-deficiency", _yes_no(preliminary)),
             ("legacy-severity", f.legacy_severity),
         )
+        review_props: list[dict] = []
+        if fv is not None:
+            if fv.differs_from_draft:
+                props += _props(
+                    ("ai-draft-tod-conclusion", f.tod_conclusion),
+                    ("ai-draft-toe-conclusion", f.toe_conclusion),
+                    ("ai-draft-result", f.result),
+                )
+            review_props = _props(
+                ("reviewer-sign-off", fv.review_status.replace("_", "-"))
+            )
+            if fv.review is not None:
+                review_props += _props(
+                    ("reviewed-by", fv.review.decided_by),
+                    ("reviewed-at", oscal_datetime(fv.review.decided_at) or ""),
+                    ("reviewer-identity-source", fv.review.identity_source),
+                )
+                reviewers.append(_line(fv.review.decided_by))
+            if fv.scope_limitation is not None:
+                review_props += _props(("scope-limitation", "true"))
+                reviewers.append(_line(fv.scope_limitation.decided_by))
+            props += review_props
         remarks = []
+        if fv is not None and fv.review is not None and fv.review.rationale:
+            label = (
+                "Reviewer challenge"
+                if fv.review_status == "challenged"
+                else "Reviewer sign-off"
+            )
+            remarks.append(
+                f"{label} by {_line(fv.review.decided_by)} "
+                f"({fv.review.identity_source} identity): {fv.review.rationale}"
+            )
+        if fv is not None and fv.scope_limitation is not None:
+            remarks.append(
+                "Reported as a scope limitation by "
+                f"{_line(fv.scope_limitation.decided_by)} "
+                f"({fv.scope_limitation.identity_source} identity): "
+                f"{fv.scope_limitation.rationale}"
+            )
         if _line(f.toe_basis):
             remarks.append(f"Basis for the ToE conclusion: {f.toe_basis}")
-        if f.result == FindingResult.NOT_TESTED:
+        if result_of_record == FindingResult.NOT_TESTED:
             remarks.append(
                 "Not tested: no evidence covered this control. OSCAL finding "
                 "targets are only 'satisfied' or 'not-satisfied', so this "
@@ -467,13 +688,10 @@ def build_assessment_results(
             )
         obs: dict[str, Any] = {
             "uuid": o_uuid,
-            "title": markup(
-                f"{_line(f.control_id)} — ToD {f.tod_conclusion}; "
-                f"ToE {f.toe_conclusion}"
-            ),
+            "title": markup(f"{_line(f.control_id)} — ToD {tod}; ToE {toe}"),
             "description": markup(f.test_conclusion),
             "props": props,
-            "methods": _methods(f),
+            "methods": _methods(tod, toe),
             "types": ["control-objective"],
             "origins": [
                 {
@@ -510,26 +728,27 @@ def build_assessment_results(
             obs["remarks"] = markup("\n\n".join(remarks))
         observations.append(obs)
 
-        if f.result == FindingResult.NOT_TESTED or f.result is None:
+        if result_of_record in (FindingResult.NOT_TESTED, "None", ""):
             continue
-        satisfied = f.result == FindingResult.NO_EXCEPTION
+        satisfied = result_of_record == FindingResult.NO_EXCEPTION
         status: dict[str, Any] = {
             "state": "satisfied" if satisfied else "not-satisfied",
             "reason": "pass" if satisfied else "fail",
         }
-        if satisfied and f.toe_conclusion == OperatingConclusion.NOT_TESTED:
+        if satisfied and toe == OperatingConclusion.NOT_TESTED:
             status["remarks"] = markup(
                 "Design and implementation only: operating effectiveness over "
                 "the period was not tested."
             )
         finding: dict[str, Any] = {
             "uuid": element_uuid(sid, "finding", key),
-            "title": markup(f"{_line(f.control_id)}: {f.result}"),
+            "title": markup(f"{_line(f.control_id)}: {result_of_record}"),
             "description": markup(f.test_conclusion),
             "props": _props(
-                ("result", f.result),
-                ("preliminary-deficiency", _yes_no(f.preliminary_deficiency)),
-            ),
+                ("result", result_of_record),
+                ("preliminary-deficiency", _yes_no(preliminary)),
+            )
+            + review_props,
             "target": {
                 "type": "objective-id",
                 "target-id": token(f.control_id),
@@ -586,6 +805,12 @@ def build_assessment_results(
                 ("trail-hash-alg", e.get("hash_alg")),
                 ("trail-entry-hash", e.get("entry_hash")),
                 ("trail-prev-hash", e.get("prev_hash")),
+                ("decision-id", e.get("decision_id")),
+                ("decision-digest", e.get("decision_digest")),
+                ("decision-type", e.get("decision_type")),
+                ("decision-subject", e.get("subject")),
+                ("supersedes-decision", e.get("supersedes")),
+                ("decisions-digest", e.get("decisions_digest")),
             ),
         }
         details = [
@@ -629,9 +854,21 @@ def build_assessment_results(
         gate_approvers,
     )
     _role("content-approver", "Report approver (Gate 3)", report_approvers)
+    conclusion = view.engagement_conclusion if view else None
+    if conclusion is not None:
+        reviewers.append(_line(conclusion.decided_by))
+    _role(
+        "reviewer",
+        "Recorded reviewer decisions (or transcribed a management response)",
+        reviewers,
+    )
 
     # ── Result ───────────────────────────────────────────────────────────────
     result_props = _props(("deficiency-scale", scale))
+    if conclusion is not None:
+        result_props += _props(
+            ("engagement-conclusion", conclusion.values.get("conclusion"))
+        ) + _decided_props(conclusion, "engagement-conclusion-")
     result: dict[str, Any] = {
         "uuid": element_uuid(sid, "result"),
         "title": markup(f"Audit results — {_line(theme) or _line(session_name)}"),
@@ -646,6 +883,37 @@ def build_assessment_results(
         result["props"] = result_props
     result["local-definitions"] = local_definitions
     result["reviewed-controls"] = reviewed_controls
+    if conclusion is not None:
+        result["attestations"] = [
+            {
+                "responsible-parties": [
+                    {
+                        "role-id": "reviewer",
+                        "party-uuids": [parties.uuid_for(conclusion.decided_by)],
+                    }
+                ],
+                "parts": [
+                    {
+                        "uuid": element_uuid(sid, "engagement-conclusion"),
+                        "name": "engagement-conclusion",
+                        "ns": PROJECT_NS,
+                        "title": markup(
+                            "Engagement conclusion: "
+                            + _line(conclusion.values.get("conclusion"))
+                        ),
+                        "props": _decided_props(conclusion),
+                        "prose": markup(
+                            f"{conclusion.values.get('conclusion')} — the "
+                            f"reviewer's conclusion on the engagement, recorded "
+                            f"by {_line(conclusion.decided_by)} "
+                            f"({conclusion.identity_source} identity) on "
+                            f"{_line(conclusion.decided_at)[:10]}.\n\n"
+                            f"{conclusion.rationale}"
+                        ),
+                    }
+                ],
+            }
+        ]
     if log_entries:
         result["assessment-log"] = {"entries": log_entries}
     result["observations"] = observations
@@ -660,6 +928,14 @@ def build_assessment_results(
         f"and deficiency classifications are props in the namespace {PROJECT_NS}. "
         "Methods: EXAMINE marks a design and implementation conclusion, TEST an "
         "operating-effectiveness conclusion over the period."
+        + (
+            " Reviewer decisions: each risk's classification prop is the "
+            "conclusion of record (classification-source says whether it is the "
+            "reviewer's decision or the AI draft; ai-draft-classification keeps "
+            "the draft); observations and findings carry reviewer-sign-off."
+            if view is not None
+            else ""
+        )
     )
 
     # ── Metadata ─────────────────────────────────────────────────────────────
@@ -667,7 +943,18 @@ def build_assessment_results(
     metadata: dict[str, Any] = {
         "title": markup(title or f"Audit results — {_line(session_name)}"),
         "last-modified": last_modified,
-        "version": "sha256-" + _digest([report, papers, racm])[:16],
+        "version": "sha256-"
+        + _digest(
+            [report, papers, racm]
+            + (
+                [
+                    d.model_dump(mode="json") if hasattr(d, "model_dump") else d
+                    for d in decisions
+                ]
+                if decisions
+                else []
+            )
+        )[:16],
         "oscal-version": OSCAL_VERSION,
         "props": _props(
             ("session-id", sid),

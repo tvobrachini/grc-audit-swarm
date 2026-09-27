@@ -29,6 +29,7 @@ from swarm.demo import (
     demo_racm,
     demo_working_papers,
 )
+from review_helpers import record_demo_decisions  # type: ignore[import-not-found]
 from swarm.schema import (
     ControlNature,
     DeficiencyClassification,
@@ -384,26 +385,37 @@ def test_api_demo_run_end_to_end(client):
         assert types.count("agent_step") == 5
         assert types[-1] == "complete"
 
+        assert detail["review_decisions_required"] is True
         for gate, approver, expected in (
             (1, "alice", "WAITING_HUMAN_GATE_2"),
             (2, "bob", "WAITING_HUMAN_GATE_3"),
             (3, "carol", "COMPLETED"),
         ):
-            r = client.patch(
-                f"/api/sessions/{sid}/approve",
-                headers=AUTH,
-                json={"gate_number": gate, "human_id": approver},
-            )
+            approve = {"gate_number": gate, "human_id": approver}
+            if gate > 1:
+                # The demo never decides for the reviewer: the gate waits.
+                r = client.patch(
+                    f"/api/sessions/{sid}/approve", headers=AUTH, json=approve
+                )
+                assert r.status_code == 409, r.text
+                assert r.json()["missing_decisions"]
+                record_demo_decisions(client, sid, f"gate{gate}", approver, AUTH)
+            r = client.patch(f"/api/sessions/{sid}/approve", headers=AUTH, json=approve)
             assert r.status_code == 200, r.text
             detail = client.get(f"/api/sessions/{sid}", headers=AUTH).json()
             assert detail["status"] == expected
 
-        assert [e["action"] for e in detail["approval_trail"]] == [
+        actions = [e["action"] for e in detail["approval_trail"]]
+        assert [a for a in actions if a != "review_decision"] == [
             "audit_created",
             "gate_approval",
             "gate_approval",
             "gate_approval",
         ]
+        assert actions.count("review_decision") == len(detail["review_decisions"])
+        assert detail["effective"]["engagement_conclusion"]["values"] == {
+            "conclusion": "Needs improvement"
+        }
         assert detail["final_report"]["oscal_sar"] is not None
         assert detail["trail_verification"]["ok"] is True
         # Persisted: a reload from disk sees the completed audit.
@@ -414,7 +426,7 @@ def test_api_demo_run_end_to_end(client):
         verify = client.get(f"/api/sessions/{sid}/trail/verify", headers=AUTH).json()
         assert verify["ok"] is True, verify
         assert verify["status"] == "ok"
-        assert verify["entries"] == 4
+        assert verify["entries"] == len(detail["approval_trail"])
         assert verify["anchored"] is True
         # A completed audit cannot be deleted.
         assert client.delete(f"/api/sessions/{sid}", headers=AUTH).status_code == 409
