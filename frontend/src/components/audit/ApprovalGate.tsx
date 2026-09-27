@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Loader2, Undo2 } from "lucide-react";
-import { api, describeError } from "@/api/client";
+import { CheckCircle, ClipboardList, Loader2, Undo2 } from "lucide-react";
+import { ApiError, api, describeError } from "@/api/client";
 import type { SessionDetail } from "@/api/client";
+import { useReviewerIdentity } from "@/hooks/useReviewerIdentity";
 
 interface Props {
   session: SessionDetail;
@@ -40,7 +41,9 @@ export function ApprovalGate({ session }: Props) {
   const [humanId, setHumanId] = useState("");
   const [showReturn, setShowReturn] = useState(false);
   const [notes, setNotes] = useState("");
+  const { token, setToken } = useReviewerIdentity();
   const gateInfo = GATE_INFO[session.status];
+  const missing = gateInfo ? session.effective?.missing_for_gate[String(gateInfo.gate)] : undefined;
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["sessions"] });
@@ -110,11 +113,40 @@ export function ApprovalGate({ session }: Props) {
       </p>
       <p className="mb-4 text-[11px] italic text-amber-200/80">{gateInfo.sodNote}</p>
 
+      {missing && missing.length > 0 && (
+        <div className="mb-4 rounded-lg border border-sky-700/40 bg-sky-900/10 p-3">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-sky-300">
+            <ClipboardList size={13} />
+            {missing.length} decision{missing.length === 1 ? "" : "s"} still needed before this
+            gate can be approved
+          </p>
+          <ul className="space-y-1">
+            {missing.map((m) => (
+              <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
+                <a
+                  href={`#decision-${m.subject_type}-${m.subject_id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    document
+                      .getElementById(`decision-${m.subject_type}-${m.subject_id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                  className="text-sky-400 underline hover:text-sky-300"
+                >
+                  {m.subject_type} {m.subject_id}
+                </a>
+                <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <label className="mb-1 block text-[11px] font-medium text-[var(--color-text-secondary)]">
         Approver name / ID — a different person from the preparer (and, at Gate
         3, from the Gate 2 approver)
       </label>
-      <div className="flex gap-2">
+      <div className="mb-2 flex gap-2">
         <input
           type="text"
           value={humanId}
@@ -122,6 +154,16 @@ export function ApprovalGate({ session }: Props) {
           placeholder="Your name / ID"
           className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-amber-500"
         />
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Reviewer token (optional)"
+          autoComplete="off"
+          className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-amber-500"
+        />
+      </div>
+      <div className="flex gap-2">
         <button
           onClick={() => approveMutation.mutate()}
           disabled={!humanId.trim()}
@@ -170,10 +212,35 @@ export function ApprovalGate({ session }: Props) {
         </div>
       )}
 
-      {error && (
-        <p role="alert" className="mt-2 text-xs text-red-400">
-          {describeError(error)}
-        </p>
+      {error && error instanceof ApiError && error.missingDecisions?.length ? (
+        <div role="alert" className="mt-2 rounded-lg border border-red-700/40 bg-red-900/10 p-3">
+          <p className="text-xs text-red-400">{describeError(error)}</p>
+          <ul className="mt-1.5 space-y-1">
+            {error.missingDecisions.map((m) => (
+              <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
+                <a
+                  href={`#decision-${m.subject_type}-${m.subject_id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    document
+                      .getElementById(`decision-${m.subject_type}-${m.subject_id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }}
+                  className="text-sky-400 underline hover:text-sky-300"
+                >
+                  {m.subject_type} {m.subject_id}
+                </a>
+                <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        error && (
+          <p role="alert" className="mt-2 text-xs text-red-400">
+            {describeError(error)}
+          </p>
+        )
       )}
     </div>
   );

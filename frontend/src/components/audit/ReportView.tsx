@@ -3,6 +3,8 @@ import { CheckCircle, FileText } from "lucide-react";
 import { clsx } from "clsx";
 import { ApprovalGate } from "./ApprovalGate";
 import { AuditTrailPane } from "@/components/inspector/AuditTrailPane";
+import { DeficiencyDecisions } from "./decisions/DeficiencyDecisions";
+import { EngagementConclusion } from "./decisions/EngagementConclusion";
 
 interface Props {
   session: SessionDetail;
@@ -34,12 +36,21 @@ const CLASSIFICATION_COLOR: Record<string, string> = {
   "Not a deficiency": "text-green-400 bg-green-900/20 border-green-700/40",
 };
 
-function DeficiencyCard({ evaluation }: { evaluation: DeficiencyEvaluation }) {
+function DeficiencyCard({
+  evaluation,
+  session,
+}: {
+  evaluation: DeficiencyEvaluation;
+  session: SessionDetail;
+}) {
   const cls =
     CLASSIFICATION_COLOR[evaluation.classification] ??
     "text-[var(--color-text-muted)] bg-[var(--color-bg-elevated)] border-[var(--color-border)]";
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3 space-y-2">
+    <div
+      id={`decision-deficiency-${evaluation.deficiency_id}`}
+      className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3 space-y-2"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-[11px] text-violet-400">
           {evaluation.deficiency_id}
@@ -79,6 +90,7 @@ function DeficiencyCard({ evaluation }: { evaluation: DeficiencyEvaluation }) {
       <p className="text-[11px] italic text-[var(--color-text-secondary)]">
         {evaluation.rationale}
       </p>
+      <DeficiencyDecisions session={session} deficiencyId={evaluation.deficiency_id} />
     </div>
   );
 }
@@ -132,21 +144,22 @@ export function ReportView({ session }: Props) {
               </section>
             )}
             {evaluations.length > 0 && (
-              <section>
+              <section className="space-y-2">
                 <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
                   Deficiency evaluation (draft for Gate 3)
                 </p>
                 <p className="mb-2 text-[11px] italic text-[var(--color-text-muted)]">
                   {deficiencyScale ? `Scale: ${deficiencyScale}. ` : ""}
                   This aggregation, likelihood/magnitude and classification are
-                  the reporting crew's draft — the auditor's judgement at Gate
-                  3 is the actual conclusion, not this text.
+                  the reporting crew's draft. The reviewer's classification
+                  below is the conclusion of record.
                 </p>
                 <div className="space-y-2">
                   {evaluations.map((e) => (
-                    <DeficiencyCard key={e.deficiency_id} evaluation={e} />
+                    <DeficiencyCard key={e.deficiency_id} evaluation={e} session={session} />
                   ))}
                 </div>
+                <EngagementConclusion session={session} />
               </section>
             )}
           </div>

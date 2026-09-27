@@ -55,6 +55,135 @@ export interface TrailVerification {
   detail: string;
 }
 
+/** One reviewer decision type (POST /api/sessions/{id}/decisions). Values
+ * depend on the type — see RecordDecisionBody and DECISIONS.md ADR-011. */
+export type DecisionType =
+  | "sign_off"
+  | "challenge"
+  | "classify"
+  | "scope_limitation"
+  | "writeup"
+  | "management_response"
+  | "engagement_conclusion";
+
+/** A compact copy of the decision a subject's effective record rests on. */
+export interface DecisionRef {
+  decision_id: string;
+  decision_type: string;
+  decided_by: string;
+  identity_source: string;
+  decided_at: string;
+  rationale: string;
+  values: Record<string, string>;
+  supersedes: string | null;
+}
+
+export interface FindingConclusions {
+  tod_conclusion: string;
+  toe_conclusion: string;
+  result: string;
+  preliminary_deficiency: boolean;
+}
+
+export interface FindingView {
+  control_id: string;
+  key_control: boolean | null;
+  draft: FindingConclusions;
+  effective: FindingConclusions;
+  /** signed_off | challenged | not_reviewed */
+  review_status: string;
+  review: DecisionRef | null;
+  scope_limitation: DecisionRef | null;
+  differs_from_draft: boolean;
+  review_required_for_gate_2: boolean;
+}
+
+export interface Classification {
+  classification: string;
+  likelihood: string;
+  magnitude: string;
+}
+
+export interface DeficiencyView {
+  deficiency_id: string;
+  title: string;
+  related_findings: string[];
+  draft: Classification;
+  effective: Classification;
+  /** "reviewer" once a classify decision is active, else "ai_draft". */
+  classification_source: string;
+  classification_decision: DecisionRef | null;
+  differs_from_draft: boolean;
+  writeup: DecisionRef | null;
+  management_response: DecisionRef | null;
+}
+
+export interface ReviewerChangeRate {
+  subjects_decided: number;
+  subjects_changed: number;
+  rate: number | null;
+  published: boolean;
+}
+
+/** One outstanding decision a gate approval needs (returned in a 409's
+ * `missing_decisions`, and pre-approval in `effective.missing_for_gate`). */
+export interface MissingDecision {
+  gate: number;
+  subject_type: string;
+  subject_id: string;
+  required: string[];
+  reason: string;
+}
+
+/** The conclusion of record: AI drafts plus active reviewer decisions
+ * (GET /api/sessions/{id} -> effective; see DECISIONS.md ADR-011). */
+export interface EffectiveView {
+  decisions_required: boolean;
+  deficiency_scale: string | null;
+  findings: FindingView[];
+  deficiencies: DeficiencyView[];
+  engagement_conclusion: DecisionRef | null;
+  missing_for_gate: Record<string, MissingDecision[]>;
+  reviewer_change_rate: ReviewerChangeRate;
+  stale_decision_ids: string[];
+  superseded_decision_ids: string[];
+}
+
+/** A stored reviewer decision plus its current state (active | superseded |
+ * stale — see DECISIONS.md ADR-011). */
+export interface ReviewDecisionRecord {
+  decision_id: string;
+  phase: number;
+  artifact: string;
+  draft_digest: string;
+  subject_type: string;
+  subject_id: string;
+  decision_type: string;
+  values: Record<string, string>;
+  rationale: string;
+  decided_by: string;
+  identity_source: string;
+  decided_at: string;
+  supersedes: string | null;
+  state: string;
+}
+
+export interface ReviewDecisionsResponse {
+  decisions: ReviewDecisionRecord[];
+  effective: EffectiveView | null;
+}
+
+export interface RecordDecisionBody {
+  decision_type: DecisionType;
+  subject_id: string;
+  subject_type?: string;
+  values?: Record<string, string>;
+  rationale?: string;
+  decided_by: string;
+  /** decision_id of the active decision this one corrects. */
+  supersedes?: string;
+}
+
 export interface SessionDetail extends SessionSummary {
   theme: string;
   business_context: string;
@@ -66,6 +195,9 @@ export interface SessionDetail extends SessionSummary {
   approval_trail: TrailEntry[];
   qa_rejection_reason: string | null;
   trail_verification: TrailVerification | null;
+  review_decisions: ReviewDecisionRecord[];
+  effective: EffectiveView | null;
+  review_decisions_required: boolean;
 }
 
 export interface AppConfig {
@@ -86,18 +218,51 @@ export interface AuditEvent {
   reason?: string;
 }
 
-/** A non-2xx API response. `message` is the server's `detail` when present. */
+/** A non-2xx API response. `message` is the server's `detail` when present.
+ * `missingDecisions` is set for a gate-approval 409 that carries the
+ * structured `missing_decisions` list (see DECISIONS.md ADR-011). */
 export class ApiError extends Error {
   readonly status: number;
+  readonly missingDecisions?: MissingDecision[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, missingDecisions?: MissingDecision[]) {
     super(message);
     this.status = status;
+    this.missingDecisions = missingDecisions;
   }
 }
 
 function authHeaders(): Record<string, string> {
   return API_AUTH_TOKEN ? { Authorization: `Bearer ${API_AUTH_TOKEN}` } : {};
+}
+
+// A per-reviewer personal token (a parallel change is adding per-reviewer
+// authentication on the backend). Kept only in this tab's sessionStorage —
+// never localStorage — and sent as X-Reviewer-Token on decision and
+// gate-action requests when the reviewer has one. The backend may not accept
+// it yet; that is fine, it is simply not checked.
+const REVIEWER_TOKEN_KEY = "grc.reviewerToken";
+
+export function getReviewerToken(): string {
+  try {
+    return sessionStorage.getItem(REVIEWER_TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setReviewerToken(token: string): void {
+  try {
+    if (token) sessionStorage.setItem(REVIEWER_TOKEN_KEY, token);
+    else sessionStorage.removeItem(REVIEWER_TOKEN_KEY);
+  } catch {
+    // Private window, blocked storage, etc. — the token just isn't remembered.
+  }
+}
+
+function reviewerHeaders(): Record<string, string> {
+  const token = getReviewerToken();
+  return token ? { "X-Reviewer-Token": token } : {};
 }
 
 function detailText(detail: unknown): string | null {
@@ -116,18 +281,29 @@ async function raiseForStatus(res: Response): Promise<Response> {
   if (res.ok) return res;
   const text = await res.text();
   let message = text || res.statusText;
+  let missingDecisions: MissingDecision[] | undefined;
   try {
-    message = detailText((JSON.parse(text) as { detail?: unknown }).detail) ?? message;
+    const body = JSON.parse(text) as {
+      detail?: unknown;
+      missing_decisions?: MissingDecision[];
+    };
+    message = detailText(body.detail) ?? message;
+    if (Array.isArray(body.missing_decisions)) missingDecisions = body.missing_decisions;
   } catch {
     // not JSON — keep the raw text
   }
-  throw new ApiError(res.status, message);
+  throw new ApiError(res.status, message, missingDecisions);
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  extraHeaders: Record<string, string> = {}
+): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...authHeaders(),
+    ...extraHeaders,
   };
   const res = await fetch(`${API_URL}${path}`, { headers, ...init });
   await raiseForStatus(res);
@@ -206,25 +382,29 @@ export const api = {
       return (await res.json()) as SessionSummary;
     },
     approve: (id: string, gate_number: number, human_id: string) =>
-      request<SessionSummary>(`/api/sessions/${id}/approve`, {
-        method: "PATCH",
-        body: JSON.stringify({ gate_number, human_id }),
-      }),
+      request<SessionSummary>(
+        `/api/sessions/${id}/approve`,
+        { method: "PATCH", body: JSON.stringify({ gate_number, human_id }) },
+        reviewerHeaders()
+      ),
     retry: (id: string, phase: number, human_id: string) =>
-      request<SessionSummary>(`/api/sessions/${id}/retry`, {
-        method: "POST",
-        body: JSON.stringify({ phase, human_id }),
-      }),
+      request<SessionSummary>(
+        `/api/sessions/${id}/retry`,
+        { method: "POST", body: JSON.stringify({ phase, human_id }) },
+        reviewerHeaders()
+      ),
     qaOverride: (id: string, phase: number, human_id: string, reason: string) =>
-      request<SessionSummary>(`/api/sessions/${id}/qa-override`, {
-        method: "POST",
-        body: JSON.stringify({ phase, human_id, reason }),
-      }),
+      request<SessionSummary>(
+        `/api/sessions/${id}/qa-override`,
+        { method: "POST", body: JSON.stringify({ phase, human_id, reason }) },
+        reviewerHeaders()
+      ),
     returnForRework: (id: string, phase: number, human_id: string, notes: string) =>
-      request<SessionSummary>(`/api/sessions/${id}/return`, {
-        method: "POST",
-        body: JSON.stringify({ phase, human_id, notes }),
-      }),
+      request<SessionSummary>(
+        `/api/sessions/${id}/return`,
+        { method: "POST", body: JSON.stringify({ phase, human_id, notes }) },
+        reviewerHeaders()
+      ),
     verifyTrail: (id: string) =>
       request<TrailVerification>(`/api/sessions/${id}/trail/verify`),
     delete: async (id: string) => {
@@ -237,6 +417,16 @@ export const api = {
     },
     export: (id: string, kind: ExportKind) =>
       download(`/api/sessions/${id}/export/${kind}`, kind),
+    decisions: {
+      list: (id: string) =>
+        request<ReviewDecisionsResponse>(`/api/sessions/${id}/decisions`),
+      record: (id: string, body: RecordDecisionBody) =>
+        request<ReviewDecisionRecord>(
+          `/api/sessions/${id}/decisions`,
+          { method: "POST", body: JSON.stringify(body) },
+          reviewerHeaders()
+        ),
+    },
   },
   evidence: {
     verify: (vault_id: string, exact_quote: string) =>
