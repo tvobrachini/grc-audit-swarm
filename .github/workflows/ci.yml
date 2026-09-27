@@ -62,7 +62,7 @@ jobs:
         run: uv sync --all-extras --frozen
 
       - name: Type Check with Pyright
-        run: uv run pyright src/
+        run: uv run pyright src/ evals/
 
   unit-tests:
     name: unit-tests (py${{ matrix.python-version }})
@@ -91,7 +91,7 @@ jobs:
       - name: Verify AI Guardrails and Agent Constraints (Pytest & BDD)
         env:
           PYTHONPATH: .
-        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=50
+        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=90
 
   security:
     name: security

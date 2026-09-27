@@ -662,18 +662,95 @@ def _trail_line(e: dict[str, str]) -> str:
     return sanitize_report(entry)
 
 
+def _has_reviewer_decisions(view: Optional[EffectiveView]) -> bool:
+    if view is None:
+        return False
+    if view.engagement_conclusion is not None:
+        return True
+    if any(d.classification_decision for d in view.deficiencies):
+        return True
+    if any(f.scope_limitation for f in view.findings):
+        return True
+    return False
+
+
+def _conclusions_of_record_section(view: Optional[EffectiveView]) -> list[str]:
+    """A short, reviewer-facing summary of the decisions of record.
+
+    Shown only once at least one reviewer decision has been recorded; it
+    never restates or rewrites the AI-drafted narrative below it (ADR-011).
+    """
+    if not _has_reviewer_decisions(view):
+        return []
+    assert view is not None
+    lines = [
+        "## Conclusions of Record",
+        "",
+        "> Reviewer decisions recorded for this engagement. Where a "
+        "conclusion has not been decided, it is still an AI-drafted proposal "
+        "pending the auditor's judgement at Gate 3. "
+        + identity_note(identity_sources(view)),
+        "",
+    ]
+    ref = view.engagement_conclusion
+    if ref is not None:
+        lines.append(
+            sanitize_report(
+                f"- **Engagement conclusion:** {_one_line(ref.values.get('conclusion'))} "
+                f"— decided by {decided_by_text(ref)}."
+            )
+        )
+    else:
+        lines.append(
+            "- **Engagement conclusion:** not yet decided (AI draft proposal only)."
+        )
+    if view.deficiencies:
+        lines.append("- **Deficiency classifications of record:**")
+        for d in view.deficiencies:
+            dref = d.classification_decision
+            if dref is not None:
+                text = f"{d.effective.classification}"
+                if d.effective.classification != d.draft.classification:
+                    text += f" (AI draft: {d.draft.classification})"
+                text += f" — decided by {decided_by_text(dref)}"
+            else:
+                text = f"{d.draft.classification} (AI draft, proposed)"
+            lines.append(sanitize_report(f"  - {d.deficiency_id}: {text}"))
+    limited = [f for f in view.findings if f.scope_limitation]
+    if limited:
+        lines.append("- **Scope limitations:**")
+        for f in limited:
+            sref = f.scope_limitation
+            assert sref is not None
+            lines.append(
+                sanitize_report(
+                    f"  - {f.control_id} — decided by {decided_by_text(sref)}."
+                )
+            )
+    else:
+        lines.append("- **Scope limitations:** none recorded.")
+    lines.append("")
+    return lines
+
+
 def report_markdown(
     report: FinalReportSchema,
     trail: list[dict[str, str]],
     ctx: ExportContext,
     view: Optional[EffectiveView] = None,
 ) -> str:
+    exec_summary_heading = (
+        "## Executive Summary (AI-drafted summary)"
+        if _has_reviewer_decisions(view)
+        else "## Executive Summary"
+    )
     lines = [
         sanitize_report(f"# GRC Audit Report — {_one_line(ctx.session_name)}"),
         "",
         f"> Report status: {ctx.artifact_state(3)} (session status {ctx.status}).",
         "",
-        "## Executive Summary",
+        *_conclusions_of_record_section(view),
+        exec_summary_heading,
         "",
         sanitize_report(report.executive_summary),
         "",

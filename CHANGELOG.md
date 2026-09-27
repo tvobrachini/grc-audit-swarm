@@ -22,13 +22,19 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 - API: state-changing requests from another site's page are refused (403 `origin_not_allowed`), closing a cross-site request path through the Compose nginx proxy, which adds the API token to every request.
 - API: the Prowler upload requires `uploaded_by` (or a reviewer token) and records it in the vault record; deleting a draft requires `deleted_by` (or a reviewer token) and logs it.
 - Compose nginx: the Prowler import route accepts up to 11 MB, matching the API's 10 MB file limit (6 MB elsewhere).
+- Trail anchor: a trail cut back and extended again no longer moves the anchor; the save is refused and verification reports `anchor_mismatch`. Exports verify the trail and return 409 for a trail that shows a change, and state the verification status in the report and OSCAL. Vault records are bound to their audit session, and the Gate 2 quote check refuses another session's record. Vault records are written atomically.
 
 **Evaluation**
 - Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
 - The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.
 
-**Fixes**
-- Trail anchor: a trail cut back and extended again no longer moves the anchor; the save is refused and verification reports `anchor_mismatch`. Exports verify the trail and return 409 for a trail that shows a change, and state the verification status in the report and OSCAL. Vault records are bound to their audit session, and the Gate 2 quote check refuses another session's record. Vault records are written atomically.
+**Docs and demo**
+- The demo's `after_issue` management response no longer claims to have been received after it was transcribed; `review_decisions.py` now rejects a `received_on` later than the date the decision is recorded (422).
+- The exported report now opens with a short "Conclusions of Record" block (engagement conclusion, each deficiency's classification of record, scope limitations) when reviewer decisions exist, and labels the executive summary below it as the AI-drafted summary.
+- DECISIONS.md: removed the stale note that the UI does not record decisions (it now does — `frontend/src/components/audit/decisions/`); ADR-011 gained an owner-confirmation table for its provisional defaults and an explicit open question on management responses recorded after issuance.
+- CASE_STUDY.md now covers reviewer decisions (ADR-011) and per-reviewer tokens (ADR-012), and no longer describes reviewer identity as only a typed name.
+- CI: the coverage gate is 90% (was 50%; actual coverage is ~96%), and the pyright job also checks `evals/`.
+- Regenerated `docs/sample-run/` so its report shows the new block and consistent demo dates.
 
 ## v0.1.0 — 2026-09-27
 
