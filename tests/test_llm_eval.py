@@ -351,6 +351,49 @@ def test_replay_goes_through_the_real_gates(replay_results):
     assert s06["runs"][1]["qa_in_pipeline"]["2"] == {"attempts": 2, "qa_rejections": 1}
 
 
+def test_replay_records_the_minimum_reviewer_decisions(replay_results):
+    """The automated reviewer records what each gate requires (ADR-011),
+    under a declared identity that names it, accepting every draft."""
+    from evals.pipeline import MANAGER, PREPARER, REVIEWER
+    from swarm import trail as audit_trail
+
+    out, _, data = replay_results
+    for s in data["scenarios"]:
+        for r in s["runs"]:
+            p = r["pipeline"]
+            assert p["completed"], (s["id"], r["run"], p)
+            assert not [e for e in p["events"] if e["event"] == "decision_failed"]
+            raw = json.loads((out / r["raw_file"]).read_text())
+            trail = raw["approval_trail"]
+            created = trail[0]
+            assert created["action"] == "audit_created"
+            assert created["review_decisions_required"] == "true"
+            assert created["human"] == PREPARER
+            decisions = raw["review_decisions"]
+            assert len(decisions) == sum(p["decisions_recorded"].values())
+            for d in decisions:
+                assert d["identity_source"] == "declared"
+                assert d["decided_by"] == (REVIEWER if d["phase"] == 2 else MANAGER)
+                assert "automated reviewer" in d["rationale"]
+                assert d["decision_type"] != "challenge"
+                if d["decision_type"] == "classify":
+                    deficiency = next(
+                        e
+                        for e in raw["final_report"]["deficiency_evaluations"]
+                        if e["deficiency_id"] == d["subject_id"]
+                    )
+                    assert d["values"]["classification"] == deficiency["classification"]
+            # Gate 3 always needs at least the engagement conclusion.
+            assert p["decisions_recorded"]["3"] >= 1
+            entries = [e for e in trail if e["action"] == "review_decision"]
+            assert {e["decision_id"] for e in entries} == {
+                d["decision_id"] for d in decisions
+            }
+            assert all(e["identity_source"] == "declared" for e in trail)
+            verify = audit_trail.verify_trail(trail, decisions=decisions)
+            assert verify["ok"], verify
+
+
 def test_every_number_is_recomputable_from_the_raw_json(replay_results, key):
     """Traceability: rescoring each saved raw run gives the stored scores."""
     out, _, data = replay_results
@@ -385,3 +428,34 @@ def test_answer_key_rejects_unknown_fields():
         Expectation.model_validate(
             {"expected_result": "Exception", "acceptabe_tod": ["Ineffective"]}
         )
+
+
+def test_automated_reviewer_reports_a_decision_it_could_not_record():
+    """A refused decision is reported (and the gate then refuses), never
+    swallowed."""
+    from types import SimpleNamespace
+
+    from evals.pipeline import record_required_decisions
+
+    missing = SimpleNamespace(subject_id="CTRL-9", required=["sign_off", "challenge"])
+
+    class Flow:
+        def effective_view(self):
+            return SimpleNamespace(missing_for_gate={"2": [missing]})
+
+        def record_decision(self, **kw):
+            assert kw["decision_type"] == "sign_off"
+            assert "automated reviewer" in kw["rationale"]
+            raise ValueError("unknown finding")
+
+    count, problems = record_required_decisions(Flow(), 2, "r")  # type: ignore[arg-type]
+    assert count == 0
+    assert problems == [
+        {
+            "phase": 2,
+            "event": "decision_failed",
+            "decision_type": "sign_off",
+            "subject_id": "CTRL-9",
+            "error": "unknown finding",
+        }
+    ]
