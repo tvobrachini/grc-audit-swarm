@@ -246,7 +246,11 @@ class TestSessionsDelete:
             patch("api.routers.sessions.get_session", return_value=None),
             patch("api.routers.sessions.delete_session"),
         ):
-            resp = client.delete("/api/sessions/sess-lock", headers=_auth_headers())
+            resp = client.delete(
+                "/api/sessions/sess-lock",
+                headers=_auth_headers(),
+                params={"deleted_by": "J. Rivera"},
+            )
         assert resp.status_code == 204
         assert "sess-lock" not in job_store._session_locks
 
