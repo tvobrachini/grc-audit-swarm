@@ -95,15 +95,42 @@ For Fieldwork, a deterministic check (`swarm.evidence.unverified_findings`) veri
 
 ---
 
-## ADR-005: OSCAL-inspired report structure
+## ADR-005: OSCAL Assessment Results export
 
-**Status:** Accepted
+**Status:** Accepted (supersedes "OSCAL-inspired report structure")
 
-**Decision.** In Phase 3 an agent turns the narrative findings into a Pydantic model modeled on NIST OSCAL Security Assessment Results (`src/swarm/schema.py`, including an `import-ap` link and an OSCAL version field).
+**Context.** In Phase 3 an agent writes `oscal_sar`, a Pydantic model loosely modelled on OSCAL (`OSCAL_SAR_Schema` in `src/swarm/schema.py`, Python-style field names). Until this change the `oscal.json` export was that model dumped as-is: OSCAL-shaped, but not valid OSCAL.
 
-**Consequences.**
-- Findings exist as structured data next to the narrative report.
-- The model is OSCAL-inspired. It uses Python-style field names and is not validated against the official OSCAL schema in this repository, so it should not be assumed to load into an OSCAL tool without conversion.
+**Decision.** `GET /api/sessions/{id}/export/oscal.json` returns an OSCAL **Assessment Results** document, `oscal-version` **1.2.1**, built by a deterministic converter (`src/swarm/oscal_ar.py`) from the gate-reviewed artifacts: the RACM, the working papers, the final report's deficiency evaluation and the approval trail. The LLM keeps producing `oscal_sar` in its own format; the converter uses only its document title and, as a labelled remark, its narrative per control. Controls, evidence IDs and conclusions come from the working papers and RACM, so model output cannot add controls or evidence references to the export.
+
+Version choice: the latest NIST release is 1.2.3. The export declares 1.2.1 because compliance-trestle 5.1.0 (IBM / oscal-compass) accepts only 1.2.0–1.2.1 in `oscal-version`. The 1.2.3 assessment-results schema differs from 1.2.1 only by three extra component `type` values, which the export does not use.
+
+**Mapping.**
+
+| Source | OSCAL Assessment Results |
+| --- | --- |
+| Session | `metadata`: title (from `oscal_sar`, else the session name), `last-modified` = time of the latest approval-trail entry (not the export time, so exports are reproducible), `version` = digest of the report, working papers and RACM, props for session ID, status and report state. |
+| Preparer and approvers (declared identities) | `parties` (type `person`), roles `prepared-by`, `gate-approver` (any gate approval) and `content-approver` (Gate 3), linked by `responsible-parties`. |
+| Approval trail | `results[0].assessment-log.entries`, one per trail entry, `logged-by` the acting party; action, artifact digest and the entry's hash-chain values as props. |
+| (no assessment plan) | `import-ap.href` = `#<uuid>` of a `back-matter` resource that describes the RACM as the plan and links to the RACM `.xlsx` export. |
+| RACM control IDs | `reviewed-controls.control-selections[0].include-controls` (IDs mapped to OSCAL tokens; the original ID is kept as a `control-id` prop on the observation). |
+| Each working-paper finding | One `observation`: `methods` EXAMINE when design and implementation (ToD) was concluded, TEST when operating effectiveness (ToE) was concluded, EXAMINE alone when nothing was tested; ToD / ToE conclusion, result, items tested, exceptions and the preliminary-deficiency flag as props; `relevant-evidence` pointing to a `back-matter` resource per vault record (vault ID, source operation, collection time; the payload is not embedded) with `quote-verified-in-vault` re-checked at export time; `collected` = the vault record's timestamp. |
+| Each *tested* finding | One `finding` with target `objective-id` = the control ID: `satisfied`/`pass` for "No exception", `not-satisfied`/`fail` for "Exception". A satisfied finding whose ToE was not tested says so in the status remarks. |
+| "Not tested" finding | An observation (result prop `Not tested`, remark) but no `finding`: an OSCAL finding target must be `satisfied` or `not-satisfied`, and neither is true. |
+| Each deficiency evaluation | One `risk` (status `open`) with the proposed classification, scale, likelihood, magnitude and RACM risk IDs as props, `classification-state` = `draft` until the report is approved at Gate 3 (then `approved-with-report`), the draft wording in its description, and links both ways to the related observations and findings. |
+| Audit scope | One result-local `component` (type `this-system`, status `other`) used as every observation's subject; the tool appears as an `assessment-platform` in each observation's `origins`. |
+
+Custom props all use the namespace `https://github.com/tvobrachini/grc-audit-swarm/ns/oscal`. Every UUID is a version-5 UUID of the session ID plus the element (for example `observation/CTRL-02#1`), so exporting the same session twice gives the same document, and an element keeps its UUID across revisions, as OSCAL asks for per-subject identifiers.
+
+**Validation.** `tests/test_oscal_ar.py` validates exports against NIST's official OSCAL 1.2.1 assessment-results JSON schema, vendored unchanged in `tests/fixtures/oscal/` (source URL, SHA-256 and license, which is US-government public domain plus CC0, in its README). It covers a DEMO_MODE session exported through the API, a synthetic report with exceptions, a not-tested control, a non-token control ID, legacy-severity findings, missing trail / RACM / `oscal_sar` and the committed `docs/sample-run/oscal.json`, plus prop / namespace / UUID / reference checks and determinism. The schema's patterns use Unicode property escapes that Python's `re` does not support, so the test evaluates `pattern` with the `regex` module; a set of deliberately broken documents proves the validator rejects bad UUIDs, tokens, namespaces, datetimes and statuses. It runs in CI's existing unit-test job. The demo sample (`docs/sample-run/oscal.json`) and a finding-rich document were also loaded with compliance-trestle 5.1.0 once, by hand; trestle is not a project dependency.
+
+**Consequences and limits.**
+- The document is schema-valid OSCAL. Schema validation does not check OSCAL's Metaschema constraints (allowed values, cross-references) or FedRAMP rules; the tests check that every internal UUID reference resolves, but no external OSCAL validator runs in CI.
+- There is no OSCAL assessment plan, system security plan, catalog or profile. Control IDs are the engagement's own RACM IDs, not catalog IDs, so a tool that resolves controls against a catalog will not find them. `import-ap` resolves only to a description of the RACM.
+- ToD / ToE conclusions, exception counts, deficiency classifications and scales have no OSCAL equivalent and are custom props that other tools will ignore. OSCAL has no "not tested" finding state, so untested controls appear only as observations.
+- Party names are the identities people declared in the app; the API does not authenticate reviewers (ADR-004, ADR-009).
+- The detailed report narrative is not embedded (the result's description is the executive summary); it stays in `report.md`.
+- The export is available once the session has a final report and working papers, including a draft awaiting Gate 3; its `report-state` prop and the risks' `classification-state` say which.
 
 ---
 
