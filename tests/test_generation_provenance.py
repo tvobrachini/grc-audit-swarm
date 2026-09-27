@@ -136,7 +136,9 @@ class TestDescribeQaLLM:
     def test_qa_model_with_provider_prefix(self, monkeypatch):
         monkeypatch.setenv("QA_LLM_MODEL", "openai/gpt-4o")
         monkeypatch.setenv("QA_LLM_API_KEY", "sk-demo-super-secret-openai-key")
-        monkeypatch.setenv("QA_LLM_BASE_URL", "https://user:pw@example.com/v1")
+        monkeypatch.setenv(
+            "QA_LLM_BASE_URL", "https://user:pw@example.com/v1"
+        )  # pragma: allowlist secret
         info = describe_qa_llm()
         assert info == {"provider": "openai", "model": "openai/gpt-4o"}
         _no_secrets_anywhere(info)
