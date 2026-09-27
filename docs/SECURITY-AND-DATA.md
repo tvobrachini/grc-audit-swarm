@@ -5,7 +5,8 @@
 - **Evidence vault.** One JSON file per evidence record, with a SHA-256 digest covering the payload and, when present, the collection metadata. With `VAULT_ENCRYPTION_KEY` set, records are Fernet-encrypted and carry an HMAC-SHA256 digest keyed from that key. Records written during an audit's crews (and API imports) record that audit's session id in their metadata, covered by the digest; the Gate 2 quote check does not accept a record bound to a different audit. Records without a session id (written before this) are still accepted. See [Limitations](LIMITATIONS.md) for what this does and does not detect.
 - **API token.** Every `/api/*` route requires `API_AUTH_TOKEN` (the API returns 503 if it is not set, and 401 for a wrong or missing token). `/health` is open. In Compose, nginx injects the token server-side.
 - **Deployment defaults.** Compose publishes ports on `127.0.0.1` only. The API container runs as a non-root user. nginx sets a Content-Security-Policy and other hardening headers. The API refuses to start with `DEMO_MODE=1` when `ENVIRONMENT` is `production` or `staging`.
-- **Untrusted input.** Scope documents are size-limited and wrapped as untrusted content — see [Architecture](ARCHITECTURE.md#how-it-works).
+- **Untrusted input.** Scope documents are size-limited and wrapped as untrusted content — see [Architecture](ARCHITECTURE.md#how-it-works). Scanner imports (Prowler, Security Hub) are normalised to single-line fields and wrapped the same way — see [Integrations](INTEGRATIONS.md).
+- **Cross-site writes.** State-changing requests from a browser page on another origin get 403 `origin_not_allowed` — see [Cross-site request check](#cross-site-request-check).
 - **Reviewer identity: declared by default, per-reviewer tokens optional.** By default the API uses one shared token, not per-person accounts: the name recorded against a gate action or decision is whatever the reviewer typed (`identity_source: "declared"`), and the segregation-of-duties checks (preparer vs. approver, Gate 2 vs. Gate 3 approver, preparer vs. reviewer decisions) compare typed names only. They catch accidental self-review and make it visible in the trail, but they do not stop someone who deliberately types a different name. With `REVIEWER_TOKENS_FILE` set, audit creation and every reviewer action also need the person's own token in `X-Reviewer-Token`; the name comes from the token (`identity_source: "authenticated"`) and a typed name that differs is refused. See [Per-reviewer tokens](#per-reviewer-tokens) for what that does and does not give you.
 
 <details>
@@ -95,8 +96,24 @@ What it does not give you:
 
 Compose's published ports are bound to `127.0.0.1` only, not `0.0.0.0`, so the API and frontend are not reachable from other hosts on the network by default. Exposing them beyond localhost (a different bind address, a reverse proxy, a cloud load balancer) is a deployment decision this repository does not make for you, and it changes the threat model — the shared bearer token and CORS allow-list were designed assuming a trusted local or single-operator context.
 
+## Cross-site request check
+
+In Compose, nginx adds the API token to every `/api/` request it forwards, so the token alone does not show that a request came from this app: a page on any other site could make a visitor's browser send a request through the proxy. Multipart form posts (the Prowler import, audit creation with a scope document) need no CORS preflight, so CORS alone does not stop them from being sent.
+
+The API therefore checks `POST`, `PUT`, `PATCH` and `DELETE` requests (`src/api/origin_check.py`):
+
+- If an `Origin` header is present, it must be in `CORS_ALLOWED_ORIGINS` (the same allow-list CORS uses), or name the host the request was sent to, or come with `Sec-Fetch-Site: same-origin`. `Origin: null` is refused.
+- Without `Origin`, `Sec-Fetch-Site: cross-site` or `same-site` is refused.
+- A request with neither header (curl, scripts, server-to-server clients) is allowed: browsers send at least one of them on these methods.
+
+A refusal is `403` with `{"detail": ..., "code": "origin_not_allowed"}`, and is logged. If you serve the UI from another origin than the API, add that origin to `CORS_ALLOWED_ORIGINS`. The Compose nginx forwards the browser's `Host` (with port) so same-origin requests match. Limits: this is not a CSRF token; it relies on browsers sending `Origin` / `Sec-Fetch-Site`, and it does not address DNS rebinding against a proxy reachable on a hostname you do not control (keep Compose bound to `127.0.0.1`, see below).
+
+Two destructive or evidence-writing routes also require a named person: the Prowler upload (`uploaded_by` form field, recorded in the vault record's metadata) and deleting a draft audit (`DELETE /api/sessions/{id}?deleted_by=<name>`, logged). When `REVIEWER_TOKENS_FILE` is set, the reviewer's `X-Reviewer-Token` supplies the identity instead. A blank identity gets 422.
+
 ## Untrusted documents
 
 A scope document (PDF or text, up to 5 MB / 30 pages / 20,000 extracted characters) is content a user uploads, not content the project controls. Its extracted text is wrapped in delimiters that label it to the model as untrusted, user-supplied content, which reduces the chance a crafted document changes agent behavior through prompt injection. It does not remove that risk — an LLM can still be influenced by adversarial text inside a delimited block. The human gates, not the delimiters, are the actual control against a bad outcome reaching a report: nothing is issued without a person approving each phase.
+
+Scanner findings (a Prowler file, Security Hub finding text) are third-party content too. Each field is collapsed to one line with control characters dropped and titles/ids capped, so a crafted title cannot add a separate quotable line (such as a forged `[PASS]` result) to the evidence text, and the tool output agents read is wrapped in `UNTRUSTED SCANNER OUTPUT` markers. The Fieldwork task prompts say that content is data, not instructions. The same caveat applies: this lowers the risk, and the human gates remain the control.
 
 To report a vulnerability, see [SECURITY.md](../SECURITY.md).

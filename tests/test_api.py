@@ -232,7 +232,11 @@ class TestSessionsDelete:
             patch("api.routers.sessions.delete_session"),
             patch("api.routers.sessions.remove_flow"),
         ):
-            resp = client.delete("/api/sessions/sess-del", headers=_auth_headers())
+            resp = client.delete(
+                "/api/sessions/sess-del",
+                headers=_auth_headers(),
+                params={"deleted_by": "J. Rivera"},
+            )
         assert resp.status_code == 204
 
     def test_delete_drops_session_lock(self, client):

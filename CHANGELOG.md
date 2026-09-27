@@ -16,6 +16,13 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 **Evidence imports**
 - Read-only import of Prowler JSON (OCSF and legacy) and AWS Security Hub (ASFF) findings as vault evidence, labelled as point-in-time results rather than operating effectiveness (docs/INTEGRATIONS.md).
 
+**Fixes**
+- Scanner imports: fields are collapsed to one line (newlines, Unicode line separators and control characters removed; titles/ids capped), so a crafted finding title can no longer forge a separate `[PASS]` line in the evidence text; output given to agents is wrapped as untrusted scanner data.
+- Scanner imports: failing and higher-severity checks are listed first and every check keeps its header line with counts, so the 300-line detail cap cannot hide a critical FAIL.
+- API: state-changing requests from another site's page are refused (403 `origin_not_allowed`), closing a cross-site request path through the Compose nginx proxy, which adds the API token to every request.
+- API: the Prowler upload requires `uploaded_by` (or a reviewer token) and records it in the vault record; deleting a draft requires `deleted_by` (or a reviewer token) and logs it.
+- Compose nginx: the Prowler import route accepts up to 11 MB, matching the API's 10 MB file limit (6 MB elsewhere).
+
 **Evaluation**
 - Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
 - The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.

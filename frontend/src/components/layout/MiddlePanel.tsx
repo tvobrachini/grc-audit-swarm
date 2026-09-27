@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
-import { api, describeError, type SessionDetail, type AuditEvent } from "@/api/client";
+import {
+  api,
+  describeError,
+  getReviewerToken,
+  type SessionDetail,
+  type AuditEvent,
+} from "@/api/client";
 import { phaseProblem } from "@/api/status";
 import { PhaseBar } from "@/components/ui/PhaseBar";
 import { AgentFeed } from "@/components/audit/AgentFeed";
@@ -31,7 +37,7 @@ export function MiddlePanel({ session, events, onDeleted }: Props) {
   const qc = useQueryClient();
 
   const del = useMutation({
-    mutationFn: () => api.sessions.delete(session.session_id),
+    mutationFn: (deletedBy: string) => api.sessions.delete(session.session_id, deletedBy),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sessions"] });
       onDeleted();
@@ -71,9 +77,17 @@ export function MiddlePanel({ session, events, onDeleted }: Props) {
         <button
           title={deleteTitle}
           onClick={() => {
-            if (window.confirm(`Delete "${session.name}"? This cannot be undone.`)) {
-              del.mutate();
+            // The server records who deletes a draft (or takes it from the
+            // reviewer token, when those are configured).
+            const who = window.prompt(
+              `Delete "${session.name}"? This cannot be undone.\n\nType your name to confirm:`
+            );
+            if (who === null) return;
+            if (!who.trim() && !getReviewerToken()) {
+              window.alert("Enter your name to delete this audit.");
+              return;
             }
+            del.mutate(who.trim());
           }}
           disabled={deleteDisabled}
           className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-red-400 disabled:opacity-30"

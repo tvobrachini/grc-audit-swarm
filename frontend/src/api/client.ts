@@ -410,11 +410,14 @@ export const api = {
       ),
     verifyTrail: (id: string) =>
       request<TrailVerification>(`/api/sessions/${id}/trail/verify`),
-    delete: async (id: string) => {
+    /** Delete an unapproved draft. The server requires who is deleting it:
+     * `deletedBy`, or the reviewer token when REVIEWER_TOKENS_FILE is set. */
+    delete: async (id: string, deletedBy: string) => {
+      const query = deletedBy ? `?deleted_by=${encodeURIComponent(deletedBy)}` : "";
       await raiseForStatus(
-        await fetch(`${API_URL}/api/sessions/${id}`, {
+        await fetch(`${API_URL}/api/sessions/${id}${query}`, {
           method: "DELETE",
-          headers: authHeaders(),
+          headers: { ...authHeaders(), ...reviewerHeaders() },
         })
       );
     },

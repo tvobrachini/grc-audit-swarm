@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
@@ -10,6 +9,11 @@ from fastapi.responses import JSONResponse
 from api.auth import ReviewerAuthError, require_api_auth
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
+from api.origin_check import (
+    ORIGIN_NOT_ALLOWED,
+    allowed_origins_from_env,
+    is_request_allowed,
+)
 from api.routers import config, evidence, exports, imports, phases, sessions
 from api.scope_document import MAX_UPLOAD_BYTES
 from swarm.demo import demo_mode_enabled
@@ -42,13 +46,9 @@ app = FastAPI(title="GRC Audit Swarm API", version="0.1.0", lifespan=lifespan)
 # the CORS spec when allow_credentials=True — browsers reject that combination.
 # CORS_ALLOWED_ORIGINS is a comma-separated allow-list; the default covers the
 # Vite dev server (the compose frontend is same-origin via its nginx proxy).
-_allowed_origins = [
-    origin.strip()
-    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(
-        ","
-    )
-    if origin.strip() and origin.strip() != "*"
-]
+# The same allow-list gates state-changing requests by Origin (see
+# api.origin_check and the middleware below).
+_allowed_origins = allowed_origins_from_env()
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,6 +79,36 @@ async def limit_upload_size(request: Request, call_next):
             return JSONResponse(
                 status_code=413, content={"detail": "Upload is too large."}
             )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def refuse_cross_site_writes(request: Request, call_next):
+    """403 for a state-changing request from a browser page on another origin.
+
+    Registered after the other middleware so it runs first. The compose
+    nginx proxy adds the API token to every request it forwards, so without
+    this a page on any site could make a visitor's browser post uploads or
+    deletes through it (see api.origin_check).
+    """
+    if not is_request_allowed(request.method, request.headers, _allowed_origins):
+        logger.warning(
+            "Refused cross-site %s %s (Origin=%r, Sec-Fetch-Site=%r)",
+            request.method,
+            request.url.path,
+            (request.headers.get("origin") or "")[:200],
+            (request.headers.get("sec-fetch-site") or "")[:40],
+        )
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": (
+                    "Cross-site request refused: this origin is not allowed "
+                    "to change data (see CORS_ALLOWED_ORIGINS)."
+                ),
+                "code": ORIGIN_NOT_ALLOWED,
+            },
+        )
     return await call_next(request)
 
 
