@@ -1,0 +1,48 @@
+{
+  "scenario": "s09-sox-change-and-logging",
+  "description": "Replay fixture (canned crew outputs, not model output). Run 1 concludes change management Effective on a fabricated quote (the evidence gate rejects it; the synthetic reviewer overrides so Reporting still runs). Run 2 is correct but omits the logging control (coverage gap).",
+  "runs": [
+    {
+      "planning": {
+        "qa": {"approved": true},
+        "racm": {
+          "risks": {"RISK-01": "Unauthorised or untested changes reach the ERP.", "RISK-02": "Security events in the ERP account go undetected."},
+          "controls": [
+            {"control_id": "CM-01", "risk_id": "RISK-01", "description": "Program changes to the ERP are approved by the change advisory board before deployment.", "tod": "Inspect change tickets for CAB approval."},
+            {"control_id": "LG-01", "risk_id": "RISK-02", "description": "CloudTrail logging is enabled in all regions and reviewed monthly.", "tod": "Inspect the CloudTrail configuration and the monthly review."}
+          ]
+        }
+      },
+      "fieldwork": {
+        "qa": {"approved": true},
+        "working_papers": {
+          "findings": [
+            {"control_id": "CM-01", "vault_id_reference": "@tool:get_iam_password_policy", "exact_quote_from_evidence": "All changes approved by the CAB", "tod_conclusion": "Effective", "toe_conclusion": "Effective", "toe_basis": "Relies on change-management ITGCs.", "result": "No exception", "test_conclusion": "Changes are approved by the CAB."},
+            {"control_id": "LG-01", "tod_conclusion": "Not tested", "toe_conclusion": "Not tested", "result": "Not tested", "test_conclusion": "No evidence tool reads CloudTrail."}
+          ]
+        }
+      },
+      "reporting": {"qa": {"approved": true}, "deficiency_scale": "ICFR deficiency scale", "deficiency_evaluations": []}
+    },
+    {
+      "planning": {
+        "qa": {"approved": true},
+        "racm": {
+          "risks": {"RISK-01": "Unauthorised or untested changes reach the ERP."},
+          "controls": [
+            {"control_id": "CM-01", "risk_id": "RISK-01", "description": "Program changes are approved before deployment.", "tod": "Inspect change tickets."}
+          ]
+        }
+      },
+      "fieldwork": {
+        "qa": {"approved": true},
+        "working_papers": {
+          "findings": [
+            {"control_id": "CM-01", "tod_conclusion": "Not tested", "toe_conclusion": "Not tested", "result": "Not tested", "test_conclusion": "No evidence tool covers change tickets."}
+          ]
+        }
+      },
+      "reporting": {"qa": {"approved": true}, "deficiency_scale": "ICFR deficiency scale", "deficiency_evaluations": []}
+    }
+  ]
+}

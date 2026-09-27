@@ -1,0 +1,592 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DRAFT ANSWER KEY — NOT YET REVIEWED BY THE OWNER
+#
+# This answer key was drafted with AI assistance from an experienced IT
+# auditor's point of view. It has NOT been reviewed or signed off. Until the
+# owner (a qualified IT auditor) reviews every expected outcome and sets
+# `reviewed_by` / `reviewed_on`, any score computed against it is provisional,
+# and every results report says so at the top.
+#
+# To sign off: review each scenario and area, edit what you disagree with,
+# bump `version` if outcomes change, then set reviewed_by and reviewed_on.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1.0.0"
+status: DRAFT
+reviewed_by: null
+reviewed_on: null
+authored_with: "AI-assisted draft; pending review by the repository owner"
+
+# ── Control-area catalogue ───────────────────────────────────────────────────
+# RACM control IDs are written by the model and change from run to run, so
+# findings are scored per control *area*. Each finding is mapped to an area by
+# keyword hits in its RACM control text (weights below) plus a bonus when the
+# evidence it cites comes from the area's evidence source. The mapping, with
+# its hits and score, is written to the raw output of every run.
+#
+# evidence_kind:
+#   point_in_time_config — a tool exists, and it reads configuration once.
+#     That is design and implementation (ToD) evidence; it is not operating
+#     effectiveness over a period unless toe_basis states the reliance.
+#   none — no evidence tool covers the area. The only supported conclusion is
+#     "Not tested" (default_expectation applies in every scenario, even one
+#     whose key does not list the area).
+areas:
+  password_policy:
+    label: IAM account password policy
+    evidence_kind: point_in_time_config
+    evidence_sources: [aws.iam.get_account_password_policy]
+    keywords:
+      - {pattern: 'password polic', weight: 4}
+      - {pattern: 'password (length|complexity|strength|requirement|rotation|expir|reuse|standard)', weight: 4}
+      - {pattern: 'passwords?', weight: 1}
+  iam_mfa:
+    label: MFA for IAM users
+    evidence_kind: point_in_time_config
+    evidence_sources: [aws.iam.list_users_mfa]
+    keywords:
+      - {pattern: '\bmfa\b', weight: 3}
+      - {pattern: 'multi[- ]?factor', weight: 3}
+      - {pattern: 'two[- ]factor|\b2fa\b', weight: 3}
+  s3_public_access:
+    label: S3 public access
+    evidence_kind: point_in_time_config
+    evidence_sources: [aws.s3.list_public_buckets]
+    keywords:
+      - {pattern: '\bs3\b', weight: 2}
+      - {pattern: 'buckets?', weight: 2}
+      - {pattern: 'block public access', weight: 3}
+      - {pattern: 'public(ly)? (access|accessible|exposure|read)', weight: 2}
+  root_account:
+    label: AWS account root user
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: 'root (user|account|credential)', weight: 8}
+    default_expectation:
+      expected_result: Not tested
+      rationale: >-
+        iam:ListUsers does not return the root user and the MFA tool says so
+        in its Notes. No tool reads root user MFA or root access keys.
+  access_review:
+    label: Periodic user access review
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: '(user )?access (review|recertification|certification)', weight: 5}
+      - {pattern: 'recertif', weight: 4}
+      - {pattern: 'periodic(al)?(ly)? review', weight: 3}
+    default_expectation:
+      expected_result: Not tested
+      rationale: >-
+        Review sign-offs live outside AWS; no tool collects them. A list of
+        users with their MFA status is not evidence that a review happened.
+  user_provisioning:
+    label: Joiner / mover / leaver access provisioning
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: '(de-?)?provisioning', weight: 5}
+      - {pattern: 'joiner|leaver|mover|terminat|offboard|onboard', weight: 4}
+      - {pattern: 'revo(ke|cation)', weight: 2}
+    default_expectation:
+      expected_result: Not tested
+      rationale: No HR or ticketing evidence is collected.
+  change_management:
+    label: Change management
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: 'change (management|request|control|ticket|approval|advisory)', weight: 5}
+      - {pattern: 'program changes?', weight: 5}
+      - {pattern: 'deploy', weight: 2}
+      - {pattern: 'release', weight: 1}
+    default_expectation:
+      expected_result: Not tested
+      rationale: No change-ticket, CI/CD or AWS Config history evidence is collected.
+  logging_monitoring:
+    label: Logging and monitoring
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: 'cloudtrail', weight: 6}
+      - {pattern: 'logging|audit logs?|log (review|retention|monitoring)', weight: 4}
+      - {pattern: 'monitor', weight: 2}
+      - {pattern: 'siem|alert', weight: 2}
+    default_expectation:
+      expected_result: Not tested
+      rationale: No CloudTrail, CloudWatch or SIEM evidence is collected.
+  encryption_at_rest:
+    label: Encryption at rest
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: 'encrypt', weight: 6}
+      - {pattern: '\bkms\b', weight: 6}
+      - {pattern: 'at rest', weight: 2}
+    default_expectation:
+      expected_result: Not tested
+      rationale: >-
+        No tool reads bucket encryption or KMS configuration; the S3 tool
+        reads public access only.
+  backup_recovery:
+    label: Backup and recovery
+    evidence_kind: none
+    evidence_sources: []
+    keywords:
+      - {pattern: 'backups?', weight: 5}
+      - {pattern: 'restor', weight: 2}
+      - {pattern: '(disaster )?recovery', weight: 2}
+    default_expectation:
+      expected_result: Not tested
+      rationale: No backup job or restore-test evidence is collected.
+
+# ── Scenarios ────────────────────────────────────────────────────────────────
+# Per area:
+#   in_scope          — counts toward coverage (the scope names this area).
+#   expected_result   — Exception / No exception / Not tested.
+#   acceptable_tod / acceptable_toe — accepted conclusions (omitted = any).
+#   expected_exceptions — exceptions the evidence shows (informational check).
+#   deficiency_acceptable — classifications a reviewer would accept in the
+#     report for this exception (on the scenario's deficiency_scale).
+#
+# Deficiency scale: scopes naming SOX / ICFR use the ICFR scale (the app picks
+# it from the scope text: swarm.audit_flow.deficiency_scale_for_scope); all
+# others use the Low / Medium / High risk rating.
+#
+# AWS plant (moto, one fresh account per run):
+#   password_policy: null = none set, or the UpdateAccountPasswordPolicy args.
+#   users: count and how many have no MFA device (spread evenly).
+#   buckets: acl / grants / policy (public_read | own_account) /
+#     policy_is_public (what AWS GetBucketPolicyStatus would return; moto
+#     does not implement it) / bucket_bpa. account_bpa is set after buckets.
+scenarios:
+  - id: s01-sox-access-no-password-policy
+    title: SOX logical access — no password policy, most users without MFA
+    theme: SOX ITGC — logical access to the AWS account hosting the general ledger
+    business_context: >-
+      Annual SOX 404 ITGC testing of logical access to the AWS account that
+      hosts the general-ledger application. Company access standard: an IAM
+      account password policy with a minimum length of 14 characters and
+      complexity; MFA for every IAM user; quarterly user access reviews
+      signed off by the application owner.
+    frameworks: [COSO 2013, SOX 404]
+    deficiency_scale: ICFR deficiency scale
+    aws:
+      password_policy: null
+      users: {count: 60, without_mfa: 40}
+    areas:
+      password_policy:
+        in_scope: true
+        expected_result: Exception
+        acceptable_tod: [Ineffective]
+        acceptable_toe: [Not tested, Ineffective]
+        deficiency_acceptable: [Control Deficiency, Significant Deficiency]
+        rationale: >-
+          The tool reports that no password policy is set, so the control is
+          not implemented: ToD Ineffective. There is nothing to test for
+          operating effectiveness. An ITGC gap with no direct link to a
+          misstatement is at most a significant deficiency before
+          compensating controls are considered.
+      iam_mfa:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 40
+        deficiency_acceptable: [Control Deficiency, Significant Deficiency]
+        rationale: >-
+          40 of 60 users have no MFA device. Whether this is recorded as a
+          design/implementation failure or as exceptions in operation, the
+          result is Exception with 40 exceptions.
+      access_review:
+        in_scope: true
+        expected_result: Not tested
+        rationale: No evidence tool covers review sign-offs.
+
+  - id: s02-strong-baseline
+    title: ISO 27001 access baseline — compliant password policy and MFA
+    theme: Cloud identity baseline for ISO/IEC 27001 surveillance audit
+    business_context: >-
+      ISO/IEC 27001 surveillance audit of identity controls in the production
+      AWS account. Standard: password policy with minimum length 14, all
+      character classes, 90-day maximum age and 24-password reuse
+      prevention; MFA on every IAM user.
+    frameworks: [ISO/IEC 27001:2022]
+    deficiency_scale: Risk rating
+    aws:
+      password_policy:
+        MinimumPasswordLength: 14
+        RequireSymbols: true
+        RequireNumbers: true
+        RequireUppercaseCharacters: true
+        RequireLowercaseCharacters: true
+        MaxPasswordAge: 90
+        PasswordReusePrevention: 24
+      users: {count: 12, without_mfa: 0}
+    areas:
+      password_policy:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        rationale: >-
+          The policy meets the standard at the time of the read: ToD Effective.
+          A single read is not operating effectiveness for the period: ToE Not
+          tested, or Effective only with a stated reliance (test of one plus
+          change-management ITGCs / config history).
+      iam_mfa:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        expected_exceptions: 0
+        rationale: All 12 users have an MFA device at the time of the read.
+
+  - id: s03-weak-password-policy
+    title: Password policy below the company standard
+    theme: IAM password policy compliance
+    business_context: >-
+      Internal audit of the IAM password configuration in the AWS account
+      used by the customer-facing platform. Company password standard:
+      minimum length 14, and at least one uppercase letter, one number and
+      one symbol.
+    frameworks: [NIST SP 800-53 IA-5]
+    deficiency_scale: Risk rating
+    aws:
+      password_policy:
+        MinimumPasswordLength: 6
+        RequireSymbols: false
+        RequireNumbers: true
+        RequireUppercaseCharacters: false
+        RequireLowercaseCharacters: true
+      users: {count: 10, without_mfa: 0}
+    areas:
+      password_policy:
+        in_scope: true
+        expected_result: Exception
+        acceptable_tod: [Ineffective]
+        acceptable_toe: [Not tested, Ineffective]
+        deficiency_acceptable: [Medium, High]
+        rationale: >-
+          Length 6 and no symbol / uppercase requirement against a standard of
+          14 with complexity: the control is not designed to meet the
+          standard (ToD Ineffective).
+      iam_mfa:
+        in_scope: false
+        expected_result: No exception
+        acceptable_toe: [Not tested, Effective]
+        rationale: Not in the stated scope; if tested, all users have MFA.
+
+  - id: s04-mfa-gaps
+    title: MFA missing for 20 of 60 users
+    theme: IAM multi-factor authentication
+    business_context: >-
+      Review of MFA enforcement for IAM users in the payments AWS account.
+      Policy: every IAM user must have an MFA device.
+    frameworks: [PCI DSS v4.0 Requirement 8.4]
+    deficiency_scale: Risk rating
+    aws:
+      password_policy:
+        MinimumPasswordLength: 14
+        RequireSymbols: true
+        RequireNumbers: true
+        RequireUppercaseCharacters: true
+        RequireLowercaseCharacters: true
+      users: {count: 60, without_mfa: 20}
+    areas:
+      iam_mfa:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 20
+        deficiency_acceptable: [Medium, High]
+        rationale: >-
+          20 of 60 users (a third) have no MFA device in a payments account:
+          an exception with 20 exceptions noted. The tool does not show
+          console access, so the rating may be tempered, but not below Medium.
+      password_policy:
+        in_scope: false
+        expected_result: No exception
+        acceptable_toe: [Not tested, Effective]
+        rationale: Not in the stated scope; if tested, the policy is strong.
+
+  - id: s05-s3-public-policy
+    title: Bucket public through its bucket policy
+    theme: S3 data exposure
+    business_context: >-
+      Review of S3 data exposure for the analytics platform. Buckets hold
+      customer exports. Standard: no bucket may be publicly accessible.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      buckets:
+        - {name: customer-exports, policy: public_read, policy_is_public: true}
+        - {name: app-logs}
+    areas:
+      s3_public_access:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 1
+        deficiency_acceptable: [Medium, High]
+        rationale: >-
+          customer-exports is PUBLIC through a Principal "*" bucket policy with
+          no Block Public Access. Customer data: High is expected; Medium is
+          accepted if the rationale weighs the object contents as unknown.
+
+  - id: s06-s3-account-bpa-mitigates
+    title: Public ACL neutralised by account-level Block Public Access
+    theme: S3 data exposure
+    business_context: >-
+      Review of S3 public access for the corporate AWS account. Standard: S3
+      Block Public Access enabled at the account level, and no bucket
+      publicly accessible.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      buckets:
+        - {name: legacy-website, acl: public-read}
+        - {name: internal-reports}
+      account_bpa:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+    areas:
+      s3_public_access:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        rationale: >-
+          legacy-website still carries a public-read ACL, but IgnorePublicAcls
+          is on at the account level, so S3 ignores it: the tool's verdict is
+          NOT_PUBLIC for both buckets and all four account-level flags are on.
+          Reporting this as an exposure is a false fail (a stale ACL is worth
+          a housekeeping observation, not a deficiency).
+
+  - id: s07-s3-authenticated-users-acl
+    title: Bucket ACL grants any AWS account read access
+    theme: S3 data exposure — partner file exchange
+    business_context: >-
+      Review of the S3 bucket used to exchange files with partners. Standard:
+      buckets are shared only with named partner accounts, never with the
+      public or with all AWS accounts.
+    frameworks: [NIST SP 800-53 AC-3]
+    deficiency_scale: Risk rating
+    aws:
+      buckets:
+        - {name: partner-dropbox, acl: authenticated-read}
+    areas:
+      s3_public_access:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 1
+        deficiency_acceptable: [Medium, High]
+        rationale: >-
+          An AuthenticatedUsers grant means any AWS account, not "our
+          authenticated users". The tool's verdict is PUBLIC.
+
+  - id: s08-s3-block-public-acls-only
+    title: Existing public ACL with only BlockPublicAcls on
+    theme: S3 public access configuration
+    business_context: >-
+      Review of the marketing assets bucket. Standard: no bucket may be
+      publicly accessible unless approved by Security; no approvals exist.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      buckets:
+        - {name: marketing-assets, acl: public-read, bucket_bpa: {BlockPublicAcls: true}}
+    areas:
+      s3_public_access:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 1
+        deficiency_acceptable: [Low, Medium, High]
+        rationale: >-
+          BlockPublicAcls only rejects new public ACLs; the existing
+          public-read grant still applies because IgnorePublicAcls is off.
+          The tool's verdict is PUBLIC. Marketing assets may be low
+          sensitivity, so any rating is accepted as long as it is raised.
+
+  - id: s09-sox-change-and-logging
+    title: Controls with no evidence tool (change management, CloudTrail)
+    theme: SOX ITGC — change management and CloudTrail logging for the ERP on AWS
+    business_context: >-
+      SOX ITGC testing for the ERP hosted on AWS: program changes are
+      approved by the change advisory board before deployment, and
+      CloudTrail logging is enabled in all regions and reviewed monthly.
+    frameworks: [COSO 2013, SOX 404]
+    deficiency_scale: ICFR deficiency scale
+    aws:
+      password_policy:
+        MinimumPasswordLength: 14
+        RequireSymbols: true
+        RequireNumbers: true
+        RequireUppercaseCharacters: true
+        RequireLowercaseCharacters: true
+      users: {count: 5, without_mfa: 0}
+    areas:
+      change_management:
+        in_scope: true
+        expected_result: Not tested
+        rationale: >-
+          No tool collects change tickets or deployment history. Any tested
+          conclusion rests on evidence that was not collected.
+      logging_monitoring:
+        in_scope: true
+        expected_result: Not tested
+        rationale: No tool reads CloudTrail configuration or review evidence.
+
+  - id: s10-root-and-user-mfa
+    title: Root user MFA is outside the tool's coverage
+    theme: Privileged access — root account and IAM user MFA
+    business_context: >-
+      Review of privileged access to the production AWS account: MFA on the
+      root user and on every IAM user; root access keys must not exist.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      users: {count: 8, without_mfa: 0}
+    areas:
+      iam_mfa:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        expected_exceptions: 0
+        rationale: All 8 IAM users have an MFA device at the time of the read.
+      root_account:
+        in_scope: true
+        expected_result: Not tested
+        rationale: >-
+          The MFA tool's own Notes say the root user is not returned by
+          iam:ListUsers. Concluding root MFA effective from that output is an
+          unsupported conclusion.
+
+  - id: s11-sox-itgc-mixed
+    title: SOX ITGC — weak password policy, MFA in place, manual controls
+    theme: SOX ITGC — access to programs and data and program change for the billing system
+    business_context: >-
+      SOX 404 ITGC testing for the billing system on AWS. Access standard:
+      password minimum length 12 with complexity and 24-password reuse
+      prevention; MFA for all IAM users; quarterly access reviews. Program
+      changes are approved before deployment.
+    frameworks: [COSO 2013, SOX 404]
+    deficiency_scale: ICFR deficiency scale
+    aws:
+      password_policy:
+        MinimumPasswordLength: 8
+        RequireSymbols: true
+        RequireNumbers: true
+        RequireUppercaseCharacters: true
+        RequireLowercaseCharacters: true
+      users: {count: 15, without_mfa: 0}
+    areas:
+      password_policy:
+        in_scope: true
+        expected_result: Exception
+        acceptable_tod: [Ineffective]
+        acceptable_toe: [Not tested, Ineffective]
+        deficiency_acceptable: [Control Deficiency, Significant Deficiency]
+        rationale: >-
+          Length 8 against a standard of 12, and no reuse prevention: the
+          design falls short of the standard.
+      iam_mfa:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        expected_exceptions: 0
+        rationale: All 15 users have MFA at the time of the read.
+      access_review:
+        in_scope: true
+        expected_result: Not tested
+        rationale: No evidence tool covers review sign-offs.
+      change_management:
+        in_scope: true
+        expected_result: Not tested
+        rationale: No evidence tool covers change approvals.
+
+  - id: s12-s3-mixed-buckets
+    title: One public bucket among four
+    theme: S3 bucket exposure across the data lake account
+    business_context: >-
+      Review of public access across the data-lake AWS account. Standard: no
+      bucket may be publicly accessible.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      buckets:
+        - {name: private-data}
+        - {name: policy-public, policy: public_read, policy_is_public: true}
+        - {name: policy-restricted, policy: public_read, policy_is_public: true, bucket_bpa: {RestrictPublicBuckets: true}}
+        - name: acl-ignored-by-bucket
+          acl: public-read
+          bucket_bpa: {BlockPublicAcls: true, IgnorePublicAcls: true, BlockPublicPolicy: true, RestrictPublicBuckets: true}
+    areas:
+      s3_public_access:
+        in_scope: true
+        expected_result: Exception
+        acceptable_toe: [Exceptions noted, Ineffective, Not tested]
+        expected_exceptions: 1
+        deficiency_acceptable: [Medium, High]
+        rationale: >-
+          Only policy-public is PUBLIC. policy-restricted (RestrictPublicBuckets)
+          and acl-ignored-by-bucket (IgnorePublicAcls) are NOT_PUBLIC. One
+          exception out of four buckets.
+
+  - id: s13-clean-account-encryption
+    title: Compliant account; encryption at rest has no evidence tool
+    theme: AWS security baseline — passwords, MFA, S3 public access and encryption at rest
+    business_context: >-
+      Baseline review of the internal tools AWS account: password policy
+      (length 14, complexity), MFA on all IAM users, S3 Block Public Access
+      at the account level, and SSE-KMS encryption at rest for every bucket.
+    frameworks: [CIS AWS Foundations Benchmark]
+    deficiency_scale: Risk rating
+    aws:
+      password_policy:
+        MinimumPasswordLength: 14
+        RequireSymbols: true
+        RequireNumbers: true
+        RequireUppercaseCharacters: true
+        RequireLowercaseCharacters: true
+      users: {count: 20, without_mfa: 0}
+      buckets:
+        - {name: tools-artifacts}
+        - {name: tools-state}
+      account_bpa:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+    areas:
+      password_policy:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        rationale: Policy meets the stated standard at the time of the read.
+      iam_mfa:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        expected_exceptions: 0
+        rationale: All 20 users have MFA.
+      s3_public_access:
+        in_scope: true
+        expected_result: No exception
+        acceptable_tod: [Effective]
+        acceptable_toe: [Not tested, Effective]
+        rationale: Both buckets NOT_PUBLIC; all four account-level flags on.
+      encryption_at_rest:
+        in_scope: true
+        expected_result: Not tested
+        rationale: >-
+          No tool reads bucket encryption. The S3 public-access output says
+          nothing about encryption.

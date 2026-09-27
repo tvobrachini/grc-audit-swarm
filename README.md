@@ -315,7 +315,18 @@ PYTHONPATH=. uv run pytest tests/eval -v      # add -s to print the scenario sco
 
 moto does not implement everything faithfully. `GetBucketPolicyStatus` returns no `IsPublic` value, moto accepts public ACLs and policies that Block Public Access would reject, it returns only one grant for the `public-read-write` canned ACL, and it does not paginate `ListUsers`. The test module lists how each gap is handled, and `tests/test_aws_checks.py` covers those branches (policy status, access denied on each read, pagination markers) with botocore Stubber against the real AWS API models. For policy scenarios, the scenario states the `IsPublic` value AWS returns for the planted policy, so those rows test how the tool combines that value with the ACL and Block Public Access, not AWS's policy evaluation.
 
-This does not evaluate the LLM agents: whether they draw the right conclusion from the evidence, and the quality of the working papers and report, are still unmeasured.
+This does not evaluate the LLM agents. That is the job of the harness below.
+
+### LLM-layer evaluation
+
+`evals/` measures whether the agents draw the right audit conclusions. It runs 13 scenarios through the real pipeline (Planning, gates, Fieldwork, Reporting) against moto-seeded accounts with your LLM provider, maps findings to control areas and scores them against a versioned answer key. The metrics are false-pass rate, false-fail rate, "Not tested" correctness, ToE basis for configuration reads, citation faithfulness, coverage, QA catch rate on seeded bad working papers, deficiency-classification agreement and run-to-run consistency. Raw JSON is saved so every number can be traced back.
+
+```bash
+uv run python -m evals.run --runs 3 --scenarios all --out evals/results/     # real model calls: costs money, never in CI
+uv run python -m evals.run --replay evals/fixtures/replay --out /tmp/replay  # offline; tested in CI
+```
+
+**No results are published yet.** The answer key is an AI-assisted draft awaiting the owner's review, and the runner prints that status at the top of every report. Metric definitions, the scenario list, cost and limitations are in [docs/EVALUATION.md](docs/EVALUATION.md).
 
 CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
 

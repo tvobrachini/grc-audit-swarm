@@ -1,0 +1,55 @@
+{
+  "scenario": "s06-s3-account-bpa-mitigates",
+  "description": "Replay fixture (canned crew outputs, not model output). Run 1 concludes correctly but states ToE Effective from a single read with no reliance (ToE-basis violation). Run 2 is a false fail (the ignored public ACL reported as an exposure) with a spurious deficiency, after one QA rejection and automatic retry.",
+  "runs": [
+    {
+      "planning": {
+        "qa": {"approved": true},
+        "racm": {
+          "risks": {"RISK-01": "Corporate data exposed through public S3 buckets."},
+          "controls": [
+            {"control_id": "S3-01", "risk_id": "RISK-01", "description": "S3 Block Public Access is enabled at the account level and no bucket is publicly accessible.", "tod": "Run list_public_s3_buckets and inspect the account-level Block Public Access and each bucket verdict."}
+          ]
+        }
+      },
+      "fieldwork": {
+        "qa": {"approved": true},
+        "working_papers": {
+          "findings": [
+            {"control_id": "S3-01", "vault_id_reference": "@tool:list_public_s3_buckets", "exact_quote_from_evidence": "\"Verdict\": \"NOT_PUBLIC\"", "tod_conclusion": "Effective", "toe_conclusion": "Effective", "toe_basis": "Configuration observed at the time of testing.", "items_tested": 2, "exceptions_noted": 0, "result": "No exception", "test_conclusion": "Both buckets are not public and account-level Block Public Access is on."}
+          ]
+        }
+      },
+      "reporting": {"qa": {"approved": true}, "deficiency_scale": "Risk rating", "deficiency_evaluations": []}
+    },
+    {
+      "planning": {
+        "qa": {"approved": true},
+        "racm": {
+          "risks": {"RISK-01": "Corporate data exposed through public S3 buckets."},
+          "controls": [
+            {"control_id": "S3-01", "risk_id": "RISK-01", "description": "No S3 bucket grants public access through ACLs or bucket policies.", "tod": "Run list_public_s3_buckets."}
+          ]
+        }
+      },
+      "fieldwork": {
+        "qa": [
+          {"approved": false, "rejection_reason": "S3-01: state items_tested (replay fixture)."},
+          {"approved": true}
+        ],
+        "working_papers": {
+          "findings": [
+            {"control_id": "S3-01", "vault_id_reference": "@tool:list_public_s3_buckets", "exact_quote_from_evidence": "ACL has public grants (AllUsers READ)", "tod_conclusion": "Ineffective", "toe_conclusion": "Not tested", "toe_basis": "Point-in-time read.", "items_tested": 2, "exceptions_noted": 1, "result": "Exception", "test_conclusion": "legacy-website has a public-read ACL."}
+          ]
+        }
+      },
+      "reporting": {
+        "qa": {"approved": true},
+        "deficiency_scale": "Risk rating",
+        "deficiency_evaluations": [
+          {"deficiency_id": "DEF-01", "title": "Public ACL on legacy-website", "related_findings": ["S3-01"], "compensating_controls": "None identified.", "likelihood": "Medium", "magnitude": "Medium", "classification": "Medium", "rationale": "Replay fixture: spurious, the ACL is ignored."}
+        ]
+      }
+    }
+  ]
+}
