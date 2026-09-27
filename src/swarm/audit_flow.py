@@ -1,9 +1,16 @@
+import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, UTC
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from pathlib import Path
 from typing import Any, Callable, Optional
 
-from swarm.state.schema import AuditState  # noqa: F401 (re-exported for backwards compat)
+from swarm.state.schema import (  # noqa: F401 (re-exported for backwards compat)
+    AuditState,
+    GenerationRun,
+)
 from swarm.state.machine import (
     AuditStatus,
     AuditStateMachine,
@@ -13,8 +20,13 @@ from swarm.crews.planning_crew import PlanningCrew
 from swarm.crews.fieldwork_crew import FieldworkCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
-from swarm.demo import DemoCrew, demo_mode_enabled, demo_reject_phase
-from swarm.evidence import unverified_findings
+from swarm.demo import (
+    DemoCrew,
+    demo_mode_enabled,
+    demo_mode_requested,
+    demo_reject_phase,
+)
+from swarm.evidence import app_version as evidence_app_version, unverified_findings
 from swarm.review_policy import (
     ReviewBlockedError,
     SegregationOfDutiesError,
@@ -114,6 +126,65 @@ def _qa_rejection(qa_output: Any) -> Optional[str]:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# ── Generation provenance (see DECISIONS.md, ADR-010) ──────────────────────
+
+_CONFIG_DIR = Path(__file__).parent / "config"
+# Per phase: the agent/task YAML files whose content is fingerprinted.
+_PHASE_CONFIG_FILES: dict[int, tuple[str, str]] = {
+    1: ("planning_agents.yaml", "planning_tasks.yaml"),
+    2: ("fieldwork_agents.yaml", "fieldwork_tasks.yaml"),
+    3: ("reporting_agents.yaml", "reporting_tasks.yaml"),
+}
+
+
+def prompt_fingerprint(phase: int, skill_context: list[Any]) -> str:
+    """Deterministic SHA-256 fingerprint of the prompts a phase run used.
+
+    Covers the phase's agent and task YAML config files (raw bytes, as
+    loaded by the crew) and the specialist prompt text injected into an
+    agent's backstory for any active domain skill (``skill_loader
+    .get_specialist_prompt``), in that order. The same config files plus the
+    same active skills always hash to the same value; a change to either
+    changes it. Each part is length-prefixed before hashing so that
+    concatenating differently split content can never collide.
+
+    Only the *prompt* fingerprint changes on a skill toggle or a config edit;
+    a difference does not by itself mean the model call itself was
+    different — see ADR-010 for what this can and cannot prove.
+    """
+    parts: list[bytes] = [
+        (_CONFIG_DIR / name).read_bytes() for name in _PHASE_CONFIG_FILES[phase]
+    ]
+    if skill_context:
+        from swarm.skill_loader import get_specialist_prompt
+
+        parts.append(get_specialist_prompt(skill_context).encode("utf-8"))
+    digest = hashlib.sha256()
+    for part in parts:
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return digest.hexdigest()
+
+
+def _crewai_version() -> str:
+    try:
+        return _pkg_version("crewai")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+# Fixed at import time: it cannot change while the process is running.
+_CREWAI_VERSION = _crewai_version()
+_APP_VERSION = evidence_app_version()
+
+# Crew / QA temperatures, matching the crews' Agent construction
+# (swarm.crews.*_crew): base agents at 0.1, QA reviewers at 0.0. Recorded
+# here so a generation run states the temperature it used without having to
+# re-derive it from the crew classes.
+_CREW_TEMPERATURE = 0.1
+_QA_TEMPERATURE = 0.0
 
 
 def _require_text(value: str, what: str) -> str:
@@ -339,6 +410,79 @@ class AuditFlow:
         entry.update(extra)
         audit_trail.append_entry(self.state.approval_trail, entry)
 
+    # ── Generation provenance ────────────────────────────────────────────────
+
+    def _start_generation_run(self, phase: int) -> GenerationRun:
+        """Begin recording generation provenance for one phase run.
+
+        Appended to ``state.generation_runs`` immediately (``outcome`` starts
+        as ``"running"``) so a run is recorded even if the crew never
+        returns; ``_run_crew_with_qa`` fills in ``attempts``, ``ended_at``
+        and the final ``outcome`` as the run progresses.
+
+        Uses ``demo_mode_requested`` (never raises) rather than
+        ``demo_mode_enabled`` (raises when DEMO_MODE is set in a blocked
+        environment): that guard's raise must surface from inside the crew
+        build/kickoff try/except in ``_run_crew_with_qa`` exactly as before,
+        not here, before a run record even exists.
+        """
+        demo = demo_mode_requested()
+        if demo:
+            crew_info = {"provider": "demo", "model": "fixed-content"}
+            qa_info = {"provider": "demo", "model": "fixed-content"}
+        else:
+            from swarm.llm_factory import describe_crew_llm, describe_qa_llm
+
+            try:
+                crew_info = describe_crew_llm()
+            except Exception:
+                # No provider configured: the crew build that follows raises
+                # the same error and is handled there (_fail_phase). This
+                # run record still gets stamped so the failed attempt has one.
+                crew_info = {"provider": "unknown", "model": "unknown"}
+            try:
+                qa_info = describe_qa_llm()
+            except Exception:
+                qa_info = {"provider": "unknown", "model": "unknown"}
+        run = GenerationRun(
+            run_id=str(uuid.uuid4()),
+            phase=phase,
+            provider=crew_info["provider"],
+            model=crew_info["model"],
+            qa_provider=qa_info["provider"],
+            qa_model=qa_info["model"],
+            temperature=0.0 if demo else _CREW_TEMPERATURE,
+            qa_temperature=0.0 if demo else _QA_TEMPERATURE,
+            crewai_version=_CREWAI_VERSION,
+            app_version=_APP_VERSION,
+            prompt_fingerprint=prompt_fingerprint(phase, self._skill_context),
+            started_at=_now(),
+            demo_mode=demo,
+        )
+        self.state.generation_runs.append(run)
+        return run
+
+    def _latest_run_for_phase(self, phase: int) -> Optional[GenerationRun]:
+        for run in reversed(self.state.generation_runs):
+            if run.phase == phase:
+                return run
+        return None
+
+    def _run_provenance_extra(self, phase: int) -> dict[str, str]:
+        """Trail-entry fields tying an action to the generation run it acted
+        on: the run id, its prompt fingerprint, and its provider/model —
+        enough to say exactly what was reviewed (see ADR-010). Empty when no
+        run has been recorded yet for this phase (e.g. a snapshot from
+        before this field existed)."""
+        run = self._latest_run_for_phase(phase)
+        if run is None:
+            return {}
+        return {
+            "generation_run_id": run.run_id,
+            "generation_prompt_fingerprint": run.prompt_fingerprint,
+            "generation_model": f"{run.provider}/{run.model}",
+        }
+
     def verify_trail(self, anchor: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Verify the approval trail's hash chain (see :mod:`swarm.trail`).
 
@@ -465,6 +609,7 @@ class AuditFlow:
             "gate_approval",
             artifact=field,
             artifact_digest=audit_trail.artifact_digest(artifact),
+            **self._run_provenance_extra(gate),
         )
         if gate == 3:
             self.state.current_human_dossier = (
@@ -545,6 +690,7 @@ class AuditFlow:
             "retry",
             previous_status=previous,
             previous_reason=self.state.qa_rejection_reason or "",
+            **self._run_provenance_extra(phase),
         )
         self.state.current_human_dossier = (
             f"{_PHASE_LABELS[phase]} retry requested by {human_id}; the phase is "
@@ -579,6 +725,7 @@ class AuditFlow:
         extra = {"notes": notes, "artifact": field}
         if artifact is not None:
             extra["artifact_digest"] = audit_trail.artifact_digest(artifact)
+        extra.update(self._run_provenance_extra(phase))
         self._stamp_trail(
             f"Return for rework ({_PHASE_LABELS[phase]})",
             human_id,
@@ -629,6 +776,7 @@ class AuditFlow:
         unverified = self.unverified_evidence() if phase == 2 else []
         if unverified:
             extra["unverified_controls"] = ",".join(unverified)
+        extra.update(self._run_provenance_extra(phase))
         self.machine.override_qa(phase)
         self._commit_status()
         self._stamp_trail(
@@ -739,8 +887,13 @@ class AuditFlow:
         rejection: Optional[str] = None
         qa_rejected = False
         artifact: Any = None
+        # Generation provenance for this attempted run (ADR-010): started
+        # now, filled in as the run progresses, and never removed even if
+        # every attempt fails.
+        gen_run = self._start_generation_run(phase)
 
         for attempt in range(1, _MAX_QA_ATTEMPTS + 1):
+            gen_run.attempts = attempt
             run = "crew" if attempt == 1 else "crew retry"
             try:
                 result = build_crew().kickoff(inputs=inputs)
@@ -749,6 +902,8 @@ class AuditFlow:
                 artifact = adapter.get(artifact_task).pydantic
             except Exception as exc:
                 logger.exception("%s %s failed", label, run)
+                gen_run.ended_at = _now()
+                gen_run.outcome = "error"
                 self._fail_phase(phase, f"{label} {run} error: {exc}")
                 return False
 
@@ -786,6 +941,8 @@ class AuditFlow:
             except Exception:
                 logger.warning("Rejected %s draft failed validation", field)
                 setattr(self.state, field, None)
+            gen_run.ended_at = _now()
+            gen_run.outcome = "qa_rejected"
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection
@@ -802,6 +959,8 @@ class AuditFlow:
             return False
 
         if artifact is None:
+            gen_run.ended_at = _now()
+            gen_run.outcome = "error"
             self._fail_phase(
                 phase,
                 f"{label} crew produced no {field}: the output could not be "
@@ -812,8 +971,12 @@ class AuditFlow:
             setattr(self.state, field, artifact)
         except Exception as exc:
             logger.exception("%s artifact failed validation", label)
+            gen_run.ended_at = _now()
+            gen_run.outcome = "error"
             self._fail_phase(phase, f"{label} crew produced an invalid {field}: {exc}")
             return False
+        gen_run.ended_at = _now()
+        gen_run.outcome = "qa_approved"
         return True
 
     # ── Crew construction ────────────────────────────────────────────────────

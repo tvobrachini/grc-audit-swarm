@@ -8,6 +8,8 @@ import os
 import datetime
 import base64
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,36 @@ _UUID_RE = re.compile(
 # A quote shorter than this proves little: it would match almost any payload
 # by chance (e.g. a lone word or punctuation).
 _MIN_QUOTE_LENGTH = 8
+
+# Repo root: src/swarm/evidence.py -> src/swarm -> src -> repo root.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@lru_cache(maxsize=1)
+def app_version() -> str:
+    """The running app's version — for generation and evidence provenance.
+
+    Tries the installed package's metadata first (the case in a built image);
+    falls back to ``pyproject.toml``'s ``project.version`` (the case running
+    from a source checkout, as in local dev and tests, where the project is
+    never installed as a distribution). ``"unknown"`` if neither is
+    available.
+    """
+    try:
+        return _pkg_version("grc-audit-swarm")
+    except PackageNotFoundError:
+        pass
+    try:
+        import tomllib
+
+        with open(_REPO_ROOT / "pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+        version = data.get("project", {}).get("version")
+        if isinstance(version, str) and version:
+            return version
+    except (OSError, ValueError, tomllib.TOMLDecodeError):
+        pass
+    return "unknown"
 
 
 def _get_fernet():
@@ -109,6 +141,40 @@ def _redact_account_ids(text: str) -> str:
     return _ACCOUNT_ID_RE.sub("[REDACTED]", text)
 
 
+def _sanitize_metadata(value: Any) -> Any:
+    """Redact AWS account IDs from every string in ``value``, recursively.
+
+    Applied to collection metadata (region, operation, caller identity …)
+    before it is stored or hashed. Metadata must already be free of secrets
+    and credentials — see :meth:`EvidenceAssuranceProtocol.register_evidence`.
+    """
+    if isinstance(value, str):
+        return _redact_account_ids(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_metadata(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_metadata(v) for v in value]
+    return value
+
+
+def _digest_input(payload: str, metadata: Optional[dict[str, Any]]) -> str:
+    """Text whose hash is the record's integrity digest.
+
+    Binds non-sensitive collection metadata (region, operation, caller
+    identity …) into the same digest as the payload, so tampering with either
+    is detected the same way (see DECISIONS.md, ADR-010). A record with no
+    metadata — every record written before this field existed, and any
+    record that is not given one — hashes the payload alone, identical to
+    before, so old digests keep verifying unchanged.
+    """
+    if not metadata:
+        return payload
+    canonical_metadata = json.dumps(
+        metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return payload + "\x00" + canonical_metadata
+
+
 class EvidenceAssuranceProtocol:
     """Integrity digest (SHA-256, or HMAC-SHA256 when encrypted) plus exact-quote check for collected audit evidence."""
 
@@ -117,18 +183,35 @@ class EvidenceAssuranceProtocol:
         return os.environ.get("EVIDENCE_VAULT_PATH", _DEFAULT_EVIDENCE_DIR)
 
     @staticmethod
-    def register_evidence(raw_payload: str, source_mcp_operation: str) -> dict:
+    def register_evidence(
+        raw_payload: str,
+        source_mcp_operation: str,
+        *,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict:
         """
         Receives raw payload from an MCP, scrubs AWS account IDs, computes an
         integrity digest (SHA-256, or HMAC-SHA256 keyed from VAULT_ENCRYPTION_KEY
         when the vault is encrypted), stores it on disk, and returns the
         Vault-ID and digest.
+
+        ``metadata`` is optional, non-sensitive collection context (AWS
+        region, the API operation(s) called and their non-sensitive
+        parameters, the collecting tool's name, the app version, and the
+        caller's identity as an ARN with the account id redacted — never a
+        key, token or credential). Every string in it is redacted the same
+        way as the payload before it is stored. When given, it is folded into
+        the same integrity digest as the payload (see ``_digest_input`` and
+        ADR-010), so tampering with either is detected the same way; a
+        record with no metadata hashes the payload alone, exactly as before.
         """
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
         os.makedirs(evidence_dir, exist_ok=True)
 
         # Redact 12-digit AWS account IDs before they leave the environment.
         sanitized_payload = _redact_account_ids(raw_payload)
+        sanitized_metadata = _sanitize_metadata(metadata) if metadata else None
+        digest_input = _digest_input(sanitized_payload, sanitized_metadata)
 
         vault_id = str(uuid.uuid4())
         fernet = _get_fernet()
@@ -137,9 +220,7 @@ class EvidenceAssuranceProtocol:
             # Keyed digest: a bare SHA-256 beside the ciphertext would leak
             # guessable payloads (see _keyed_digest).
             digest_field = "hmac_sha256"
-            digest = _keyed_digest(
-                sanitized_payload, os.environ["VAULT_ENCRYPTION_KEY"]
-            )
+            digest = _keyed_digest(digest_input, os.environ["VAULT_ENCRYPTION_KEY"])
             stored_payload = fernet.encrypt(sanitized_payload.encode("utf-8")).decode(
                 "ascii"
             )
@@ -147,7 +228,7 @@ class EvidenceAssuranceProtocol:
             # Plaintext is stored alongside, so the hash reveals nothing extra;
             # it detects accidental corruption only.
             digest_field = "sha256"
-            digest = hashlib.sha256(sanitized_payload.encode("utf-8")).hexdigest()
+            digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
             stored_payload = sanitized_payload
 
         evidence_record = {
@@ -158,6 +239,8 @@ class EvidenceAssuranceProtocol:
             "raw_payload": stored_payload,
             "encrypted": encrypted,
         }
+        if sanitized_metadata is not None:
+            evidence_record["metadata"] = sanitized_metadata
 
         filepath = os.path.join(evidence_dir, f"{vault_id}.json")
         with open(filepath, "w") as f:
@@ -205,16 +288,22 @@ class EvidenceAssuranceProtocol:
                     return False
                 payload = fernet.decrypt(payload.encode("ascii")).decode("utf-8")
 
+            # Metadata (if any) was folded into the digest at registration
+            # time — see _digest_input. Records written before metadata
+            # existed have none, so this reproduces the original digest input
+            # (the payload alone) for them, unchanged.
+            digest_input = _digest_input(payload, evidence_record.get("metadata"))
+
             if "hmac_sha256" in evidence_record:
                 key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
                 if not key_b64:
                     return False
-                expected = _keyed_digest(payload, key_b64)
+                expected = _keyed_digest(digest_input, key_b64)
                 stored = evidence_record["hmac_sha256"]
             else:
                 # Unencrypted records, and encrypted records written before
                 # the keyed digest was introduced.
-                expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                expected = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
                 stored = evidence_record["sha256"]
             if not hmac.compare_digest(expected, str(stored)):
                 return False
@@ -278,7 +367,8 @@ class EvidenceAssuranceProtocol:
                 payload = fernet.decrypt(record["raw_payload"].encode("ascii")).decode(
                     "utf-8"
                 )
-                plain = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                digest_input = _digest_input(payload, record.get("metadata"))
+                plain = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()
                 if not hmac.compare_digest(plain, str(record["sha256"])):
                     logger.error(
                         "Not migrating %s: payload does not match its stored "
@@ -289,7 +379,7 @@ class EvidenceAssuranceProtocol:
                     continue
 
                 del record["sha256"]
-                record["hmac_sha256"] = _keyed_digest(payload, key_b64)
+                record["hmac_sha256"] = _keyed_digest(digest_input, key_b64)
                 tmp_path = f"{filepath}.tmp"
                 try:
                     with open(tmp_path, "w") as f:
