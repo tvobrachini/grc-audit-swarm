@@ -160,7 +160,9 @@ def make_aws_tools(session_id: str):
     return [get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets]
 
 
-# Module-level exports for tests and MCP server
+# Session-less instances for the tests and the evaluation harness (evals/),
+# which look tools up by name. Evidence they register is not bound to a
+# session; audit runs build their own via the factory above.
 _test_tools = make_aws_tools(None)
 get_iam_password_policy = _test_tools[0]
 list_iam_users_with_mfa = _test_tools[1]

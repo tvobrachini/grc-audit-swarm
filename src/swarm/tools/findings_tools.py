@@ -222,7 +222,9 @@ def make_findings_tools(session_id: str):
     return [import_prowler_findings, get_securityhub_findings]
 
 
-# Module-level exports for tests and MCP server
+# Session-less instances for the tests and the evaluation harness (evals/),
+# which look tools up by name. Evidence they register is not bound to a
+# session; audit runs build their own via the factory above.
 _test_tools = make_findings_tools(None)
 import_prowler_findings = _test_tools[0]
 get_securityhub_findings = _test_tools[1]
