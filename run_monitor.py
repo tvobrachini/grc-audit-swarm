@@ -16,7 +16,7 @@ import os
 import logging
 import argparse
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── env bootstrap ──────────────────────────────────────────────────────────────
 from dotenv import load_dotenv
@@ -119,7 +119,7 @@ def run_phase1(flow) -> bool:
     print(f"  Theme:   {flow.state.theme}")
     print(f"  Context: {flow.state.business_context}")
     print(f"  Frameworks: {flow.state.frameworks}\n")
-    t0 = datetime.utcnow()
+    t0 = datetime.now(timezone.utc)
     try:
         flow.generate_planning()
     except Exception:
@@ -127,7 +127,7 @@ def run_phase1(flow) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.utcnow() - t0).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 1: {status}  ({elapsed:.1f}s)")
 
@@ -186,7 +186,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
         print("  ✅ Mock working papers injected.")
         return True
 
-    t0 = datetime.utcnow()
+    t0 = datetime.now(timezone.utc)
     flow.begin_phase_2(MONITOR_IN_CHARGE)
     try:
         flow.generate_fieldwork()
@@ -195,7 +195,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.utcnow() - t0).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 2: {status}  ({elapsed:.1f}s)")
 
@@ -239,7 +239,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
 
 def run_phase3(flow) -> bool:
     section("PHASE 3 — REPORTING CREW")
-    t0 = datetime.utcnow()
+    t0 = datetime.now(timezone.utc)
     flow.begin_phase_3(MONITOR_IN_CHARGE)
     try:
         flow.generate_reporting()
@@ -248,7 +248,7 @@ def run_phase3(flow) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.utcnow() - t0).total_seconds()
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 3: {status}  ({elapsed:.1f}s)")
 

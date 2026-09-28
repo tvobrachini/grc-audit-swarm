@@ -84,8 +84,8 @@ With your own provider key. This makes paid model calls:
 
 ```bash
 uv sync
-# One provider, as for the app: GEMINI_API_KEY / OPENAI_API_KEY / GROQ_API_KEY /
-# NVIDIA_API_KEY / OLLAMA_MODEL, in the environment or .env.
+# One provider, as for the app: OLLAMA_MODEL / NVIDIA_API_KEY / OPENROUTER_API_KEY /
+# GEMINI_API_KEY / OPENAI_API_KEY / GROQ_API_KEY, in the environment or .env.
 # Optional: QA_LLM_MODEL (+ QA_LLM_API_KEY / QA_LLM_BASE_URL) for an independent QA model.
 uv run python -m evals.run --runs 3 --scenarios all --out evals/results/
 

@@ -14,7 +14,7 @@ The workflow runs three CrewAI crews in sequence. Each crew ends with a QA revie
 
 **QA gates (automatic).** QA reviewers run at temperature 0. The other agents run at 0.1. If QA rejects the output, or its answer cannot be parsed, the phase counts as rejected: QA fails closed. The flow then re-runs the crew once with the rejection reason added to the drafting prompt. This happens in all three phases. A second rejection stops the phase in `QA_REJECTED_PHASE_n` and keeps the rejected draft for review. A crew error stops it in `ERROR_PHASE_n`.
 
-**Deterministic evidence check (Fieldwork).** After the QA agent, every finding's quote is checked in code against the evidence vault record it cites; no model is involved. A finding with an empty quote passes only if it concludes the control was "Not tested". A quote that does not verify counts as a QA rejection whose reason lists the control IDs, so it goes through the same automatic retry and, if it fails again, stops in `QA_REJECTED_PHASE_2`. A supervisor can still override it with a written reason; the override records which controls were accepted unverified and a digest of the working papers it applies to. Approving Gate 2 re-runs the check and is refused (409) if a quote no longer verifies and was not accepted by an override of those exact working papers.
+**Deterministic evidence check (Fieldwork).** After the QA agent, every finding's quote is checked in code against the evidence vault record it cites; no model is involved. A finding with an empty quote passes only if it concludes the control was "Not tested". A quote shorter than 15 characters never verifies: a fragment such as `"users": 60` would match almost any payload by chance, so it proves nothing about the record it cites. A quote that does not verify counts as a QA rejection whose reason lists the control IDs, so it goes through the same automatic retry and, if it fails again, stops in `QA_REJECTED_PHASE_2`. A supervisor can still override it with a written reason; the override records which controls were accepted unverified and a digest of the working papers it applies to. Approving Gate 2 re-runs the check and is refused (409) if a quote no longer verifies and was not accepted by an override of those exact working papers.
 
 **QA independence (optional).** By default the QA reviewers use the same provider and model as the agents whose work they check, so they share its blind spots: a QA approval from the same model is not an independent review. `QA_LLM_MODEL` (with optional `QA_LLM_API_KEY` and `QA_LLM_BASE_URL`) gives the QA reviewers a different model through `get_qa_llm()` in `src/swarm/llm_factory.py`. A different model is still not a human reviewer.
 
@@ -153,7 +153,7 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evidence-layer evaluation in `tests/eval/`). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, the OSCAL export against the vendored NIST schema, generation provenance, and the API (gates, retry and override, exports, scope upload, DEMO_MODE, and a 404 for streaming an unknown session's event stream, which also fixes unbounded queue growth for ids nobody created). At the time of writing: 714 Python tests (95% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 21 frontend tests (Vitest and React Testing Library).
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evidence-layer evaluation in `tests/eval/`). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, the OSCAL export against the vendored NIST schema, generation provenance, and the API (gates, retry and override, exports, scope upload, DEMO_MODE, and a 404 for streaming an unknown session's event stream, which also fixes unbounded queue growth for ids nobody created). At the time of writing: 980 Python tests (96% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 39 frontend tests (Vitest and React Testing Library).
 
 ### Evidence-layer evaluation
 
@@ -187,7 +187,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
 
 - pre-commit hooks (ruff lint and format, bandit, detect-secrets, pip-audit, file hygiene);
 - pyright on `src/`;
-- pytest on Python 3.11, 3.12 and 3.13, failing below 50% coverage;
+- pytest on Python 3.11, 3.12 and 3.13, failing below 90% coverage;
 - bandit, and pip-audit against the exported `uv.lock` requirements (the ignored advisories are listed and explained in the workflow);
 - frontend lint, build and `npm audit --audit-level=high`;
 - Docker builds for both images and `docker compose config`. The API image runs Python 3.13, the newest version the test matrix covers.
