@@ -107,7 +107,9 @@ UNTRUSTED_BEGIN = (
 UNTRUSTED_END = "<<<END UNTRUSTED SCANNER OUTPUT>>>"
 
 
-def _register_and_format(raw_output: str, source: str, *, metadata: dict, session_id: str | None = None) -> str:
+def _register_and_format(
+    raw_output: str, source: str, *, metadata: dict, session_id: str | None = None
+) -> str:
     vault_record = EvidenceAssuranceProtocol.register_evidence(
         raw_output, source, metadata=metadata, session_id=session_id
     )
@@ -160,7 +162,7 @@ def make_findings_tools(session_id: str):
                 return f"Error reading Prowler findings file: {exc.strerror or exc}"
             except FindingsImportError as exc:
                 return f"Error importing Prowler findings: {exc}"
-            
+
             raw_output = build_prowler_summary(result)
 
         source = "prowler.findings_import"
@@ -169,10 +171,9 @@ def make_findings_tools(session_id: str):
             "local_file_read",
             parameters={"source_path_basename": os.path.basename(path)},
         )
-        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
-
-
-
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
 
     @tool("Get Security Hub Findings")
     def get_securityhub_findings(context: str = "") -> str:
@@ -214,9 +215,12 @@ def make_findings_tools(session_id: str):
             region=region,
             parameters={"filters": filters, "max_findings": max_findings},
         )
-        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
 
     return [import_prowler_findings, get_securityhub_findings]
+
 
 # Module-level exports for tests and MCP server
 _test_tools = make_findings_tools(None)

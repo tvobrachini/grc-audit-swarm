@@ -175,7 +175,9 @@ class TestVerifyExactQuote:
         key = base64.urlsafe_b64encode(_os.urandom(32)).decode()
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
-        result = EvidenceAssuranceProtocol.register_evidence("secret payload data", "op")
+        result = EvidenceAssuranceProtocol.register_evidence(
+            "secret payload data", "op"
+        )
         # Vault file should NOT contain plaintext
         import json as _json
 

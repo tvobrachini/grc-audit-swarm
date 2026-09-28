@@ -32,6 +32,7 @@ REPLAY = Path(__file__).resolve().parent.parent / "evals" / "fixtures" / "replay
 _PROVIDER_VARS = (
     "OLLAMA_MODEL",
     "NVIDIA_API_KEY",
+    "OPENROUTER_API_KEY",
     "GEMINI_API_KEY",
     "OPENAI_API_KEY",
     "GROQ_API_KEY",
@@ -306,8 +307,10 @@ def test_replay_scores_every_metric(replay_results):
     assert _metric(data, "not_tested_correctness") == (9, 11)
     # s06 run 1: ToE Effective on a single read with no reliance.
     assert _metric(data, "toe_basis_correctness") == (5, 6)
-    # s09 run 1: fabricated quote.
-    assert _metric(data, "citation_faithfulness") == (7, 8)
+    # s09 run 1: fabricated quote. s01 run 2 AC-2/AC-3: quotes below the
+    # 15-char minimum ("with_mfa": 20 / "users": 60) are too generic to
+    # verify, so the stricter minimum correctly counts them as unfaithful too.
+    assert _metric(data, "citation_faithfulness") == (5, 8)
     # s09 run 2 has no logging control.
     assert _metric(data, "coverage") == (11, 12)
     # s01 run 2 Material Weakness; s06 run 2 spurious Medium.
