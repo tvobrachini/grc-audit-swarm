@@ -18,6 +18,7 @@ def clear_api_keys(monkeypatch):
         "OLLAMA_MODEL",
         "NVIDIA_API_KEY",
         "NVIDIA_NIM_API_KEY",
+        "OPENROUTER_API_KEY",
         "GEMINI_API_KEY",
         "OPENAI_API_KEY",
         "GROQ_API_KEY",

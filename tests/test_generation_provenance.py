@@ -92,6 +92,7 @@ class TestDescribeCrewLLM:
         for var in (
             "OLLAMA_MODEL",
             "NVIDIA_API_KEY",
+            "OPENROUTER_API_KEY",
             "GEMINI_API_KEY",
             "OPENAI_API_KEY",
             "GROQ_API_KEY",
@@ -108,7 +109,13 @@ class TestDescribeCrewLLM:
         _no_secrets_anywhere(info)
 
     def test_openai_selected_when_only_that_key_is_set(self, monkeypatch):
-        for var in ("OLLAMA_MODEL", "NVIDIA_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
+        for var in (
+            "OLLAMA_MODEL",
+            "NVIDIA_API_KEY",
+            "OPENROUTER_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+        ):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-demo-super-secret-openai-key")
         info = describe_crew_llm()
@@ -116,7 +123,7 @@ class TestDescribeCrewLLM:
         _no_secrets_anywhere(info)
 
     def test_gemini_model_override_is_reflected(self, monkeypatch):
-        for var in ("OLLAMA_MODEL", "NVIDIA_API_KEY"):
+        for var in ("OLLAMA_MODEL", "NVIDIA_API_KEY", "OPENROUTER_API_KEY"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("GEMINI_API_KEY", "AIzaDemoSuperSecretGeminiKey")
         monkeypatch.setenv("GEMINI_MODEL", "gemini-custom")
@@ -380,7 +387,7 @@ class TestEvidenceMetadata:
             "legacy payload with no metadata", "op"
         )
         assert EvidenceAssuranceProtocol.verify_exact_quote(
-            result["vault_id"], "legacy payload"
+            result["vault_id"], "legacy payload with no metadata"
         )
         record = json.loads((tmp_path / f"{result['vault_id']}.json").read_text())
         assert "metadata" not in record

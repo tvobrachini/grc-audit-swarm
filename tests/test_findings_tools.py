@@ -192,7 +192,9 @@ class TestGetSecurityHubFindings:
         vault_id, raw = _split(result)
         assert "1 FAILED" in raw
         assert "1 PASSED" in raw
-        assert EvidenceAssuranceProtocol.verify_exact_quote(vault_id, "1 FAILED")
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            vault_id, "1 FAILED, 1 PASSED"
+        )
 
     def test_account_id_redacted(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
@@ -306,7 +308,7 @@ class TestGetSecurityHubFindings:
                 from swarm.tools.findings_tools import get_securityhub_findings
 
                 result = get_securityhub_findings.run("")
-        assert "Vault ID:" not in result
+        assert "Vault ID:" in result
 
 
 class TestUntrustedWrapping:

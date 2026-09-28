@@ -69,7 +69,9 @@ def _collection_metadata(
     return metadata
 
 
-def _register_and_format(raw_output: str, source: str, *, metadata: dict, session_id: str | None = None) -> str:
+def _register_and_format(
+    raw_output: str, source: str, *, metadata: dict, session_id: str | None = None
+) -> str:
     vault_record = EvidenceAssuranceProtocol.register_evidence(
         raw_output, source, metadata=metadata, session_id=session_id
     )
@@ -86,7 +88,7 @@ def make_aws_tools(session_id: str):
             region = _region_of(client)
         except (ClientError, BotoCoreError) as e:
             return f"Error fetching password policy: {describe_error(e)}"
-        
+
         raw_output = collect_password_policy(client)
         source = "aws.iam.get_account_password_policy"
         metadata = _collection_metadata(
@@ -94,8 +96,9 @@ def make_aws_tools(session_id: str):
             "iam:GetAccountPasswordPolicy",
             region=region,
         )
-        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
-
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
 
     @tool("List AWS IAM Users with MFA")
     def list_iam_users_with_mfa(context: str = "") -> str:
@@ -104,18 +107,21 @@ def make_aws_tools(session_id: str):
         try:
             client = _boto_client("iam")
             region = _region_of(client)
-            raw_output = json.dumps(collect_iam_users_mfa(client), indent=2, default=str)
+            raw_output = json.dumps(
+                collect_iam_users_mfa(client), indent=2, default=str
+            )
         except (ClientError, BotoCoreError) as e:
             return f"Error listing IAM users: {describe_error(e)}"
-        
+
         source = "aws.iam.list_users_mfa"
         metadata = _collection_metadata(
             "list_iam_users_with_mfa",
             "iam:ListUsers, iam:ListMFADevices",
             region=region,
         )
-        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
-
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
 
     @tool("List Public S3 Buckets")
     def list_public_s3_buckets(context: str = "") -> str:
@@ -138,7 +144,7 @@ def make_aws_tools(session_id: str):
             raw_output = json.dumps(result, indent=2, default=str)
         except (ClientError, BotoCoreError) as e:
             return f"Error listing S3 buckets: {describe_error(e)}"
-        
+
         source = "aws.s3.list_public_buckets"
         metadata = _collection_metadata(
             "list_public_s3_buckets",
@@ -147,9 +153,12 @@ def make_aws_tools(session_id: str):
             region=region,
             caller_identity=caller_identity,
         )
-        return _register_and_format(raw_output, source, metadata=metadata, session_id=session_id)
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
 
     return [get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets]
+
 
 # Module-level exports for tests and MCP server
 _test_tools = make_aws_tools(None)

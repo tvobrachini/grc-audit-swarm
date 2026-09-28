@@ -315,7 +315,7 @@ def real_reviewer() -> Reviewer:  # pragma: no cover - needs an LLM provider
     from swarm.llm_factory import get_qa_llm
     from swarm.schema import QA_PushbackSchema
 
-    configs = FieldworkCrew()
+    configs = FieldworkCrew("eval")
 
     def review(
         seed_id: str, test_plan: str, evidence: str, papers: str

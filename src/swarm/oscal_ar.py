@@ -804,10 +804,12 @@ def build_assessment_results(
         ctrl_ref = {"control-id": t}
         if len(c) >= 4 and c[2] == "-" and c[:2].isalpha() and c[3].isdigit():
             # Standard NIST 800-53 heuristic (e.g. AC-2, IA-5)
-            ctrl_ref["links"] = [{
-                "href": f"https://csrc.nist.gov/Projects/risk-management/sp800-53-controls/release-search#!/control?version=5.1&number={c.upper()}",
-                "rel": "related"
-            }]
+            ctrl_ref["links"] = [
+                {
+                    "href": f"https://csrc.nist.gov/Projects/risk-management/sp800-53-controls/release-search#!/control?version=5.1&number={c.upper()}",
+                    "rel": "related",
+                }
+            ]
         include.append(ctrl_ref)
 
     if not include:

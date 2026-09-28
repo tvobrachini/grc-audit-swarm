@@ -310,7 +310,7 @@ class TestPlanningContextWiring:
             patch.object(planning_crew, "Crew"),
             patch.object(planning_crew, "Task", side_effect=fake_task),
         ):
-            planning_crew.PlanningCrew().crew()
+            planning_crew.PlanningCrew("test-session").crew()
         return tasks
 
     def test_racm_task_receives_weighting_output(self):
@@ -348,7 +348,7 @@ def _build_crew(module_name: str, crew_cls: str) -> dict[str, MagicMock]:
         patch.object(module, "Crew"),
         patch.object(module, "Task", side_effect=fake_task),
     ):
-        getattr(module, crew_cls)().crew()
+        getattr(module, crew_cls)("test-session").crew()
     return tasks
 
 

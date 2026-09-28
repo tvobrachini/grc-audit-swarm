@@ -25,7 +25,8 @@ class FieldworkCrew:
             verbose=True,
             llm=base_llm,
             max_iter=5,
-            tools=make_aws_tools(self.session_id) + make_findings_tools(self.session_id),
+            tools=make_aws_tools(self.session_id)
+            + make_findings_tools(self.session_id),
         )
 
         # Augment field auditor backstory with domain skill prompts if detected

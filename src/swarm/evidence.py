@@ -61,9 +61,15 @@ def app_version() -> str:
     available.
     """
     try:
-        from importlib.metadata import version as _pkg_version, PackageNotFoundError
         return _pkg_version("grc-audit-swarm")
-    except (ImportError, PackageNotFoundError):
+    except PackageNotFoundError:
+        pass
+    try:
+        import tomllib
+
+        with open(_REPO_ROOT / "pyproject.toml", "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
         return os.environ.get("APP_VERSION", "unknown")
 
 

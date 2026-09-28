@@ -64,7 +64,9 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
         )
 
     if os.environ.get("OPENROUTER_API_KEY"):
-        openrouter_model = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct")
+        openrouter_model = os.environ.get(
+            "OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct"
+        )
         logger.info(f"[LLM Factory] Binding to OpenRouter: {openrouter_model}.")
         return LLM(
             model=f"openrouter/{openrouter_model}",
@@ -115,7 +117,9 @@ def describe_crew_llm() -> dict[str, str]:
     if os.environ.get("OPENROUTER_API_KEY"):
         return {
             "provider": "openrouter",
-            "model": os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct"),
+            "model": os.environ.get(
+                "OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct"
+            ),
         }
     if os.environ.get("GEMINI_API_KEY"):
         return {
