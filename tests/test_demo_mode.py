@@ -151,6 +151,19 @@ class TestArtifacts:
             "CTRL-02",
         ]
 
+    def test_demo_evidence_is_bound_to_the_session(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        sid = "11111111-2222-3333-4444-555555555555"
+        papers = demo_working_papers("", racm_test_plan(demo_racm()), sid)
+        cited = [f for f in papers.findings if f.vault_id_reference]
+        assert cited
+        for f in cited:
+            record = json.loads((tmp_path / f"{f.vault_id_reference}.json").read_text())
+            assert record["metadata"]["session_id"] == sid
+            assert EvidenceAssuranceProtocol.verify_exact_quote(
+                f.vault_id_reference, f.exact_quote_from_evidence, session_id=sid
+            )
+
     def test_no_compliance_claims(self):
         text = demo_final_report().model_dump_json().lower()
         for claim in ("compliant", "compliance with", "certif", "attest"):

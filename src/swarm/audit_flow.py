@@ -28,7 +28,6 @@ from swarm.demo import (
 )
 from swarm.evidence import (
     app_version as evidence_app_version,
-    evidence_session,
     unverified_findings,
 )
 from swarm.review_policy import (
@@ -1139,8 +1138,7 @@ class AuditFlow:
             gen_run.attempts = attempt
             run = "crew" if attempt == 1 else "crew retry"
             try:
-                with evidence_session(self.session_id):
-                    result = build_crew().kickoff(inputs=inputs)
+                result = build_crew().kickoff(inputs=inputs)
                 adapter = CrewResultAdapter(result)
                 qa_output = adapter.get(qa_task).pydantic
                 artifact = adapter.get(artifact_task).pydantic
@@ -1236,6 +1234,7 @@ class AuditFlow:
                 phase,
                 event_callback=event_callback,
                 reject=demo_reject_phase() == phase and not self._was_retried(phase),
+                session_id=self.session_id,
             )
         crew_cls = {1: PlanningCrew, 2: FieldworkCrew, 3: ReportingCrew}[phase]
         return crew_cls(
