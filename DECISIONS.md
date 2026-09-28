@@ -138,7 +138,7 @@ Custom props all use the namespace `https://github.com/tvobrachini/grc-audit-swa
 
 **Status:** Accepted
 
-**Decision.** `src/swarm/llm_factory.py` picks the first provider whose configuration is present, in this order: Ollama (local), NVIDIA NIM, Gemini, OpenAI, Groq. The comments in that file describe each entry: Ollama as "no limits, zero cost", Gemini as "most generous free-tier TPM", and Groq as "fastest, but harsh TPM limits".
+**Decision.** `src/swarm/llm_factory.py` picks the first provider whose configuration is present, in this order: Ollama (local), NVIDIA NIM, OpenRouter, Gemini, OpenAI, Groq. OpenRouter was added later, ahead of Gemini, as a multi-model gateway. The comments in that file describe each entry: Ollama as "no limits, zero cost", Gemini as "most generous free-tier TPM", and Groq as "fastest, but harsh TPM limits".
 
 **Consequences.**
 - With several keys set, Groq is used last, not first.

@@ -10,9 +10,10 @@ The factory (`src/swarm/llm_factory.py`) uses the first provider that is configu
 |---|---|---|
 | 1 | `OLLAMA_MODEL` (plus optional `OLLAMA_BASE_URL`, default `http://localhost:11434`) | the local Ollama model you name |
 | 2 | `NVIDIA_API_KEY` (plus optional `NVIDIA_BASE_URL`) | `meta/llama-3.3-70b-instruct` |
-| 3 | `GEMINI_API_KEY` | `gemini-2.5-flash`, or `GEMINI_MODEL` if set |
-| 4 | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| 5 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
+| 3 | `OPENROUTER_API_KEY` | `meta-llama/llama-3.1-8b-instruct`, or `OPENROUTER_MODEL` if set |
+| 4 | `GEMINI_API_KEY` | `gemini-2.5-flash`, or `GEMINI_MODEL` if set |
+| 5 | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| 6 | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
 
 Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stops working.
 
