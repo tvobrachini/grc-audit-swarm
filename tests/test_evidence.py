@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from swarm.evidence import (
     EvidenceAssuranceProtocol,
     _redact_account_ids,
-    evidence_session,
     unverified_findings,
 )
 
@@ -581,10 +580,11 @@ class TestSessionBinding:
             rec["vault_id"], payload, session_id=SID_B
         )
 
-    def test_evidence_session_context_binds_records(self, tmp_path, monkeypatch):
+    def test_explicit_session_id_binds_records(self, tmp_path, monkeypatch):
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
-        with evidence_session(SID_A):
-            rec = EvidenceAssuranceProtocol.register_evidence("payload text", "op")
+        rec = EvidenceAssuranceProtocol.register_evidence(
+            "payload text", "op", session_id=SID_A
+        )
         outside = EvidenceAssuranceProtocol.register_evidence("payload text", "op")
         bound = json.loads((tmp_path / f"{rec['vault_id']}.json").read_text())
         unbound = json.loads((tmp_path / f"{outside['vault_id']}.json").read_text())
