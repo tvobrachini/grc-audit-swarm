@@ -24,6 +24,14 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 - Compose nginx: the Prowler import route accepts up to 11 MB, matching the API's 10 MB file limit (6 MB elsewhere).
 - Trail anchor: a trail cut back and extended again no longer moves the anchor; the save is refused and verification reports `anchor_mismatch`. Exports verify the trail and return 409 for a trail that shows a change, and state the verification status in the report and OSCAL. Vault records are bound to their audit session, and the Gate 2 quote check refuses another session's record. Vault records are written atomically.
 
+**Reliability and interoperability**
+- New LLM provider: OpenRouter (`OPENROUTER_API_KEY`, optional `OPENROUTER_MODEL`, default `meta-llama/llama-3.1-8b-instruct`), selected after NVIDIA NIM and before Gemini (docs/CONFIGURATION.md).
+- Evidence quotes shorter than 15 characters no longer verify: a short fragment could match almost any record. In the offline replay this lowers citation faithfulness from 7/8 to 5/8, because two canned quotes in scenario s01 were too short to identify their evidence.
+- AWS tools report boto3 errors to the agent instead of swallowing them.
+- OSCAL export: RACM control IDs shaped like NIST SP 800-53 IDs (for example `AC-2`) link to the NIST control catalog.
+- `app_version` falls back to `pyproject.toml` when the package is not installed, so provenance records carry a version in source checkouts instead of `unknown`.
+- Crews receive the audit's `session_id` explicitly, so the evidence each run registers is bound to that audit.
+
 **Evaluation**
 - Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
 - The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.

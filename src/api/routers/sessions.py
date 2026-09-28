@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -457,7 +457,9 @@ def _create_and_launch(
 ) -> SessionSummary:
     session_id = str(uuid.uuid4())
     name = name or f"{theme[:40]} audit"
-    created_at = datetime.utcnow().isoformat(timespec="seconds")
+    created_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+    )
 
     flow = AuditFlow()
     flow.state.theme = theme
