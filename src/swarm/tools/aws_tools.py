@@ -69,79 +69,99 @@ def _collection_metadata(
     return metadata
 
 
-def _register_and_format(raw_output: str, source: str, *, metadata: dict) -> str:
+def _register_and_format(
+    raw_output: str, source: str, *, metadata: dict, session_id: str | None = None
+) -> str:
     vault_record = EvidenceAssuranceProtocol.register_evidence(
-        raw_output, source, metadata=metadata
+        raw_output, source, metadata=metadata, session_id=session_id
     )
     return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
 
 
-@tool("Get IAM Password Policy")
-def get_iam_password_policy(context: str = "") -> str:
-    """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance. If no policy is set, returns a finding saying so."""
-    region = None
-    try:
-        client = _boto_client("iam")
-        region = _region_of(client)
-    except (ClientError, BotoCoreError) as e:
-        raw_output = f"Error fetching password policy: {describe_error(e)}"
-    else:
+def make_aws_tools(session_id: str):
+    @tool("Get IAM Password Policy")
+    def get_iam_password_policy(context: str = "") -> str:
+        """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance. If no policy is set, returns a finding saying so."""
+        region = None
+        try:
+            client = _boto_client("iam")
+            region = _region_of(client)
+        except (ClientError, BotoCoreError) as e:
+            return f"Error fetching password policy: {describe_error(e)}"
+
         raw_output = collect_password_policy(client)
-    source = "aws.iam.get_account_password_policy"
-    metadata = _collection_metadata(
-        "get_iam_password_policy",
-        "iam:GetAccountPasswordPolicy",
-        region=region,
-    )
-    return _register_and_format(raw_output, source, metadata=metadata)
+        source = "aws.iam.get_account_password_policy"
+        metadata = _collection_metadata(
+            "get_iam_password_policy",
+            "iam:GetAccountPasswordPolicy",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("List AWS IAM Users with MFA")
+    def list_iam_users_with_mfa(context: str = "") -> str:
+        """Lists every IAM user and whether an MFA device is assigned. Essential for AC-02 access compliance. The account root user is not included (iam:ListUsers does not return it)."""
+        region = None
+        try:
+            client = _boto_client("iam")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_iam_users_mfa(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error listing IAM users: {describe_error(e)}"
+
+        source = "aws.iam.list_users_mfa"
+        metadata = _collection_metadata(
+            "list_iam_users_with_mfa",
+            "iam:ListUsers, iam:ListMFADevices",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("List Public S3 Buckets")
+    def list_public_s3_buckets(context: str = "") -> str:
+        """
+        Evaluates every S3 bucket for effective public access: bucket policy status,
+        bucket ACL grants to AllUsers/AuthenticatedUsers, and account- and
+        bucket-level Block Public Access. Each bucket gets a Verdict of PUBLIC,
+        NOT_PUBLIC or UNKNOWN (a read was denied), with reasons. Essential for data
+        security audit.
+        """
+        region = None
+        caller_identity = None
+        try:
+            s3 = _boto_client("s3")
+            s3control = _boto_client("s3control")
+            sts = _boto_client("sts")
+            region = _region_of(s3)
+            result = collect_s3_public_access(s3, s3control, sts)
+            caller_identity = result.get("CallerIdentityArn")
+            raw_output = json.dumps(result, indent=2, default=str)
+        except (ClientError, BotoCoreError) as e:
+            return f"Error listing S3 buckets: {describe_error(e)}"
+
+        source = "aws.s3.list_public_buckets"
+        metadata = _collection_metadata(
+            "list_public_s3_buckets",
+            "s3:ListBuckets, s3:GetPublicAccessBlock, s3control:GetPublicAccessBlock, "
+            "s3:GetBucketPolicyStatus, s3:GetBucketAcl, sts:GetCallerIdentity",
+            region=region,
+            caller_identity=caller_identity,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    return [get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets]
 
 
-@tool("List AWS IAM Users with MFA")
-def list_iam_users_with_mfa(context: str = "") -> str:
-    """Lists every IAM user and whether an MFA device is assigned. Essential for AC-02 access compliance. The account root user is not included (iam:ListUsers does not return it)."""
-    region = None
-    try:
-        client = _boto_client("iam")
-        region = _region_of(client)
-        raw_output = json.dumps(collect_iam_users_mfa(client), indent=2, default=str)
-    except (ClientError, BotoCoreError) as e:
-        raw_output = f"Error listing IAM users: {describe_error(e)}"
-    source = "aws.iam.list_users_mfa"
-    metadata = _collection_metadata(
-        "list_iam_users_with_mfa",
-        "iam:ListUsers, iam:ListMFADevices",
-        region=region,
-    )
-    return _register_and_format(raw_output, source, metadata=metadata)
-
-
-@tool("List Public S3 Buckets")
-def list_public_s3_buckets(context: str = "") -> str:
-    """
-    Evaluates every S3 bucket for effective public access: bucket policy status,
-    bucket ACL grants to AllUsers/AuthenticatedUsers, and account- and
-    bucket-level Block Public Access. Each bucket gets a Verdict of PUBLIC,
-    NOT_PUBLIC or UNKNOWN (a read was denied), with reasons. Essential for data
-    security audit.
-    """
-    region = None
-    caller_identity = None
-    try:
-        s3 = _boto_client("s3")
-        s3control = _boto_client("s3control")
-        sts = _boto_client("sts")
-        region = _region_of(s3)
-        result = collect_s3_public_access(s3, s3control, sts)
-        caller_identity = result.get("CallerIdentityArn")
-        raw_output = json.dumps(result, indent=2, default=str)
-    except (ClientError, BotoCoreError) as e:
-        raw_output = f"Error listing S3 buckets: {describe_error(e)}"
-    source = "aws.s3.list_public_buckets"
-    metadata = _collection_metadata(
-        "list_public_s3_buckets",
-        "s3:ListBuckets, s3:GetPublicAccessBlock, s3control:GetPublicAccessBlock, "
-        "s3:GetBucketPolicyStatus, s3:GetBucketAcl, sts:GetCallerIdentity",
-        region=region,
-        caller_identity=caller_identity,
-    )
-    return _register_and_format(raw_output, source, metadata=metadata)
+# Module-level exports for tests and MCP server
+_test_tools = make_aws_tools(None)
+get_iam_password_policy = _test_tools[0]
+list_iam_users_with_mfa = _test_tools[1]
+list_public_s3_buckets = _test_tools[2]

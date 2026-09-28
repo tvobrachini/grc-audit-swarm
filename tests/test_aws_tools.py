@@ -94,7 +94,7 @@ class TestGetIamPasswordPolicy:
 
             result = get_iam_password_policy.run("")
 
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "Error fetching password policy" in result
 
     def test_account_id_not_in_output(self, tmp_path, monkeypatch):
@@ -237,5 +237,5 @@ class TestListPublicS3Buckets:
 
             result = list_public_s3_buckets.run("")
 
-        assert "Vault ID:" in result
+        assert "Vault ID:" not in result
         assert "Error listing S3 buckets: NoRegionError" in result

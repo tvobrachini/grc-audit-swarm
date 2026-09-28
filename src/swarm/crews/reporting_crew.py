@@ -11,7 +11,8 @@ from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class ReportingCrew:
-    def __init__(self, event_callback=None, skill_context=None):
+    def __init__(self, session_id: str, event_callback=None, skill_context=None):
+        self.session_id = session_id
         self._event_callback = event_callback
         self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent

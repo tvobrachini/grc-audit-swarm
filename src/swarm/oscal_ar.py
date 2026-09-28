@@ -798,14 +798,27 @@ def build_assessment_results(
         c.control_id for r in (racm.risks if racm else []) for c in r.controls
     ]
     control_ids += [f.control_id for f in papers.findings]
-    include = [{"control-id": t} for t in dict.fromkeys(token(c) for c in control_ids)]
+    include = []
+    for c in dict.fromkeys(control_ids):
+        t = token(c)
+        ctrl_ref = {"control-id": t}
+        if len(c) >= 4 and c[2] == "-" and c[:2].isalpha() and c[3].isdigit():
+            # Standard NIST 800-53 heuristic (e.g. AC-2, IA-5)
+            ctrl_ref["links"] = [
+                {
+                    "href": f"https://csrc.nist.gov/Projects/risk-management/sp800-53-controls/release-search#!/control?version=5.1&number={c.upper()}",
+                    "rel": "related",
+                }
+            ]
+        include.append(ctrl_ref)
+
     if not include:
         raise ValueError("no controls to report: the RACM and working papers are empty")
     reviewed_controls = {
         "description": markup(
-            "Controls in the engagement's Risk and Control Matrix (RACM). The "
-            "control IDs are the engagement's own identifiers, not IDs from an "
-            "OSCAL catalog; no catalog or profile is imported."
+            "Controls in the engagement's Risk and Control Matrix (RACM). Where "
+            "control IDs match standard NIST 800-53 patterns (e.g., AC-2), standard "
+            "framework catalog links are attached for interoperability."
         ),
         "control-selections": [{"include-controls": include}],
     }

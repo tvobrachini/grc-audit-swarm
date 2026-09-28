@@ -9,6 +9,7 @@ _NVIDIA_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 _PROVIDER_ENV_VARS = (
     "OLLAMA_MODEL",
     "NVIDIA_API_KEY",
+    "OPENROUTER_API_KEY",
     "GEMINI_API_KEY",
     "OPENAI_API_KEY",
     "GROQ_API_KEY",
@@ -25,9 +26,10 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
     Priority:
       1. Ollama (Local - No limits, zero cost)
       2. NVIDIA NIM (DeepSeek / Llama 3.3 via H100s)
-      3. Gemini (Most generous free-tier TPM)
-      4. OpenAI (Enterprise standard)
-      5. Groq (Fastest, but harsh TPM limits)
+      3. OpenRouter (Multi-model provider)
+      4. Gemini (Most generous free-tier TPM)
+      5. OpenAI (Enterprise standard)
+      6. Groq (Fastest, but harsh TPM limits)
 
     Credentials are passed to the LLM object directly — this function never
     mutates ``os.environ``, so one provider's key cannot leak into another
@@ -51,21 +53,27 @@ def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
 
     nvidia_key = os.environ.get("NVIDIA_API_KEY")
     if nvidia_key:
-        try:
-            model_name = "meta/llama-3.3-70b-instruct"
-            logger.info(f"[LLM Factory] Binding to NVIDIA NIM: {model_name}.")
-            return LLM(
-                model=f"nvidia_nim/{model_name}",
-                api_key=nvidia_key,
-                base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_DEFAULT_BASE_URL),
-                temperature=temperature,
-                timeout=120,
-            )
-        except Exception as e:
-            logger.warning(
-                f"[LLM Factory] NVIDIA NIM failed to initialize: {e}. "
-                "Falling back to the next configured provider."
-            )
+        model_name = "meta/llama-3.3-70b-instruct"
+        logger.info(f"[LLM Factory] Binding to NVIDIA NIM: {model_name}.")
+        return LLM(
+            model=f"nvidia_nim/{model_name}",
+            api_key=nvidia_key,
+            base_url=os.environ.get("NVIDIA_BASE_URL", _NVIDIA_DEFAULT_BASE_URL),
+            temperature=temperature,
+            timeout=120,
+        )
+
+    if os.environ.get("OPENROUTER_API_KEY"):
+        openrouter_model = os.environ.get(
+            "OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct"
+        )
+        logger.info(f"[LLM Factory] Binding to OpenRouter: {openrouter_model}.")
+        return LLM(
+            model=f"openrouter/{openrouter_model}",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            temperature=temperature,
+            timeout=120,
+        )
 
     if os.environ.get("GEMINI_API_KEY"):
         # gemini-2.0-flash was shut down on 2026-06-01; override with GEMINI_MODEL.
@@ -106,6 +114,13 @@ def describe_crew_llm() -> dict[str, str]:
         return {"provider": "ollama", "model": ollama_model}
     if os.environ.get("NVIDIA_API_KEY"):
         return {"provider": "nvidia_nim", "model": "meta/llama-3.3-70b-instruct"}
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return {
+            "provider": "openrouter",
+            "model": os.environ.get(
+                "OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct"
+            ),
+        }
     if os.environ.get("GEMINI_API_KEY"):
         return {
             "provider": "gemini",
