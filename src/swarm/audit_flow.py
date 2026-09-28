@@ -1239,7 +1239,9 @@ class AuditFlow:
             )
         crew_cls = {1: PlanningCrew, 2: FieldworkCrew, 3: ReportingCrew}[phase]
         return crew_cls(
-            event_callback=event_callback, skill_context=self._skill_context
+            self.session_id,
+            event_callback=event_callback,
+            skill_context=self._skill_context,
         ).crew()
 
     def _was_retried(self, phase: int) -> bool:
