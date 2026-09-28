@@ -381,7 +381,9 @@ _DEMO_FINDINGS: dict[str, dict[str, Any]] = {
 }
 
 
-def _register_demo_evidence(control_id: str, evidence: str) -> str:
+def _register_demo_evidence(
+    control_id: str, evidence: str, session_id: Optional[str] = None
+) -> str:
     """Store a synthetic evidence record in the vault and return its vault ID.
 
     The payload is labelled as demo data and contains the quoted evidence
@@ -397,12 +399,14 @@ def _register_demo_evidence(control_id: str, evidence: str) -> str:
         indent=2,
     )
     record = EvidenceAssuranceProtocol.register_evidence(
-        payload, "demo_mode_synthetic_evidence"
+        payload, "demo_mode_synthetic_evidence", session_id=session_id
     )
     return record["vault_id"]
 
 
-def _demo_finding(control_id: str) -> AuditFindingSchema:
+def _demo_finding(
+    control_id: str, session_id: Optional[str] = None
+) -> AuditFindingSchema:
     spec = _DEMO_FINDINGS.get(control_id)
     if spec is None:
         return AuditFindingSchema(
@@ -420,7 +424,9 @@ def _demo_finding(control_id: str) -> AuditFindingSchema:
         )
     return AuditFindingSchema(
         control_id=control_id,
-        vault_id_reference=_register_demo_evidence(control_id, spec["evidence"]),
+        vault_id_reference=_register_demo_evidence(
+            control_id, spec["evidence"], session_id
+        ),
         exact_quote_from_evidence=spec["quote"],
         tod_conclusion=spec["tod"],
         toe_conclusion=spec["toe"],
@@ -431,10 +437,14 @@ def _demo_finding(control_id: str) -> AuditFindingSchema:
     )
 
 
-def demo_working_papers(theme: str = "", test_plan: str = "") -> WorkingPaperSchema:
+def demo_working_papers(
+    theme: str = "", test_plan: str = "", session_id: Optional[str] = None
+) -> WorkingPaperSchema:
     return WorkingPaperSchema(
         theme=f"[{DEMO_LABEL}] {theme or 'AWS Cloud Security'}",
-        findings=[_demo_finding(c) for c in _controls_from_test_plan(test_plan)],
+        findings=[
+            _demo_finding(c, session_id) for c in _controls_from_test_plan(test_plan)
+        ],
     )
 
 
@@ -637,19 +647,23 @@ class DemoCrew:
         event_callback: Optional[Callable[[Any], None]] = None,
         *,
         reject: bool = False,
+        session_id: Optional[str] = None,
     ) -> None:
         if phase not in _PHASE_TASKS:
             raise ValueError("phase must be 1, 2, or 3")
         self.phase = phase
         self._event_callback = event_callback
         self._reject = reject
+        self._session_id = session_id
 
     def _artifact(self, inputs: dict[str, Any]) -> Any:
         theme = str(inputs.get("theme", ""))
         if self.phase == 1:
             return demo_racm(theme)
         if self.phase == 2:
-            return demo_working_papers(theme, str(inputs.get("test_plan", "")))
+            return demo_working_papers(
+                theme, str(inputs.get("test_plan", "")), self._session_id
+            )
         return demo_final_report(
             theme,
             str(inputs.get("working_papers_string", "")),

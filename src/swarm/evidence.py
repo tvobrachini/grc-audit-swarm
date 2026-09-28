@@ -8,12 +8,10 @@ import os
 import datetime
 import base64
 import tempfile
-from contextlib import contextmanager
-from contextvars import ContextVar
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -174,25 +172,6 @@ def _digest_input(payload: str, metadata: Optional[dict[str, Any]]) -> str:
     return payload + "\x00" + canonical_metadata
 
 
-# Audit session the evidence being collected belongs to. The flow sets it
-# around a crew run (see ``evidence_session``) so the evidence tools, which do
-# not know the session, bind the records they register to it. CrewAI copies
-# the context into the threads it runs tools in.
-_CURRENT_SESSION: ContextVar[Optional[str]] = ContextVar(
-    "evidence_session_id", default=None
-)
-
-
-@contextmanager
-def evidence_session(session_id: Optional[str]) -> Iterator[None]:
-    """Bind evidence registered inside the block to ``session_id``."""
-    token = _CURRENT_SESSION.set(session_id or None)
-    try:
-        yield
-    finally:
-        _CURRENT_SESSION.reset(token)
-
-
 def record_session_id(record: dict[str, Any]) -> Optional[str]:
     """Session a vault record is bound to, or None for an unbound record.
 
@@ -262,9 +241,8 @@ class EvidenceAssuranceProtocol:
         ADR-010), so tampering with either is detected the same way; a
         record with no metadata hashes the payload alone, exactly as before.
 
-        ``session_id`` (default: the one set by :func:`evidence_session`, if
-        any) is stored as ``metadata.session_id`` and so is covered by the
-        digest too; the Gate 2 quote check only accepts a record bound to the
+        ``session_id``, when given, is stored as ``metadata.session_id`` and
+        so is covered by the digest too; the Gate 2 quote check only accepts a record bound to the
         session it is checking (see :func:`unverified_findings`).
         """
         evidence_dir = EvidenceAssuranceProtocol._evidence_dir()
@@ -273,7 +251,7 @@ class EvidenceAssuranceProtocol:
         # Redact 12-digit AWS account IDs before they leave the environment.
         sanitized_payload = _redact_account_ids(raw_payload)
         sanitized_metadata = _sanitize_metadata(metadata) if metadata else None
-        bound_session = session_id or _CURRENT_SESSION.get()
+        bound_session = session_id
         if bound_session:
             # Added after redaction: a session id is a UUID, never an account
             # id, and must be stored exactly to be compared later.
