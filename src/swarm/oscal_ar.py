@@ -77,10 +77,30 @@ _VAULT_ID_RE = re.compile(
 )
 _NOT_TOKEN_CHAR = re.compile(r"[^A-Za-z0-9._-]")
 
-_NIST_800_53_FAMILIES = frozenset({
-    "AC", "AT", "AU", "CA", "CM", "CP", "IA", "IR", "MA", "MP",
-    "PE", "PL", "PM", "PS", "PT", "RA", "SA", "SC", "SI", "SR",
-})
+_NIST_800_53_FAMILIES = frozenset(
+    {
+        "AC",
+        "AT",
+        "AU",
+        "CA",
+        "CM",
+        "CP",
+        "IA",
+        "IR",
+        "MA",
+        "MP",
+        "PE",
+        "PL",
+        "PM",
+        "PS",
+        "PT",
+        "RA",
+        "SA",
+        "SC",
+        "SI",
+        "SR",
+    }
+)
 _NIST_CONTROL_RE = re.compile(r"^([A-Z]{2})-(\d+)(?:\((\d+)\))?$", re.IGNORECASE)
 
 
@@ -825,10 +845,10 @@ def build_assessment_results(
         for r in (racm.risks if racm else [])
         for m in (r.regulatory_mapping or [])
     ]
-    theme_text = (racm.theme.lower() if racm and racm.theme else "")
-    cites_nist_800_53 = any(
-        "800-53" in m for m in all_mappings
-    ) or "800-53" in theme_text
+    theme_text = racm.theme.lower() if racm and racm.theme else ""
+    cites_nist_800_53 = (
+        any("800-53" in m for m in all_mappings) or "800-53" in theme_text
+    )
 
     for c in dict.fromkeys(control_ids):
         t = token(c)
@@ -844,7 +864,9 @@ def build_assessment_results(
         m = _NIST_CONTROL_RE.match(norm_c)
         if m:
             family = m.group(1).upper()
-            if family in _NIST_800_53_FAMILIES and (cites_nist_800_53 or c_explicit_nist):
+            if family in _NIST_800_53_FAMILIES and (
+                cites_nist_800_53 or c_explicit_nist
+            ):
                 canonical_num = f"{family}-{m.group(2)}" + (
                     f"({m.group(3)})" if m.group(3) else ""
                 )

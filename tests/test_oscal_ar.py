@@ -521,9 +521,9 @@ class TestMapping:
         ar_nist = _ar(_build(racm=racm_with_nist, papers=papers))
         controls_nist = {
             c["control-id"]: c
-            for c in ar_nist["results"][0]["reviewed-controls"]["control-selections"][0][
-                "include-controls"
-            ]
+            for c in ar_nist["results"][0]["reviewed-controls"]["control-selections"][
+                0
+            ]["include-controls"]
         }
         assert "links" in controls_nist["AC-2"]
         assert "sp800-53-controls" in controls_nist["AC-2"]["links"][0]["href"]
