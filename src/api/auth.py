@@ -131,6 +131,13 @@ def reviewer_identity(
     """
     path = reviewer_tokens.configured_path()
     if path is None:
+        if reviewer_tokens.reviewer_tokens_mandatory():
+            raise ReviewerAuthError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                REVIEWER_TOKENS_UNAVAILABLE,
+                "Reviewer tokens are mandatory in this deployment, but no "
+                "tokens file is configured; see the server log.",
+            )
         return ReviewerIdentity()
     try:
         registry = reviewer_tokens.load_registry(path)
