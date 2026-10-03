@@ -29,6 +29,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -43,6 +44,8 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from swarm.review_policy import normalise_identity
+
+logger = logging.getLogger(__name__)
 
 ENV_VAR = "REVIEWER_TOKENS_FILE"
 HEADER = "X-Reviewer-Token"
@@ -64,6 +67,36 @@ def configured_path() -> Optional[str]:
     """Path from ``REVIEWER_TOKENS_FILE``, or None when the feature is off."""
     value = os.environ.get(ENV_VAR, "").strip()
     return value or None
+
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_BLOCKED_ENVIRONMENTS = frozenset({"production", "prod", "staging", "stage"})
+
+
+def reviewer_tokens_mandatory() -> bool:
+    """True when reviewer tokens are mandatory for reviewer actions.
+
+    Enabled when REVIEWER_TOKENS_MANDATORY is set, or when ENVIRONMENT is
+    production or staging. In DEMO_MODE, returns False so demo walkthroughs
+    run out of the box without keys.
+    """
+    from swarm.demo import demo_mode_enabled
+
+    try:
+        is_demo = demo_mode_enabled()
+    except Exception as exc:
+        # If demo_mode_enabled() raises because of production, tokens remain mandatory.
+        logger.debug("demo_mode_enabled check: %s", exc)
+        is_demo = False
+
+    if is_demo:
+        return False
+
+    raw = os.environ.get("REVIEWER_TOKENS_MANDATORY", "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    env = os.environ.get("ENVIRONMENT", "local").strip().lower()
+    return env in _BLOCKED_ENVIRONMENTS
 
 
 def generate_token() -> str:

@@ -713,3 +713,59 @@ def test_identity_wording_is_conditional():
     assert "Some of this party's actions" in _party_remarks(
         {"declared", "authenticated"}
     )
+
+
+# ── Mandatory reviewer tokens outside demo mode ─────────────────────────────
+
+
+def test_reviewer_tokens_mandatory_flag(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("REVIEWER_TOKENS_MANDATORY", raising=False)
+    assert rt.reviewer_tokens_mandatory() is False
+
+    monkeypatch.setenv("REVIEWER_TOKENS_MANDATORY", "1")
+    assert rt.reviewer_tokens_mandatory() is True
+
+    monkeypatch.delenv("REVIEWER_TOKENS_MANDATORY", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert rt.reviewer_tokens_mandatory() is True
+
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    assert rt.reviewer_tokens_mandatory() is True
+
+    # In DEMO_MODE=1, reviewer tokens are not mandatory so demo mode works out of the box
+    monkeypatch.setenv("DEMO_MODE", "1")
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("REVIEWER_TOKENS_MANDATORY", "1")
+    assert rt.reviewer_tokens_mandatory() is False
+
+
+def test_reviewer_identity_refuses_when_tokens_mandatory_and_unset(monkeypatch):
+    from fastapi import Request
+    from api.auth import reviewer_identity, ReviewerAuthError
+
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.setenv("REVIEWER_TOKENS_MANDATORY", "1")
+    monkeypatch.delenv("REVIEWER_TOKENS_FILE", raising=False)
+
+    req = Request({"type": "http", "headers": []})
+    with pytest.raises(ReviewerAuthError) as exc_info:
+        reviewer_identity(req, x_reviewer_token=None)
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.code == "reviewer_tokens_unavailable"
+
+
+def test_api_startup_refuses_when_tokens_mandatory_and_unset(monkeypatch):
+    from api.main import app
+
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.setenv("REVIEWER_TOKENS_MANDATORY", "1")
+    monkeypatch.delenv("REVIEWER_TOKENS_FILE", raising=False)
+    monkeypatch.setenv("API_AUTH_TOKEN", "test-token")
+
+    with pytest.raises(
+        rt.ReviewerTokensError, match="REVIEWER_TOKENS_FILE must be configured"
+    ):
+        with TestClient(app):
+            pass

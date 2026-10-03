@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from api import reviewer_tokens
 from api.auth import ReviewerAuthError, require_api_auth
 from api.executor import init_executor, shutdown_executor
 from api.job_store import set_main_loop
@@ -34,6 +35,15 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "DEMO_MODE is on: phase crews are replaced with fixed demo artifacts."
         )
+    if reviewer_tokens.reviewer_tokens_mandatory():
+        path = reviewer_tokens.configured_path()
+        if path is None:
+            raise reviewer_tokens.ReviewerTokensError(
+                "REVIEWER_TOKENS_FILE must be configured when reviewer tokens are "
+                "mandatory (ENVIRONMENT is production/staging or "
+                "REVIEWER_TOKENS_MANDATORY is set). Reviewer identity cannot be "
+                "unauthenticated in this environment."
+            )
     set_main_loop(asyncio.get_running_loop())
     init_executor()
     yield
