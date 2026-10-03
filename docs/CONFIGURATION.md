@@ -30,7 +30,8 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 |---|---|
 | `API_AUTH_TOKEN` | Shared bearer token for all `/api/*` routes. Required. |
 | `VITE_API_AUTH_TOKEN` | Dev only: lets `npm run dev` send the token. It is built into the JS bundle, so never set it for a Compose or production build. |
-| `REVIEWER_TOKENS_FILE` | Optional. Path to the per-reviewer tokens file (names and SHA-256 digests of their tokens; see below). When set, audit creation and every reviewer action need the person's token in the `X-Reviewer-Token` header, and their name is recorded as authenticated. Unset: names are declared, as typed. |
+| `REVIEWER_TOKENS_FILE` | Path to the per-reviewer tokens file (names and SHA-256 digests of their tokens; see below). When set, audit creation and every reviewer action need the person's token in the `X-Reviewer-Token` header, and their name is recorded as authenticated. Required when `REVIEWER_TOKENS_MANDATORY=1` or `ENVIRONMENT` is production/staging. Unset in dev/demo: names are declared, as typed. |
+| `REVIEWER_TOKENS_MANDATORY` | `1` (or `true`, `yes`, `on`) makes the API require `REVIEWER_TOKENS_FILE` and personal tokens for all reviewer actions. Automatically enforced when `ENVIRONMENT` is production or staging (unless `DEMO_MODE=1`). |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated origin allow-list (default `http://localhost:5173`; `*` is ignored). Used for CORS and for the cross-site write check: a POST/PUT/PATCH/DELETE whose `Origin` is not on this list (or the API's own host) is refused with 403 `origin_not_allowed`. Add the UI's origin here if it is served from another host. |
 | `DEMO_MODE` | `1` (or `true`, `yes`, `on`) replaces the crews with fixed demo artifacts. |
 | `DEMO_QA_REJECT_PHASE` | `1`, `2` or `3`: in demo mode, QA rejects that phase until a person retries it. |
