@@ -66,6 +66,33 @@ def configured_path() -> Optional[str]:
     return value or None
 
 
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_BLOCKED_ENVIRONMENTS = frozenset({"production", "prod", "staging", "stage"})
+
+
+def reviewer_tokens_mandatory() -> bool:
+    """True when reviewer tokens are mandatory for reviewer actions.
+
+    Enabled when REVIEWER_TOKENS_MANDATORY is set, or when ENVIRONMENT is
+    production or staging. In DEMO_MODE, returns False so demo walkthroughs
+    run out of the box without keys.
+    """
+    from swarm.demo import demo_mode_enabled
+
+    try:
+        if demo_mode_enabled():
+            return False
+    except Exception:
+        # If demo_mode_enabled() raises because of production, tokens remain mandatory.
+        pass
+
+    raw = os.environ.get("REVIEWER_TOKENS_MANDATORY", "").strip().lower()
+    if raw in _TRUTHY:
+        return True
+    env = os.environ.get("ENVIRONMENT", "local").strip().lower()
+    return env in _BLOCKED_ENVIRONMENTS
+
+
 def generate_token() -> str:
     """A new random token (256 bits from ``secrets``)."""
     return TOKEN_PREFIX + secrets.token_urlsafe(32)

@@ -77,6 +77,12 @@ _VAULT_ID_RE = re.compile(
 )
 _NOT_TOKEN_CHAR = re.compile(r"[^A-Za-z0-9._-]")
 
+_NIST_800_53_FAMILIES = frozenset({
+    "AC", "AT", "AU", "CA", "CM", "CP", "IA", "IR", "MA", "MP",
+    "PE", "PL", "PM", "PS", "PT", "RA", "SA", "SC", "SI", "SR",
+})
+_NIST_CONTROL_RE = re.compile(r"^([A-Z]{2})-(\d+)(?:\((\d+)\))?$", re.IGNORECASE)
+
 
 # ── Small value helpers ──────────────────────────────────────────────────────
 
@@ -641,12 +647,17 @@ def build_assessment_results(
     for f, key, o_uuid in zip(papers.findings, keys, obs_uuid):
         vid = _line(f.vault_id_reference)
         meta = evidence_meta.get(vid) if vid else None
-        collected = (
-            (meta.collected if meta else None)
-            or gate2_time
-            or (evidence_times[-1] if evidence_times else None)
-            or last_modified
-        )
+        exact_collected = meta.collected if meta else None
+        collected_is_fallback = False
+        if exact_collected:
+            collected = exact_collected
+        else:
+            collected = (
+                gate2_time
+                or (evidence_times[-1] if evidence_times else None)
+                or last_modified
+            )
+            collected_is_fallback = True
         fv: Optional[FindingView] = view.finding(f.control_id) if view else None
         tod = fv.effective.tod_conclusion if fv else str(f.tod_conclusion)
         toe = fv.effective.toe_conclusion if fv else str(f.toe_conclusion)
@@ -664,6 +675,8 @@ def build_assessment_results(
             ("preliminary-deficiency", _yes_no(preliminary)),
             ("legacy-severity", f.legacy_severity),
         )
+        if collected_is_fallback:
+            props += _props(("collected-is-fallback", "true"))
         review_props: list[dict] = []
         if fv is not None:
             if fv.differs_from_draft:
@@ -687,6 +700,12 @@ def build_assessment_results(
                 reviewers.append(_line(fv.scope_limitation.decided_by))
             props += review_props
         remarks = []
+        if collected_is_fallback:
+            remarks.append(
+                "Notice: Evidence collection timestamp was not recorded in vault; "
+                "observation 'collected' timestamp is a fallback to engagement "
+                "gate/modification time."
+            )
         if fv is not None and fv.review is not None and fv.review.rationale:
             label = (
                 "Reviewer challenge"
@@ -799,17 +818,42 @@ def build_assessment_results(
     ]
     control_ids += [f.control_id for f in papers.findings]
     include = []
+
+    # Does the engagement cite NIST SP 800-53 in its regulatory context?
+    all_mappings = [
+        str(m).lower()
+        for r in (racm.risks if racm else [])
+        for m in (r.regulatory_mapping or [])
+    ]
+    theme_text = (racm.theme.lower() if racm and racm.theme else "")
+    cites_nist_800_53 = any(
+        "800-53" in m for m in all_mappings
+    ) or "800-53" in theme_text
+
     for c in dict.fromkeys(control_ids):
         t = token(c)
         ctrl_ref = {"control-id": t}
-        if len(c) >= 4 and c[2] == "-" and c[:2].isalpha() and c[3].isdigit():
-            # Standard NIST 800-53 heuristic (e.g. AC-2, IA-5)
-            ctrl_ref["links"] = [
-                {
-                    "href": f"https://csrc.nist.gov/Projects/risk-management/sp800-53-controls/release-search#!/control?version=5.1&number={c.upper()}",
-                    "rel": "related",
-                }
-            ]
+        # Check if control ID explicitly cites NIST or matches a valid NIST 800-53 family
+        c_explicit_nist = bool(re.search(r"800-53|nist", c, re.IGNORECASE))
+        norm_c = re.sub(
+            r"^(?:NIST\s+(?:SP\s+)?800-53(?:\s+r(?:ev)?\d+)?\s+|NIST[._-])",
+            "",
+            c.strip(),
+            flags=re.IGNORECASE,
+        )
+        m = _NIST_CONTROL_RE.match(norm_c)
+        if m:
+            family = m.group(1).upper()
+            if family in _NIST_800_53_FAMILIES and (cites_nist_800_53 or c_explicit_nist):
+                canonical_num = f"{family}-{m.group(2)}" + (
+                    f"({m.group(3)})" if m.group(3) else ""
+                )
+                ctrl_ref["links"] = [
+                    {
+                        "href": f"https://csrc.nist.gov/Projects/risk-management/sp800-53-controls/release-search#!/control?version=5.1&number={canonical_num.upper()}",
+                        "rel": "related",
+                    }
+                ]
         include.append(ctrl_ref)
 
     if not include:
@@ -817,8 +861,8 @@ def build_assessment_results(
     reviewed_controls = {
         "description": markup(
             "Controls in the engagement's Risk and Control Matrix (RACM). Where "
-            "control IDs match standard NIST 800-53 patterns (e.g., AC-2), standard "
-            "framework catalog links are attached for interoperability."
+            "control IDs match verified NIST 800-53 families and the engagement cites "
+            "NIST SP 800-53, standard framework catalog links are attached for interoperability."
         ),
         "control-selections": [{"include-controls": include}],
     }

@@ -456,8 +456,80 @@ class TestMapping:
         collected = {p["name"]: p["value"] for p in res[ev_uuid]["props"]}["collected"]
         assert obs[0]["collected"] == collected
         assert ar["results"][0]["start"] == collected
-        # No evidence: falls back to the Gate 2 approval time.
+        # Vault timestamp present: no fallback prop
+        obs0_props = {p["name"]: p["value"] for p in obs[0]["props"]}
+        assert "collected-is-fallback" not in obs0_props
+
+        # No evidence: falls back to the Gate 2 approval time and flags it.
         assert obs[2]["collected"] == "2026-03-05T09:00:00+00:00"
+        obs2_props = {p["name"]: p["value"] for p in obs[2]["props"]}
+        assert obs2_props.get("collected-is-fallback") == "true"
+        assert "fallback" in obs[2]["remarks"]
+
+    def test_reviewed_controls_nist_family_and_context_filtering(self):
+        from types import SimpleNamespace
+
+        # 1. RACM without NIST 800-53 mapping: AC-2 gets NO link (prevents collision with internal IDs)
+        racm_no_nist = SimpleNamespace(
+            theme="SOC 2 Internal Audit",
+            risks=[
+                SimpleNamespace(
+                    risk_id="RISK-01",
+                    regulatory_mapping=["SOC 2 CC6.1"],
+                    controls=[
+                        SimpleNamespace(control_id="AC-2"),
+                        SimpleNamespace(control_id="IT-01"),
+                    ],
+                )
+            ],
+        )
+        papers = WorkingPaperSchema(
+            theme="SOC 2",
+            findings=[
+                AuditFindingSchema(
+                    control_id="AC-2",
+                    tod_conclusion="Not tested",
+                    toe_conclusion="Not tested",
+                    test_conclusion="No evidence collected",
+                ),
+            ],
+        )
+        ar = _ar(_build(racm=racm_no_nist, papers=papers))
+        controls = {
+            c["control-id"]: c
+            for c in ar["results"][0]["reviewed-controls"]["control-selections"][0][
+                "include-controls"
+            ]
+        }
+        assert "links" not in controls["AC-2"]
+        assert "links" not in controls["IT-01"]
+
+        # 2. RACM citing NIST 800-53: valid NIST family AC-2 gets catalog link; non-family IT-01 does not
+        racm_with_nist = SimpleNamespace(
+            theme="NIST 800-53 Audit",
+            risks=[
+                SimpleNamespace(
+                    risk_id="RISK-01",
+                    regulatory_mapping=["NIST SP 800-53 AC-2"],
+                    controls=[
+                        SimpleNamespace(control_id="AC-2"),
+                        SimpleNamespace(control_id="IT-01"),
+                    ],
+                )
+            ],
+        )
+        ar_nist = _ar(_build(racm=racm_with_nist, papers=papers))
+        controls_nist = {
+            c["control-id"]: c
+            for c in ar_nist["results"][0]["reviewed-controls"]["control-selections"][0][
+                "include-controls"
+            ]
+        }
+        assert "links" in controls_nist["AC-2"]
+        assert "sp800-53-controls" in controls_nist["AC-2"]["links"][0]["href"]
+        assert "number=AC-2" in controls_nist["AC-2"]["links"][0]["href"]
+        # Non-NIST family IT-01 still does not get link
+        assert "links" not in controls_nist["IT-01"]
 
     def test_findings_only_for_tested_controls(self):
         result = _ar(_build())["results"][0]
