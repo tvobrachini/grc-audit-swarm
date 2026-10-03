@@ -29,6 +29,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -43,6 +44,8 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from swarm.review_policy import normalise_identity
+
+logger = logging.getLogger(__name__)
 
 ENV_VAR = "REVIEWER_TOKENS_FILE"
 HEADER = "X-Reviewer-Token"
@@ -80,11 +83,14 @@ def reviewer_tokens_mandatory() -> bool:
     from swarm.demo import demo_mode_enabled
 
     try:
-        if demo_mode_enabled():
-            return False
-    except Exception:
+        is_demo = demo_mode_enabled()
+    except Exception as exc:
         # If demo_mode_enabled() raises because of production, tokens remain mandatory.
-        pass
+        logger.debug("demo_mode_enabled check: %s", exc)
+        is_demo = False
+
+    if is_demo:
+        return False
 
     raw = os.environ.get("REVIEWER_TOKENS_MANDATORY", "").strip().lower()
     if raw in _TRUTHY:

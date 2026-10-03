@@ -764,6 +764,8 @@ def test_api_startup_refuses_when_tokens_mandatory_and_unset(monkeypatch):
     monkeypatch.delenv("REVIEWER_TOKENS_FILE", raising=False)
     monkeypatch.setenv("API_AUTH_TOKEN", "test-token")
 
-    with pytest.raises(rt.ReviewerTokensError, match="REVIEWER_TOKENS_FILE must be configured"):
+    with pytest.raises(
+        rt.ReviewerTokensError, match="REVIEWER_TOKENS_FILE must be configured"
+    ):
         with TestClient(app):
             pass
