@@ -76,7 +76,7 @@ Full phase/agent breakdown, the state-machine diagram, generation provenance and
 
 Two layers, evaluated separately. The **evidence layer** (`tests/eval/`, runs in CI) plants known misconfigurations in a simulated AWS account (moto) and checks the deterministic AWS-reading tools against them — this part is measured and passes today. The **LLM layer** (`evals/`) runs 13 scenarios through the real pipeline against your own LLM provider and scores the agents' conclusions against a versioned answer key on false-pass rate, false-fail rate, citation faithfulness, deficiency-classification agreement and more.
 
-**No real-model results are published yet.** The answer key is an AI-assisted draft that still awaits the owner's review, and the runner prints that status at the top of every report. Metric definitions, all 13 scenarios, cost and the harness's own limitations: [docs/EVALUATION.md](docs/EVALUATION.md).
+**No real-model results are published yet.** The answer key, an AI-assisted draft, was reviewed and signed off by the owner, and the runner prints its review status at the top of every report. Metric definitions, all 13 scenarios, cost and the harness's own limitations: [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ---
 
@@ -126,7 +126,7 @@ More screenshots (QA rejection / retry / override, control attributes, return-fo
 ## Limitations
 
 - **Decision support only.** The output is a draft for a qualified auditor, not an audit opinion, and does not replace engagement supervision.
-- **Not benchmarked yet.** No measured accuracy, precision, time-saving or cost figures exist for the LLM layer; the harness is built, the answer key is not yet reviewed.
+- **Not benchmarked yet.** No measured accuracy, precision, time-saving or cost figures exist for the LLM layer; the harness is built and the answer key is signed off, but no real-model run has been published.
 - **QA is another LLM,** run at temperature 0 to reduce (not remove) variance. A QA approval does not show the output is correct.
 - **Reviewer identity is self-declared by default,** compared as typed names against one shared API token. Optional per-reviewer tokens (`REVIEWER_TOKENS_FILE`) tie each action to an issued token instead; that is not SSO and has no MFA — see [Security and data handling](docs/SECURITY-AND-DATA.md#per-reviewer-tokens).
 - **The approval trail is tamper-evident, not tamper-proof.** Its hash chain detects edits and reordering; detecting entries cut from the end depends on where you keep a separate anchor file, which this repository does not configure for you.
