@@ -223,7 +223,7 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 
 ## ADR-011: Reviewer decisions as an append-only record beside the AI drafts
 
-**Status:** Accepted (Option B, slices 1 and 2). The defaults listed under "Provisional" are awaiting the owner's confirmation.
+**Status:** Accepted (Option B, slices 1 and 2). The owner confirmed every default listed under "Policy defaults" on 2026-10-17.
 
 **Context.** A reviewer could approve a gate or return it for rework, and nothing else. They could not record their own conclusion, a final deficiency classification, a per-finding sign-off, a finding write-up or management's response, and the report still called every classification "proposed" after Gate 3. The only way to change a conclusion was to ask the crew to redraft it, which could also change findings the reviewer had no issue with. Three designs were compared: fields on the artifacts (A), a separate append-only record (B), and reviewer edits with diffs in the trail (C). B was chosen because it keeps the AI draft and the human decision apart, fits the existing trail and digest semantics, and leaves the eval harness measuring the model.
 
@@ -232,7 +232,7 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 | Type | Subject | Values | Rationale |
 |---|---|---|---|
 | `sign_off` | finding | none | optional |
-| `challenge` | finding | optional `tod_conclusion` / `toe_conclusion` (see provisional 3) | required |
+| `challenge` | finding | optional `tod_conclusion` / `toe_conclusion` (see policy default 3) | required |
 | `scope_limitation` | finding concluded Not tested | none | required (the limitation as reported) |
 | `classify` | deficiency | `classification` on the report's scale; `likelihood` / `magnitude` default to the draft's; the Material Weakness rule applies | required when it differs from the draft |
 | `writeup` | deficiency | `criteria`, `condition`, `cause`, `effect`, `recommendation` | optional |
@@ -251,25 +251,25 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 
 **Decision (DEMO_MODE).** The demo never records a decision: its gates wait for a person. `swarm.demo.demo_review_decisions` holds the example decisions of the scripted walk-through, and `scripts/demo_walkthrough.py` posts them through the API (acting as the reviewer) and writes the four exports, so `docs/sample-run/` can be regenerated.
 
-**Provisional — awaiting owner confirmation.** Each is a named constant or function in `src/swarm/review_policy.py`. The table below is for the owner to record a call on each; nothing here has been confirmed or overridden yet — every checkbox starts unchecked and every rationale cell starts blank.
+**Policy defaults — confirmed by the owner (2026-10-17).** Each is a named constant or function in `src/swarm/review_policy.py`. The owner (Tiago) confirmed all fifteen as proposed, with none overridden; the alternatives are kept below for the record.
 
-| # | Default | AI-proposed setting | Owner decision: ☐ confirm ☐ override — ___ | Owner rationale: ___ |
-|---|---|---|---|---|
-| 1 | Decision model | Option B: append-only decisions, drafts never change | ☐ confirm ☐ override — ___ | ___ |
-| 2 | Classification changes | Allowed without rework; rationale required when it differs from the draft | ☐ confirm ☐ override — ___ | ___ |
-| 3 | ToD/ToE downgrades | Only "Effective" → "Not tested" without rework; anything else needs rework | ☐ confirm ☐ override — ___ | ___ |
-| 4 | Gate 2 review scope | Every Exception and every key-control finding needs a sign-off or challenge | ☐ confirm ☐ override — ___ | ___ |
-| 5 | Who may classify | Anyone except the preparer; the Gate 3 approver still differs from the Gate 2 approver | ☐ confirm ☐ override — ___ | ___ |
-| 6 | Engagement conclusion | Required before Gate 3, scale Satisfactory / Needs improvement / Unsatisfactory, with a rationale | ☐ confirm ☐ override — ___ | ___ |
-| 7 | Management responses | Transcribed by the auditor; recordable at Gate 3 and after COMPLETED | ☐ confirm ☐ override — ___ | ___ |
-| 8 | Disagreement handling | Auditor's rebuttal required in the rationale; both shown in the export | ☐ confirm ☐ override — ___ | ___ |
-| 9 | Write-up authorship | Five-part write-up per deficiency, written by a person; no AI drafting | ☐ confirm ☐ override — ___ | ___ |
-| 10 | AI draft visibility | Exports show the conclusion of record plus the AI draft alongside when they differ | ☐ confirm ☐ override — ___ | ___ |
-| 11 | Supersede window | A decision stays correctable until its phase seals: Gate 2 for phase-2, COMPLETED for phase-3, indefinitely for management responses | ☐ confirm ☐ override — ___ | ___ |
-| 12 | Identity source | `declared` by default; `authenticated` only when per-reviewer tokens (ADR-012) are configured | ☐ confirm ☐ override — ___ | ___ |
-| 13 | Reviewer change rate | Computed per session, exposed in the API, not published as a claim | ☐ confirm ☐ override — ___ | ___ |
-| 14 | Preparer exclusions | Preparer may not sign off, challenge, classify, record a scope limitation or the engagement conclusion; may draft a write-up or transcribe a management response | ☐ confirm ☐ override — ___ | ___ |
-| 15 | Scope limitation for untested key controls | Required before Gate 3 for any key control whose conclusion of record is Not tested | ☐ confirm ☐ override — ___ | ___ |
+| # | Default | Setting | Owner decision |
+|---|---|---|---|
+| 1 | Decision model | Option B: append-only decisions, drafts never change | Confirmed, 2026-10-17 |
+| 2 | Classification changes | Allowed without rework; rationale required when it differs from the draft | Confirmed, 2026-10-17 |
+| 3 | ToD/ToE downgrades | Only "Effective" → "Not tested" without rework; anything else needs rework | Confirmed, 2026-10-17 |
+| 4 | Gate 2 review scope | Every Exception and every key-control finding needs a sign-off or challenge | Confirmed, 2026-10-17 |
+| 5 | Who may classify | Anyone except the preparer; the Gate 3 approver still differs from the Gate 2 approver | Confirmed, 2026-10-17 |
+| 6 | Engagement conclusion | Required before Gate 3, scale Satisfactory / Needs improvement / Unsatisfactory, with a rationale | Confirmed, 2026-10-17 |
+| 7 | Management responses | Transcribed by the auditor; recordable at Gate 3 and after COMPLETED | Confirmed, 2026-10-17 |
+| 8 | Disagreement handling | Auditor's rebuttal required in the rationale; both shown in the export | Confirmed, 2026-10-17 |
+| 9 | Write-up authorship | Five-part write-up per deficiency, written by a person; no AI drafting | Confirmed, 2026-10-17 |
+| 10 | AI draft visibility | Exports show the conclusion of record plus the AI draft alongside when they differ | Confirmed, 2026-10-17 |
+| 11 | Supersede window | A decision stays correctable until its phase seals: Gate 2 for phase-2, COMPLETED for phase-3, indefinitely for management responses | Confirmed, 2026-10-17 |
+| 12 | Identity source | `declared` by default; `authenticated` only when per-reviewer tokens (ADR-012) are configured | Confirmed, 2026-10-17 |
+| 13 | Reviewer change rate | Computed per session, exposed in the API, not published as a claim | Confirmed, 2026-10-17 |
+| 14 | Preparer exclusions | Preparer may not sign off, challenge, classify, record a scope limitation or the engagement conclusion; may draft a write-up or transcribe a management response | Confirmed, 2026-10-17 |
+| 15 | Scope limitation for untested key controls | Required before Gate 3 for any key control whose conclusion of record is Not tested | Confirmed, 2026-10-17 |
 
 1. Option B, append-only, drafts never change. *Alternative:* A (fields on the artifacts) or C (reviewer edits with diffs).
 2. A reviewer may change a classification without rework; a rationale is required when it differs from the draft (`classification_differs`). *Alternative:* only by return for rework.
@@ -287,7 +287,7 @@ Identities are compared after case folding and collapsing whitespace. Audits cre
 14. The preparer may not record `sign_off`, `challenge`, `classify`, `scope_limitation` or `engagement_conclusion` (`PREPARER_EXCLUDED_DECISIONS`); they may draft a write-up and transcribe a management response. *Alternative:* exclude the preparer from all decisions.
 15. A key control whose conclusion of record is Not tested needs a `scope_limitation` decision before Gate 3 (`GATE_3_SCOPE_LIMITATION_FOR_UNTESTED_KEY_CONTROLS`); added because the demo already told the auditor to decide this before Gate 3. *Alternative:* optional.
 
-**Open question for the owner — management responses recorded after issuance.** Item 7 above lets a management response be transcribed at Gate 3 *or* after the session reaches COMPLETED, i.e. after the report has been issued and outside the Gate 3 seal (a response recorded post-issuance is not covered by `decisions_digest`/`decisions_count` on that gate — see **Decision (trail and digests)**). The rationale for allowing it: in practice a remediation owner's formal response to a finding often is not finalized until after the report goes out, and a workflow that requires it before Gate 3 would either hold up issuance waiting on a business response or force the auditor to skip recording an incomplete or informal one. The counter-view the owner should weigh: in most audit practice, management's response is obtained *before* issuance, as part of the same report, precisely so that it is subject to the same review and seal as the rest of the conclusions; recording it afterwards, unsealed, means a response can be added, and the record of it changed, with no gate to catch a change. Neither position has been chosen over the other here — this is left for the owner to decide, and confirming or overriding it is item 7 in the table above. No behaviour changes with this note.
+**Management responses recorded after issuance (decided).** Item 7 lets a management response be transcribed at Gate 3 *or* after the session reaches COMPLETED, i.e. after the report has been issued and outside the Gate 3 seal (a response recorded post-issuance is not covered by `decisions_digest`/`decisions_count` on that gate — see **Decision (trail and digests)**). For: a remediation owner's formal response often is not finalized until after the report goes out, and requiring it before Gate 3 would either hold up issuance or force the auditor to skip an incomplete or informal one. Against: in most audit practice the response is obtained before issuance so that it falls under the same review and seal; recorded afterwards, it can be added, and its record changed, with no gate to catch the change. The owner confirmed item 7 as proposed on 2026-10-17: post-issuance responses stay allowed and unsealed. Each one is still a chained `review_decision` trail entry, so an edit or removal shows up in trail verification; the exports do not currently label a response as received after issuance.
 
 **Consequences.**
 - The report of a completed audit states the reviewer's conclusions, marked as the reviewer's, instead of "proposed" drafts, and a reader can still see what the AI proposed.

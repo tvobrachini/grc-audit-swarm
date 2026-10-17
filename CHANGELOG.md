@@ -40,6 +40,7 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 - The demo's `after_issue` management response no longer claims to have been received after it was transcribed; `review_decisions.py` now rejects a `received_on` later than the date the decision is recorded (422).
 - The exported report now opens with a short "Conclusions of Record" block (engagement conclusion, each deficiency's classification of record, scope limitations) when reviewer decisions exist, and labels the executive summary below it as the AI-drafted summary.
 - DECISIONS.md: removed the stale note that the UI does not record decisions (it now does — `frontend/src/components/audit/decisions/`); ADR-011 gained an owner-confirmation table for its provisional defaults and an explicit open question on management responses recorded after issuance.
+- ADR-011: the owner confirmed all fifteen reviewer-decision policy defaults as proposed, including management responses staying recordable after issuance; the ADR, `review_policy.py` and ARCHITECTURE.md no longer call them provisional.
 - CASE_STUDY.md now covers reviewer decisions (ADR-011) and per-reviewer tokens (ADR-012), and no longer describes reviewer identity as only a typed name.
 - CI: the coverage gate is 90% (was 50%; actual coverage is ~96%), and the pyright job also checks `evals/`.
 - Regenerated `docs/sample-run/` so its report shows the new block and consistent demo dates.
