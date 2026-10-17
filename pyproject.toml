@@ -51,3 +51,8 @@ dev = [
     "jsonschema>=4.23.0",
     "regex>=2024.11.6",
 ]
+
+[tool.uv]
+# crewai pins mcp~=1.28.1, which has CVE-2026-59951 (fixed in 1.30.0).
+# Remove this override once crewai allows a fixed mcp release.
+override-dependencies = ["mcp>=1.30.0,<2"]
