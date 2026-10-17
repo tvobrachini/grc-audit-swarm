@@ -49,12 +49,19 @@ def key() -> AnswerKey:
 # ── Answer key ───────────────────────────────────────────────────────────────
 
 
-def test_answer_key_is_a_draft_pending_owner_review(key):
-    assert key.status == "DRAFT"
-    assert key.reviewed_by is None
-    assert not key.reviewed
-    assert key.review_status() == UNREVIEWED_BANNER
-    assert "NOT YET REVIEWED BY THE OWNER" in key.review_status()
+def test_answer_key_is_signed_off_by_the_owner(key):
+    assert key.status == "REVIEWED"
+    assert key.reviewed
+    assert key.review_status() == (
+        f"Answer key v{key.version} reviewed by Tiago (tvobrachini) on 2026-10-17."
+    )
+
+
+def test_unreviewed_key_carries_the_banner(key):
+    draft = key.model_copy(update={"reviewed_by": None, "reviewed_on": None})
+    assert not draft.reviewed
+    assert draft.review_status() == UNREVIEWED_BANNER
+    assert "NOT YET REVIEWED BY THE OWNER" in draft.review_status()
 
 
 def test_answer_key_has_10_to_15_scenarios_with_unique_ids(key):
@@ -290,9 +297,9 @@ def test_replay_report_leads_with_the_answer_key_review_status(replay_results):
     _, md, data = replay_results
     lines = [line for line in md.splitlines() if line.strip()]
     assert lines[0].startswith("# LLM-layer evaluation")
-    assert "ANSWER KEY NOT YET REVIEWED BY THE OWNER" in lines[1]
+    assert "reviewed by Tiago (tvobrachini) on 2026-10-17" in lines[1]
     assert "REPLAY MODE" in md
-    assert data["answer_key"]["reviewed_by"] is None
+    assert data["answer_key"]["reviewed_by"] == "Tiago (tvobrachini)"
 
 
 def test_replay_scores_every_metric(replay_results):

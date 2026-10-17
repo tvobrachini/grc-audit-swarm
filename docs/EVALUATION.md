@@ -7,7 +7,7 @@ GRC Audit Swarm has two layers that can be wrong in different ways, and each is 
 | Evidence | The AWS read reports the wrong configuration, leaks an account ID, or is not stored in the vault | Deterministic: planted misconfigurations in moto, exact expected output | `tests/eval/` (runs in CI) |
 | LLM | The agents draw the wrong audit conclusion from correct evidence: a pass where the evidence shows an exception, a conclusion with no evidence behind it, a single configuration read treated as operating effectiveness, a severity outside a reasonable range | This harness: scenarios with a versioned answer key, run through the real pipeline with your LLM provider | `evals/` (run by the owner; never in CI) |
 
-> **No published results yet. Run the harness with your provider.** The answer key is a draft that the owner has not reviewed yet (`reviewed_by: null`), and no real-model run has been recorded. Nothing in this repository reports a measured accuracy figure for the LLM layer.
+> **No published results yet. Run the harness with your provider.** The answer key was reviewed and signed off by the owner on 2026-10-17 (v1.0.0), but no real-model run has been recorded yet. Nothing in this repository reports a measured accuracy figure for the LLM layer.
 
 ## How the harness works
 
@@ -21,7 +21,7 @@ For each scenario and each run:
 
 ## Answer key
 
-`evals/scenarios/answer_key.v1.yaml` is versioned (`version`) and carries its review status. It is a **draft written with AI assistance** from an experienced IT auditor's point of view, and the owner must review and sign it off by setting `reviewed_by` and `reviewed_on`. Until then every report starts with "ANSWER KEY NOT YET REVIEWED BY THE OWNER".
+`evals/scenarios/answer_key.v1.yaml` is versioned (`version`) and carries its review status. It was **drafted with AI assistance** from an experienced IT auditor's point of view and **reviewed and signed off by the owner** on 2026-10-17 (`reviewed_by`, `reviewed_on`). Every report states the key's review status on its first line; a key without `reviewed_by` makes the report start with "ANSWER KEY NOT YET REVIEWED BY THE OWNER". Changing an outcome means bumping `version` and signing off again.
 
 For each scenario and control area the key gives the expected result (`Exception`, `No exception` or `Not tested`), the acceptable ToD and ToE conclusions, the number of exceptions the evidence shows (where it applies), the deficiency classifications a reviewer would accept, and a rationale. Areas with no evidence tool have a default expectation of `Not tested` in every scenario. The key validates itself on load: a tool-less area cannot expect a tested outcome, and classifications must be on the scenario's scale. A test also checks that the planted evidence (the real tool output from the seeded account) agrees with each expected outcome.
 
@@ -143,7 +143,7 @@ When the owner publishes a run, it will be listed here with its date, crew and Q
 
 - **Small n.** 13 scenarios, a few areas each and a handful of runs give small denominators. The rates show what happened in these runs. They are not estimates with a stated confidence, so read each one with its counts.
 - **Simulated AWS.** moto stands in for AWS. The known gaps (policy status, BPA enforcement, pagination) are handled as in `tests/eval`. Only three evidence tools exist, so most control areas can only be `Not tested`. The scenarios test judgement about the evidence the app can collect, not audit coverage in general.
-- **The answer key is an AI-assisted draft pending owner review.** Several outcomes are matters of professional judgement: whether an MFA gap is a design or an operating failure, and the deficiency ranges. The key records accepted ranges and rationales so they can be challenged. Scores are provisional until `reviewed_by` is set.
+- **The answer key reflects one reviewer's judgement.** It is an AI-assisted draft signed off by the owner. Several outcomes are matters of professional judgement: whether an MFA gap is a design or an operating failure, ToE `Ineffective` accepted beside `Not tested` when design already failed, and the deficiency ranges. The key records accepted ranges and rationales so they can be challenged.
 - **Mapping is heuristic.** Keyword and evidence-source mapping can misassign an unusual control. Every mapping is saved with its scores, and unmatched or ambiguous mappings are reported so a reviewer can check them.
 - **ToE-basis check is heuristic.** It looks for a reliance statement in `toe_basis`. It does not judge whether that reliance is justified.
 - **LLM variance.** Outputs change between runs, models, provider versions and prompt edits. A result applies to the model, prompts, harness version and answer-key version recorded with it.
