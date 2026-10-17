@@ -103,8 +103,8 @@ def sod_violation(
 
 # ── Reviewer decisions (DECISIONS.md, ADR-011) ──────────────────────────────
 #
-# Every value below is a PROVISIONAL default awaiting the owner's
-# confirmation; ADR-011 lists each one with its alternative. Decision types
+# Every value below is a policy default the owner confirmed on 2026-10-17;
+# ADR-011 lists each one with its alternative. Decision types
 # and statuses are plain strings here so this module stays free of schema
 # imports.
 
