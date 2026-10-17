@@ -4,6 +4,9 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 
 ## Unreleased
 
+**Evaluation answer key**
+- The LLM-layer answer key (`evals/scenarios/answer_key.v1.yaml`, v1.0.0) is reviewed and signed off by the owner; evaluation reports no longer open with the "not yet reviewed" banner.
+
 **Reviewer decisions (ADR-011)**
 - At Gates 2 and 3 a reviewer records decisions beside the AI draft: sign-off or challenge per finding, a scope limitation for untested controls, a classification, five-part write-up and management response per deficiency, and an engagement conclusion. Gates 2 and 3 refuse approval until the required decisions exist, and list what is missing.
 - Each decision is appended to the approval trail; Gate 2 and 3 approvals also record a digest of that phase's decisions, so a decision edited, removed or added afterwards is reported by trail verification.

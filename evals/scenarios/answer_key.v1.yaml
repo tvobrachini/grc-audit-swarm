@@ -1,21 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# DRAFT ANSWER KEY — NOT YET REVIEWED BY THE OWNER
+# ANSWER KEY — REVIEWED AND SIGNED OFF BY THE OWNER
 #
-# This answer key was drafted with AI assistance from an experienced IT
-# auditor's point of view. It has NOT been reviewed or signed off. Until the
-# owner (a qualified IT auditor) reviews every expected outcome and sets
-# `reviewed_by` / `reviewed_on`, any score computed against it is provisional,
-# and every results report says so at the top.
+# Drafted with AI assistance from an experienced IT auditor's point of view,
+# then reviewed and signed off by the repository owner (a qualified IT
+# auditor) on 2026-10-17. Outcomes that are matters of professional judgement
+# keep their accepted ranges and rationales so they can still be challenged.
 #
-# To sign off: review each scenario and area, edit what you disagree with,
-# bump `version` if outcomes change, then set reviewed_by and reviewed_on.
+# To change an outcome: edit it, bump `version`, and sign off again by
+# updating reviewed_by and reviewed_on.
 # ─────────────────────────────────────────────────────────────────────────────
 
 version: "1.0.0"
-status: DRAFT
-reviewed_by: null
-reviewed_on: null
-authored_with: "AI-assisted draft; pending review by the repository owner"
+status: REVIEWED
+reviewed_by: "Tiago (tvobrachini)"
+reviewed_on: "2026-10-17"
+authored_with: "AI-assisted draft; reviewed and signed off by the repository owner"
 
 # ── Control-area catalogue ───────────────────────────────────────────────────
 # RACM control IDs are written by the model and change from run to run, so
