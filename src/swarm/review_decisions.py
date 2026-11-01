@@ -51,6 +51,7 @@ from swarm.schema import (
     IdentitySource,
     ManagementResponseValues,
     OperatingConclusion,
+    RemediationVerificationValues,
     ReviewDecision,
     RiskControlMatrixSchema,
     RiskRating,
@@ -78,6 +79,7 @@ SUBJECT_FOR_TYPE: dict[DecisionType, DecisionSubjectType] = {
     DecisionType.CLASSIFY: DecisionSubjectType.DEFICIENCY,
     DecisionType.WRITEUP: DecisionSubjectType.DEFICIENCY,
     DecisionType.MANAGEMENT_RESPONSE: DecisionSubjectType.DEFICIENCY,
+    DecisionType.REMEDIATION_VERIFICATION: DecisionSubjectType.DEFICIENCY,
     DecisionType.ENGAGEMENT_CONCLUSION: DecisionSubjectType.ENGAGEMENT,
 }
 
@@ -89,6 +91,7 @@ PHASE_FOR_TYPE: dict[DecisionType, int] = {
     DecisionType.CLASSIFY: 3,
     DecisionType.WRITEUP: 3,
     DecisionType.MANAGEMENT_RESPONSE: 3,
+    DecisionType.REMEDIATION_VERIFICATION: 3,
     DecisionType.ENGAGEMENT_CONCLUSION: 3,
 }
 
@@ -337,6 +340,25 @@ def _management_values(
     return values
 
 
+def _remediation_values(
+    parsed: RemediationVerificationValues, recorded_on: str
+) -> dict[str, str]:
+    verified_on = _iso_date(parsed.verified_on, "verified_on") or ""
+    if verified_on and verified_on > recorded_on:
+        raise DecisionValidationError(
+            f"values.verified_on ({verified_on}) is after the date this "
+            f"decision is being recorded ({recorded_on})"
+        )
+    out = {
+        "status": str(parsed.status),
+        "verified_on": verified_on,
+    }
+    vault_id = _text(parsed.evidence_vault_id)
+    if vault_id:
+        out["evidence_vault_id"] = vault_id
+    return out
+
+
 def build_decision(
     ctx: DecisionContext,
     *,
@@ -461,6 +483,10 @@ def build_decision(
         elif dtype == DecisionType.MANAGEMENT_RESPONSE:
             stored = _management_values(
                 cast(ManagementResponseValues, parsed), rationale, decided_at[:10]
+            )
+        elif dtype == DecisionType.REMEDIATION_VERIFICATION:
+            stored = _remediation_values(
+                cast(RemediationVerificationValues, parsed), decided_at[:10]
             )
         else:
             stored = {k: str(v) for k, v in parsed.model_dump().items()}
@@ -589,6 +615,7 @@ class DeficiencyView(BaseModel):
     differs_from_draft: bool = False
     writeup: Optional[DecisionRef] = None
     management_response: Optional[DecisionRef] = None
+    remediation_verification: Optional[DecisionRef] = None
 
 
 class ReviewerChangeRate(BaseModel):
@@ -714,6 +741,15 @@ def _deficiency_views(
                 management_response=DecisionRef.of(
                     active.get(
                         (DecisionType.MANAGEMENT_RESPONSE.value, did, e.deficiency_id)
+                    )
+                ),
+                remediation_verification=DecisionRef.of(
+                    active.get(
+                        (
+                            DecisionType.REMEDIATION_VERIFICATION.value,
+                            did,
+                            e.deficiency_id,
+                        )
                     )
                 ),
             )

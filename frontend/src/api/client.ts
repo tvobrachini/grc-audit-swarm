@@ -64,7 +64,8 @@ export type DecisionType =
   | "scope_limitation"
   | "writeup"
   | "management_response"
-  | "engagement_conclusion";
+  | "engagement_conclusion"
+  | "remediation_verification";
 
 /** A compact copy of the decision a subject's effective record rests on. */
 export interface DecisionRef {
@@ -116,6 +117,30 @@ export interface DeficiencyView {
   differs_from_draft: boolean;
   writeup: DecisionRef | null;
   management_response: DecisionRef | null;
+  remediation_verification?: DecisionRef | null;
+}
+
+export interface GenerationRunSummary {
+  run_id: string;
+  phase: number;
+  artifact: string;
+  started_at: string;
+  completed_at: string | null;
+  provider: string;
+  model: string;
+  qa_provider: string;
+  qa_model: string;
+  drafter_family?: string;
+  qa_family?: string;
+  cross_family_verified?: boolean;
+  linter_passed?: boolean | null;
+  linter_violations?: string[];
+  cascade_tier?: string;
+  demo_mode: boolean;
+  attempts: number;
+  outcome: string;
+  artifact_digest: string | null;
+  qa_verdict_summary: string | null;
 }
 
 export interface ReviewerChangeRate {
@@ -195,6 +220,7 @@ export interface SessionDetail extends SessionSummary {
   approval_trail: TrailEntry[];
   qa_rejection_reason: string | null;
   trail_verification: TrailVerification | null;
+  generation_runs?: GenerationRunSummary[];
   review_decisions: ReviewDecisionRecord[];
   effective: EffectiveView | null;
   review_decisions_required: boolean;

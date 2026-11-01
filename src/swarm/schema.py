@@ -776,6 +776,7 @@ class DecisionType(StrEnum):
     WRITEUP = "writeup"
     MANAGEMENT_RESPONSE = "management_response"
     ENGAGEMENT_CONCLUSION = "engagement_conclusion"
+    REMEDIATION_VERIFICATION = "remediation_verification"
 
 
 class DecisionSubjectType(StrEnum):
@@ -802,6 +803,12 @@ class ManagementAgreement(StrEnum):
     AGREE = "agree"
     PARTIAL = "partial"
     DISAGREE = "disagree"
+
+
+class RemediationStatus(StrEnum):
+    REMEDIATED = "remediated"
+    PARTIALLY_REMEDIATED = "partially_remediated"
+    OPEN = "open"
 
 
 class ReviewDecision(BaseModel):
@@ -885,6 +892,14 @@ class EngagementConclusionValues(_DecisionValues):
     conclusion: Annotated[EngagementRating, _lenient(EngagementRating)]
 
 
+class RemediationVerificationValues(_DecisionValues):
+    """Post-issuance remediation follow-up verification (IIA GIAS Standard 15.2)."""
+
+    status: Annotated[RemediationStatus, _lenient(RemediationStatus)]
+    verified_on: str = Field(min_length=1)
+    evidence_vault_id: Optional[str] = None
+
+
 DECISION_VALUE_MODELS: dict[DecisionType, type[_DecisionValues]] = {
     DecisionType.SIGN_OFF: SignOffValues,
     DecisionType.CHALLENGE: ChallengeValues,
@@ -893,4 +908,5 @@ DECISION_VALUE_MODELS: dict[DecisionType, type[_DecisionValues]] = {
     DecisionType.WRITEUP: WriteupValues,
     DecisionType.MANAGEMENT_RESPONSE: ManagementResponseValues,
     DecisionType.ENGAGEMENT_CONCLUSION: EngagementConclusionValues,
+    DecisionType.REMEDIATION_VERIFICATION: RemediationVerificationValues,
 }
