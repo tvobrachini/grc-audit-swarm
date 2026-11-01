@@ -537,7 +537,7 @@ class TestNewAwsChecksAndSeededSampling:
         iam.list_access_keys.return_value = {
             "AccessKeyMetadata": [
                 {
-                    "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
+                    "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
                     "Status": "Active",
                     "CreateDate": datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
                 }
