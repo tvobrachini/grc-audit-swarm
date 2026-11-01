@@ -468,6 +468,43 @@ def build_assessment_results(
             ]
         },
     }
+    objectives_and_methods: list[dict[str, Any]] = []
+    seen_obj_ctrl: set[str] = set()
+    for r in racm.risks if racm else []:
+        for c in getattr(r, "controls", []) or []:
+            cid = getattr(c, "control_id", "")
+            if not cid or cid in seen_obj_ctrl:
+                continue
+            seen_obj_ctrl.add(cid)
+            desc_text = (
+                _line(getattr(c, "description", "")) or f"RACM control {_line(cid)}"
+            )
+            obj_entry: dict[str, Any] = {
+                "control-id": token(cid),
+                "description": markup(desc_text),
+                "parts": [
+                    {
+                        "id": token(cid),
+                        "name": "assessment-objective",
+                        "ns": PROJECT_NS,
+                        "prose": markup(desc_text),
+                    }
+                ],
+            }
+            reg_map = getattr(r, "regulatory_mapping", None) or []
+            obj_props = _props(
+                ("racm-control-id", cid),
+                ("racm-risk-id", getattr(r, "risk_id", "")),
+                ("control-nature", getattr(c, "nature", "")),
+                ("control-frequency", getattr(c, "frequency", "")),
+                (
+                    "framework-mapping",
+                    "; ".join(str(m) for m in reg_map if _line(m)),
+                ),
+            )
+            if obj_props:
+                obj_entry["props"] = obj_props
+            objectives_and_methods.append(obj_entry)
 
     # ── Deficiency evaluations → risks ───────────────────────────────────────
     keys = _occurrence_keys(papers.findings)
@@ -650,6 +687,35 @@ def build_assessment_results(
                     }
                 ]
             }
+        remediation_ver = dv.remediation_verification if dv else None
+        if remediation_ver is not None:
+            rv = remediation_ver.values
+            rem_status = _line(rv.get("status"))
+            if rem_status == "remediated":
+                risk["status"] = "closed"
+            rem_props = _props(
+                ("remediation-status", rem_status),
+                ("remediation-verified-on", rv.get("verified_on")),
+                ("remediation-evidence-vault-id", rv.get("evidence_vault_id")),
+            ) + _decided_props(remediation_ver, "remediation-")
+            risk["props"] += rem_props
+            rem_desc = (
+                f"Remediation verification ({rem_status}), verified on "
+                f"{_line(rv.get('verified_on'))} by {_line(remediation_ver.decided_by)} "
+                f"({remediation_ver.identity_source} identity): "
+                f"{remediation_ver.rationale}"
+            )
+            risk.setdefault("risk-log", {}).setdefault("entries", []).append(
+                {
+                    "uuid": element_uuid(sid, "remediation-verification", risk_uuid),
+                    "title": markup("Remediation verification"),
+                    "description": markup(rem_desc),
+                    "start": oscal_datetime(rv.get("verified_on"))
+                    or oscal_datetime(remediation_ver.decided_at)
+                    or last_modified,
+                    "props": rem_props,
+                }
+            )
         if remediations:
             risk["remediations"] = [
                 {k: val for k, val in r.items() if val} for r in remediations
@@ -1087,19 +1153,105 @@ def build_assessment_results(
         "source artifacts."
     )
 
-    return {
-        "assessment-results": {
-            "uuid": element_uuid(sid, "assessment-results"),
-            "metadata": metadata,
-            "import-ap": {
-                "href": f"#{plan_uuid}",
-                "remarks": markup(
-                    "No OSCAL assessment plan document exists. This reference "
-                    "resolves to a back-matter resource describing the RACM, "
-                    "which served as the assessment plan."
-                ),
-            },
-            "results": [result],
-            "back-matter": {"resources": resources},
+    ar_body: dict[str, Any] = {
+        "uuid": element_uuid(sid, "assessment-results"),
+        "metadata": metadata,
+        "import-ap": {
+            "href": f"#{plan_uuid}",
+            "remarks": markup(
+                "No OSCAL assessment plan document exists. This reference "
+                "resolves to a back-matter resource describing the RACM, "
+                "which served as the assessment plan."
+            ),
+        },
+    }
+    if objectives_and_methods:
+        ar_body["local-definitions"] = {
+            "objectives-and-methods": objectives_and_methods
         }
+    ar_body["results"] = [result]
+    ar_body["back-matter"] = {"resources": resources}
+    return {"assessment-results": ar_body}
+
+
+def evaluate_oscal_drift(
+    baseline_doc: Mapping[str, Any],
+    target_doc: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compare two OSCAL Assessment Results documents for longitudinal drift.
+
+    Inspired by Defense Unicorns ``lula evaluate``: compares a baseline OSCAL AR
+    against a target OSCAL AR and returns:
+    - ``regressed_controls``: controls that were ``satisfied`` in baseline and are
+      ``not-satisfied`` in target.
+    - ``improved_controls``: controls that were ``not-satisfied`` in baseline and
+      are ``satisfied`` in target.
+    - ``remediated_risks``: deficiency IDs that were ``open`` in baseline and are
+      ``closed`` in target.
+    - ``new_open_risks``: deficiency IDs that are ``open`` in target and were not
+      ``open`` in baseline.
+    - ``passed``: True if and only if ``regressed_controls`` and ``new_open_risks``
+      are both empty.
+    """
+
+    def _findings_map(doc: Mapping[str, Any]) -> dict[str, str]:
+        results = doc.get("assessment-results", {}).get("results", [])
+        if not results:
+            return {}
+        out: dict[str, str] = {}
+        for f in results[0].get("findings", []):
+            tgt = f.get("target", {})
+            tid = str(tgt.get("target-id", ""))
+            state = str(tgt.get("status", {}).get("state", ""))
+            if tid and state:
+                out[tid] = state
+        return out
+
+    def _risks_map(doc: Mapping[str, Any]) -> dict[str, str]:
+        results = doc.get("assessment-results", {}).get("results", [])
+        if not results:
+            return {}
+        out: dict[str, str] = {}
+        for r in results[0].get("risks", []):
+            props = {p.get("name"): p.get("value") for p in r.get("props", [])}
+            def_id = str(props.get("deficiency-id") or r.get("title") or "")
+            status = str(r.get("status", "open"))
+            if def_id:
+                out[def_id] = status
+        return out
+
+    base_f = _findings_map(baseline_doc)
+    targ_f = _findings_map(target_doc)
+
+    regressed_controls = sorted(
+        cid
+        for cid, b_state in base_f.items()
+        if b_state == "satisfied" and targ_f.get(cid) == "not-satisfied"
+    )
+    improved_controls = sorted(
+        cid
+        for cid, b_state in base_f.items()
+        if b_state == "not-satisfied" and targ_f.get(cid) == "satisfied"
+    )
+
+    base_r = _risks_map(baseline_doc)
+    targ_r = _risks_map(target_doc)
+
+    remediated_risks = sorted(
+        did
+        for did, b_status in base_r.items()
+        if b_status == "open" and targ_r.get(did) == "closed"
+    )
+    new_open_risks = sorted(
+        did
+        for did, t_status in targ_r.items()
+        if t_status == "open" and base_r.get(did) != "open"
+    )
+
+    return {
+        "passed": len(regressed_controls) == 0 and len(new_open_risks) == 0,
+        "regressed_controls": regressed_controls,
+        "improved_controls": improved_controls,
+        "remediated_risks": remediated_risks,
+        "new_open_risks": new_open_risks,
     }

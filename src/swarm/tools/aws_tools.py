@@ -14,7 +14,7 @@ import json
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from crewai.tools import tool
+from swarm.crews._compat import tool
 
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 from swarm.evidence import app_version as _app_version
@@ -81,7 +81,7 @@ def _register_and_format(
 def make_aws_tools(session_id: str):
     @tool("Get IAM Password Policy")
     def get_iam_password_policy(context: str = "") -> str:
-        """Fetches the AWS IAM account password policy. Essential for AC-01 password rules compliance. If no policy is set, returns a finding saying so."""
+        """Fetches the AWS IAM account password policy. Essential for NIST SP 800-53 IA-5(1) password authenticator compliance. If no policy is set, returns a finding saying so."""
         region = None
         try:
             client = _boto_client("iam")
@@ -102,7 +102,7 @@ def make_aws_tools(session_id: str):
 
     @tool("List AWS IAM Users with MFA")
     def list_iam_users_with_mfa(context: str = "") -> str:
-        """Lists every IAM user and whether an MFA device is assigned. Essential for AC-02 access compliance. The account root user is not included (iam:ListUsers does not return it)."""
+        """Lists every IAM user and whether an MFA device is assigned. Essential for NIST SP 800-53 IA-2(1)/IA-2(2) and AC-2 access and multi-factor authentication compliance. The account root user is not included (iam:ListUsers does not return it)."""
         region = None
         try:
             client = _boto_client("iam")

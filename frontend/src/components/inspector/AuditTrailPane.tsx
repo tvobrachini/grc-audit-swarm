@@ -1,6 +1,11 @@
 import { clsx } from "clsx";
 import { ShieldCheck, ShieldAlert, ShieldQuestion, ShieldX } from "lucide-react";
-import type { SessionDetail, TrailEntry, TrailVerification } from "@/api/client";
+import type {
+  GenerationRunSummary,
+  SessionDetail,
+  TrailEntry,
+  TrailVerification,
+} from "@/api/client";
 
 interface Props {
   session: SessionDetail;
@@ -171,6 +176,66 @@ function VerificationBadge({ verification }: { verification: TrailVerification }
   );
 }
 
+const PHASE_NAMES: Record<number, string> = {
+  1: "Phase 1 (Planning)",
+  2: "Phase 2 (Fieldwork)",
+  3: "Phase 3 (Reporting)",
+};
+
+function GenerationRunsCard({ runs }: { runs: GenerationRunSummary[] }) {
+  if (!runs || runs.length === 0) return null;
+  return (
+    <div className="mb-2 space-y-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        Audit Factory Provenance &amp; Linters
+      </p>
+      {runs.map((r) => (
+        <div
+          key={r.run_id}
+          className="rounded border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-2 text-[11px]"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-1">
+            <span className="font-medium text-[var(--color-text-primary)]">
+              {PHASE_NAMES[r.phase] ?? `Phase ${r.phase}`}
+            </span>
+            <div className="flex flex-wrap items-center gap-1 text-[10px]">
+              {r.cross_family_verified ? (
+                <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-green-400">
+                  Cross-Family PoLL
+                </span>
+              ) : r.demo_mode ? (
+                <span className="rounded bg-violet-900/30 px-1.5 py-0.5 text-violet-400">
+                  Demo Fixture
+                </span>
+              ) : (
+                <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-amber-400">
+                  Single-Family
+                </span>
+              )}
+              {r.linter_passed === true && (
+                <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-green-400">
+                  Linters D1–D14 Passed
+                </span>
+              )}
+              {r.linter_passed === false && (
+                <span className="rounded bg-red-900/30 px-1.5 py-0.5 text-red-400">
+                  {r.linter_violations?.length ?? 1} Linter Advisory
+                </span>
+              )}
+            </div>
+          </div>
+          <p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">
+            Drafter: <span className="font-mono">{r.model}</span>
+            {r.drafter_family ? ` (${r.drafter_family})` : ""} &middot; Critic:{" "}
+            <span className="font-mono">{r.qa_model}</span>
+            {r.qa_family ? ` (${r.qa_family})` : ""}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Approvals, returns, retries and QA overrides, oldest first, with the
  * hash-chain verification result shown at the top. */
 export function AuditTrailPane({ session }: Props) {
@@ -178,6 +243,9 @@ export function AuditTrailPane({ session }: Props) {
     <div className="space-y-2">
       {session.trail_verification && (
         <VerificationBadge verification={session.trail_verification} />
+      )}
+      {session.generation_runs && session.generation_runs.length > 0 && (
+        <GenerationRunsCard runs={session.generation_runs} />
       )}
       {session.approval_trail.length === 0 && (
         <p className="text-xs text-[var(--color-text-muted)] opacity-50">

@@ -23,13 +23,23 @@ const SCALE_CLASSIFICATIONS: Record<string, string[]> = {
 };
 const RISK_RATINGS = ["Low", "Medium", "High"];
 const AGREEMENTS = ["agree", "partial", "disagree"];
+const REMEDIATION_STATUSES = [
+  { value: "remediated", label: "Remediated (closed)" },
+  { value: "partially_remediated", label: "Partially remediated" },
+  { value: "open", label: "Open (not remediated)" },
+];
 
 interface Props {
   session: SessionDetail;
   deficiencyId: string;
 }
 
-type Dialog = "classify" | "writeup" | "management_response" | null;
+type Dialog =
+  | "classify"
+  | "writeup"
+  | "management_response"
+  | "remediation_verification"
+  | null;
 
 export function DeficiencyDecisions({ session, deficiencyId }: Props) {
   const qc = useQueryClient();
@@ -56,11 +66,13 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
     ref ? effective.stale_decision_ids.includes(ref.decision_id) : false;
 
   const canSubmitName = !!name.trim();
-  // Classification and write-up belong to Gate 3; management responses may
-  // still be transcribed after completion (review_policy.py).
+  // Classification and write-up belong to Gate 3; management responses and
+  // remediation verifications may be recorded after completion (review_policy.py).
   const atGate3 = session.status === "WAITING_HUMAN_GATE_3";
+  const isCompleted = session.status === "COMPLETED";
   const scale = effective.deficiency_scale ?? "ICFR deficiency scale";
   const classifyStale = isStale(view.classification_decision);
+  const remediation = view.remediation_verification ?? null;
 
   return (
     <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3">
@@ -89,6 +101,19 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
             ? `Classified by ${view.classification_decision?.decided_by ?? ""}`
             : "Proposed (AI draft) — not yet classified"}
         </span>
+        {remediation && (
+          <span
+            className={clsx(
+              "rounded px-2 py-0.5 font-medium",
+              remediation.values.status === "remediated"
+                ? "bg-emerald-900/30 text-emerald-400"
+                : "bg-amber-900/30 text-amber-400",
+            )}
+          >
+            Remediation: {remediation.values.status} (verified by{" "}
+            {remediation.decided_by})
+          </span>
+        )}
         {classifyStale && (
           <span className="rounded bg-red-900/30 px-2 py-0.5 font-medium text-red-400">
             Stale — draft reworked after this decision
@@ -126,6 +151,15 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
             ? "Edit management response"
             : "Management response"}
         </button>
+        {isCompleted && (
+          <button
+            onClick={() => setDialog("remediation_verification")}
+            disabled={!canSubmitName || record.isPending}
+            className="rounded-lg border border-emerald-700/40 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-50"
+          >
+            {remediation ? "Update remediation" : "Verify remediation"}
+          </button>
+        )}
       </div>
 
       {record.isError && (
@@ -160,6 +194,16 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
           view={view}
           decidedBy={name}
           isStale={isStale(view.management_response)}
+          onCancel={() => setDialog(null)}
+          onSubmit={(body) => record.mutate(body)}
+          pending={record.isPending}
+        />
+      )}
+      {dialog === "remediation_verification" && (
+        <RemediationVerificationForm
+          view={view}
+          decidedBy={name}
+          isStale={isStale(remediation)}
           onCancel={() => setDialog(null)}
           onSubmit={(body) => record.mutate(body)}
           pending={record.isPending}
@@ -515,6 +559,116 @@ function ManagementResponseForm({
           className="rounded-lg bg-violet-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-600 disabled:opacity-50"
         >
           Save management response
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RemediationVerificationForm({
+  view,
+  decidedBy,
+  isStale,
+  onCancel,
+  onSubmit,
+  pending,
+}: {
+  view: DeficiencyView;
+  decidedBy: string;
+  isStale: boolean;
+  onCancel: () => void;
+  onSubmit: (body: RecordDecisionBody) => void;
+  pending: boolean;
+}) {
+  const existing = view.remediation_verification?.values ?? {};
+  const [status, setStatus] = useState(existing.status ?? "remediated");
+  const [verifiedOn, setVerifiedOn] = useState(
+    existing.verified_on ?? "2026-10-25",
+  );
+  const [evidenceVaultId, setEvidenceVaultId] = useState(
+    existing.evidence_vault_id ?? "",
+  );
+  const [rationale, setRationale] = useState(
+    view.remediation_verification?.rationale ?? "",
+  );
+
+  const complete = status.trim() && verifiedOn.trim() && rationale.trim();
+
+  const submit = () =>
+    onSubmit({
+      decision_type: "remediation_verification",
+      subject_id: view.deficiency_id,
+      decided_by: decidedBy.trim(),
+      values: {
+        status,
+        verified_on: verifiedOn,
+        ...(evidenceVaultId.trim()
+          ? { evidence_vault_id: evidenceVaultId.trim() }
+          : {}),
+      },
+      rationale: rationale.trim(),
+      ...(view.remediation_verification && !isStale
+        ? { supersedes: view.remediation_verification.decision_id }
+        : {}),
+    });
+
+  return (
+    <div className="space-y-2 rounded-lg border border-emerald-700/40 bg-emerald-900/10 p-3">
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-[11px] text-[var(--color-text-secondary)]">
+          Remediation status
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]"
+          >
+            {REMEDIATION_STATUSES.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-[11px] text-[var(--color-text-secondary)]">
+          Verified on
+          <input
+            type="date"
+            value={verifiedOn}
+            onChange={(e) => setVerifiedOn(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]"
+          />
+        </label>
+        <label className="text-[11px] text-[var(--color-text-secondary)]">
+          Evidence Vault ID (optional)
+          <input
+            type="text"
+            value={evidenceVaultId}
+            onChange={(e) => setEvidenceVaultId(e.target.value)}
+            placeholder="vault UUID"
+            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]"
+          />
+        </label>
+      </div>
+      <textarea
+        value={rationale}
+        onChange={(e) => setRationale(e.target.value)}
+        rows={2}
+        placeholder="Remediation retest evidence & auditor rationale (required per IIA GIAS 15.2)"
+        className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2 text-xs text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-emerald-500"
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={submit}
+          disabled={!decidedBy.trim() || !complete || pending}
+          className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+        >
+          Save remediation verification
         </button>
         <button
           onClick={onCancel}

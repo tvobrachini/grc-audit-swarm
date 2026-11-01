@@ -4,6 +4,16 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 
 ## Unreleased
 
+**Zero-Framework Audit Factory, 3-Tier Cascade & IIA GIAS 15.2 Remediation Follow-Up (ADR-013)**
+- Replaced `crewai` with a zero-framework runtime (`src/swarm/crews/_compat.py`) and direct `httpx` structured gateway (`src/swarm/llm_gateway.py`) that emits cryptographic `LLMCallReceipt` hashes (`prompt_sha256`, `response_sha256`, latency, token usage).
+- Added 14 deterministic Python audit-methodology linters (`D1`–`D14`), 5 Distortion Traps (`TRAP-1`–`TRAP-5`), and an anti-slop lexicon linter (`src/swarm/linters.py`), plus surgical single-control retry (`merge_surgical_finding_retries`).
+- Added System-1 `Jev`/`Kev` single-token logprob primitives (`Noul`, `Choice`, `Score`), RouteLLM complexity scoring $C(q)$, FrugalGPT/AutoMix composite trustworthiness $\hat{S}(q, y_1)$, and Economic Value of Escalation ($\Delta\text{IBC}$) (`src/swarm/decision_engine.py`).
+- Added disjoint-family QA routing (`detect_model_family`, `assert_disjoint_family`), Panel of LLM Evaluators (`aggregate_poll_jury`), and blind PCAOB falsification prompts (`src/swarm/model_routing.py`), surfaced in `GenerationRun` provenance and the UI (`AuditTrailPane.tsx`).
+- Expanded deterministic AWS evidence tools (`collect_root_account_summary`, `collect_access_key_age`, CloudTrail, KMS, GuardDuty) and added seeded HMAC-SHA256 audit sampling and AICPA sample tables (`src/swarm/sampling.py`).
+- Added `skills/iso_27001.yaml` (ISO/IEC 27001:2022) and `skills/soc2_tsc.yaml` (AICPA SOC 2 2017/2022 TSC), and updated `skills/aws_cloud_security.yaml` and `skills/pci_dss.yaml` (PCI-DSS v4.0.1).
+- Populated OSCAL 1.2.1 `assessment-results.local-definitions.objectives-and-methods`, added `evaluate_oscal_drift()` (`src/swarm/oscal_ar.py`), and added the `"RACM Crosswalk"` worksheet to `working-papers.xlsx` (`src/api/exports.py`).
+- Added post-issuance `remediation_verification` reviewer decisions per IIA GIAS Standard 15.2 across the backend, exports, and React UI (`DeficiencyDecisions.tsx`).
+
 **Evaluation answer key**
 - The LLM-layer answer key (`evals/scenarios/answer_key.v1.yaml`, v1.0.0) is reviewed and signed off by the owner; evaluation reports no longer open with the "not yet reviewed" banner.
 

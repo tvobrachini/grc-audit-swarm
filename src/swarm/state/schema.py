@@ -47,6 +47,13 @@ class GenerationRun(BaseModel):
     demo_mode: bool = False
     # "running" | "qa_approved" | "qa_rejected" | "error"
     outcome: str = "running"
+    # Audit Factory telemetry (Model SoD, Deterministic Linters D1-D14, Cascade Tier)
+    drafter_family: str = ""
+    qa_family: str = ""
+    cross_family_verified: bool = False
+    linter_passed: bool = True
+    linter_violations: List[str] = Field(default_factory=list)
+    cascade_tier: str = "tier_0_deterministic"
 
 
 class AuditState(BaseModel):
