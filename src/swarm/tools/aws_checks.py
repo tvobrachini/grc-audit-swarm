@@ -31,6 +31,7 @@ S3 public-access semantics (see DECISIONS.md, ADR-003):
 from __future__ import annotations
 
 import concurrent.futures
+import datetime
 import json
 import logging
 from typing import Any
@@ -160,6 +161,116 @@ def collect_iam_users_mfa(iam) -> dict:
         "Users": report,
         "Summary": summary,
         "Notes": [ROOT_USER_NOTE, CONSOLE_ACCESS_NOTE],
+    }
+
+
+def collect_root_account_summary(iam) -> dict:
+    """Inspect AWS root account MFA and root access key status via ``iam:GetAccountSummary``.
+
+    Addresses CIS AWS Foundations Benchmark v3.0/v4.0 controls 1.4 (no root access
+    keys) and 1.5 (MFA enabled for root account) and NIST SP 800-53 IA-2(1).
+    """
+    summary_map = iam.get_account_summary().get("SummaryMap", {})
+    mfa_enabled = int(summary_map.get("AccountMFAEnabled", 0))
+    keys_present = int(summary_map.get("AccountAccessKeysPresent", 0))
+    reasons: list[str] = []
+    if mfa_enabled != 1:
+        reasons.append("Root account MFA is not enabled (AccountMFAEnabled=0)")
+    if keys_present > 0:
+        reasons.append(
+            f"Root account has active access keys (AccountAccessKeysPresent={keys_present})"
+        )
+    verdict = "PASS" if (mfa_enabled == 1 and keys_present == 0) else "FAIL"
+    return {
+        "AccountMFAEnabled": mfa_enabled,
+        "AccountAccessKeysPresent": keys_present,
+        "RootMFAStatus": "Enabled" if mfa_enabled == 1 else "Disabled",
+        "Verdict": verdict,
+        "Reasons": reasons,
+    }
+
+
+def collect_access_key_age(
+    iam,
+    *,
+    max_age_days: int = 90,
+    reference_time: datetime.datetime | None = None,
+) -> dict:
+    """List IAM user access keys and evaluate key rotation age against ``max_age_days``.
+
+    Addresses CIS AWS Foundations Benchmark v3.0/v4.0 control 1.14 and NIST SP 800-53
+    IA-5(1) / AC-2.
+    """
+    now = reference_time or datetime.datetime.now(datetime.UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=datetime.UTC)
+
+    users: list[str] = []
+    for page in iam.get_paginator("list_users").paginate():
+        users.extend(u["UserName"] for u in page.get("Users", []))
+
+    keys_report: list[dict[str, Any]] = []
+    for user in sorted(users):
+        try:
+            resp = iam.list_access_keys(UserName=user)
+            metadata_list = resp.get("AccessKeyMetadata", [])
+        except (ClientError, BotoCoreError) as exc:
+            keys_report.append(
+                {
+                    "UserName": user,
+                    "Status": "Unknown",
+                    "Error": describe_error(exc),
+                }
+            )
+            continue
+
+        for meta in metadata_list:
+            key_id = str(meta.get("AccessKeyId", ""))
+            status = str(meta.get("Status", "Unknown"))
+            created = meta.get("CreateDate")
+            age_days: int | None = None
+            if isinstance(created, datetime.datetime):
+                created_utc = (
+                    created
+                    if created.tzinfo is not None
+                    else created.replace(tzinfo=datetime.UTC)
+                )
+                age_days = max(0, (now - created_utc).days)
+            elif isinstance(created, str):
+                try:
+                    parsed_dt = datetime.datetime.fromisoformat(
+                        created.replace("Z", "+00:00")
+                    )
+                    if parsed_dt.tzinfo is None:
+                        parsed_dt = parsed_dt.replace(tzinfo=datetime.UTC)
+                    age_days = max(0, (now - parsed_dt).days)
+                except ValueError:
+                    age_days = None
+
+            exceeds_max_age = (
+                status == "Active" and age_days is not None and age_days > max_age_days
+            )
+            keys_report.append(
+                {
+                    "UserName": user,
+                    "AccessKeyIdSuffix": key_id[-4:] if len(key_id) >= 4 else key_id,
+                    "Status": status,
+                    "AgeDays": age_days,
+                    "ExceedsMaxAge": exceeds_max_age,
+                }
+            )
+
+    active_keys = [k for k in keys_report if k.get("Status") == "Active"]
+    expired_keys = [k for k in active_keys if k.get("ExceedsMaxAge") is True]
+    return {
+        "MaxAgeThresholdDays": max_age_days,
+        "AccessKeys": keys_report,
+        "Summary": {
+            "total_keys": len(keys_report),
+            "active_keys": len(active_keys),
+            "exceeding_max_age": len(expired_keys),
+        },
+        "Verdict": "FAIL" if expired_keys else "PASS",
     }
 
 

@@ -139,7 +139,9 @@ def export_working_papers(session_id: str) -> Response:
     if papers is None:
         raise _missing("Working papers")
     return _download(
-        working_papers_xlsx(papers, ctx, flow.effective_view()),
+        working_papers_xlsx(
+            papers, ctx, flow.effective_view(), racm=flow.state.racm_plan
+        ),
         XLSX_MEDIA_TYPE,
         export_filename(ctx, "working-papers", "xlsx"),
     )

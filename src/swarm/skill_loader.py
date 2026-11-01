@@ -12,9 +12,10 @@ A "Skill" is the GRC Audit Swarm equivalent of a Claude Skill:
 
 import logging
 import os
+import re
 import yaml
 import copy
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -55,19 +56,42 @@ def list_available_skills() -> List[Dict[str, Any]]:
     return copy.deepcopy(_SKILLS_CACHE)
 
 
-def detect_skills_from_scope(scope_text: str) -> List[Dict[str, Any]]:
+def _keyword_matches(keyword: str, text: str) -> bool:
+    """Return True if ``keyword`` appears in ``text`` bounded by non-word characters.
+
+    Prevents short acronyms such as ``"EU"`` from matching inside words like
+    ``"reuse"`` or ``"queue"``.
     """
-    Auto-detect which skills apply based on keyword matching against the scope text.
+    kw = keyword.strip()
+    if not kw:
+        return False
+    pattern = rf"(?<!\w){re.escape(kw)}(?!\w)"
+    return bool(re.search(pattern, text, flags=re.IGNORECASE))
+
+
+def detect_skills_from_scope(
+    scope_text: str,
+    frameworks: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Auto-detect which skills apply based on word-boundary keyword matching
+    against the scope text (and optional explicit framework list).
     Returns a list of matched skill dicts, ordered by match score descending.
     Falls back to 'itgc_general' if nothing matches.
     """
-    scope_lower = scope_text.lower()
+    combined_scope = scope_text or ""
+    if frameworks:
+        combined_scope = f"{combined_scope} {' '.join(str(f) for f in frameworks)}"
     skills = list_available_skills()
     scored = []
 
     for skill in skills:
         keywords = skill.get("scope_keywords", [])
-        score = sum(1 for kw in keywords if kw.lower() in scope_lower)
+        score = sum(
+            1
+            for kw in keywords
+            if isinstance(kw, str) and _keyword_matches(kw, combined_scope)
+        )
         if score > 0:
             scored.append((score, skill))
 

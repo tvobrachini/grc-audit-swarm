@@ -137,13 +137,15 @@ PREPARER_EXCLUDED_DECISIONS = frozenset(
         "classify",
         "scope_limitation",
         "engagement_conclusion",
+        "remediation_verification",
     }
 )
 
 # Statuses in which each decision type may be recorded (defaults 5, 7, 11).
 # A decision belongs to the gate that is open when it is recorded, so a gate
 # approval seals that phase's decisions; after COMPLETED only management
-# responses may be added (they arrive after the report is issued).
+# responses and remediation verifications may be added (they arrive after the
+# report is issued).
 DECISION_RECORDABLE_STATUSES: dict[str, frozenset[str]] = {
     "sign_off": frozenset({"WAITING_HUMAN_GATE_2"}),
     "challenge": frozenset({"WAITING_HUMAN_GATE_2"}),
@@ -152,6 +154,7 @@ DECISION_RECORDABLE_STATUSES: dict[str, frozenset[str]] = {
     "engagement_conclusion": frozenset({"WAITING_HUMAN_GATE_3"}),
     "writeup": frozenset({"WAITING_HUMAN_GATE_3"}),
     "management_response": frozenset({"WAITING_HUMAN_GATE_3", "COMPLETED"}),
+    "remediation_verification": frozenset({"COMPLETED"}),
 }
 
 # Decision types that always need a rationale: a challenge says why the
@@ -160,7 +163,12 @@ DECISION_RECORDABLE_STATUSES: dict[str, frozenset[str]] = {
 # need one only when they differ from the draft (classify) or record a
 # disagreement (management_response, default 8).
 RATIONALE_ALWAYS_REQUIRED = frozenset(
-    {"challenge", "scope_limitation", "engagement_conclusion"}
+    {
+        "challenge",
+        "scope_limitation",
+        "engagement_conclusion",
+        "remediation_verification",
+    }
 )
 
 # Default 3: the only change to a ToD / ToE conclusion a reviewer may make

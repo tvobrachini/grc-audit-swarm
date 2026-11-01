@@ -248,7 +248,12 @@ def identity_sources(view: Optional[EffectiveView]) -> set[str]:
     for f in view.findings:
         refs += [f.review, f.scope_limitation]
     for d in view.deficiencies:
-        refs += [d.classification_decision, d.writeup, d.management_response]
+        refs += [
+            d.classification_decision,
+            d.writeup,
+            d.management_response,
+            d.remediation_verification,
+        ]
     return {str(r.identity_source) for r in refs if r is not None}
 
 
@@ -282,10 +287,30 @@ def _draft_text(view: FindingView) -> str:
     return f"ToD {d.tod_conclusion}; ToE {d.toe_conclusion}; result {d.result}"
 
 
+RACM_CROSSWALK_HEADERS = [
+    "Risk ID",
+    "Regulatory Mapping",
+    "Control ID",
+    "Control Description",
+    "Control Owner",
+    "Frequency",
+    "Nature",
+    "Key Control",
+    "IPE",
+    "Planned Sample Size",
+    "Items Tested",
+    "Exceptions Noted",
+    "ToD Conclusion",
+    "ToE Conclusion",
+    "Result",
+]
+
+
 def working_papers_xlsx(
     papers: WorkingPaperSchema,
     ctx: ExportContext,
     view: Optional[EffectiveView] = None,
+    racm: Optional[RiskControlMatrixSchema] = None,
 ) -> bytes:
     from swarm.evidence import EvidenceAssuranceProtocol
 
@@ -366,6 +391,40 @@ def working_papers_xlsx(
             "severity label on load."
         )
     _write_sheet(wb, "Findings", headers, rows)
+    if racm is not None:
+        ctrl_lookup: dict[str, tuple[Any, Any]] = {}
+        for risk in racm.risks:
+            for c in risk.controls:
+                if c.control_id not in ctrl_lookup:
+                    ctrl_lookup[c.control_id] = (risk, c)
+        crosswalk_rows = []
+        for f in papers.findings:
+            fv = view.finding(f.control_id) if view else None
+            record = fv.effective if fv else None
+            rc = ctrl_lookup.get(f.control_id)
+            risk_obj = rc[0] if rc else None
+            ctrl_obj = rc[1] if rc else None
+            tp = ctrl_obj.testing_procedures if ctrl_obj else None
+            crosswalk_rows.append(
+                [
+                    risk_obj.risk_id if risk_obj else "",
+                    ", ".join(risk_obj.regulatory_mapping) if risk_obj else "",
+                    f.control_id,
+                    ctrl_obj.description if ctrl_obj else "",
+                    _text(ctrl_obj.control_owner) if ctrl_obj else "",
+                    _text(ctrl_obj.frequency) if ctrl_obj else "",
+                    _text(ctrl_obj.nature) if ctrl_obj else "",
+                    _yes_no(ctrl_obj.key_control) if ctrl_obj else "",
+                    "; ".join(ctrl_obj.ipe) if ctrl_obj else "",
+                    _text(tp.sample_size) if tp else "",
+                    _text(f.items_tested),
+                    _text(f.exceptions_noted),
+                    record.tod_conclusion if record else _text(f.tod_conclusion),
+                    record.toe_conclusion if record else _text(f.toe_conclusion),
+                    record.result if record else _text(f.result),
+                ]
+            )
+        _write_sheet(wb, "RACM Crosswalk", RACM_CROSSWALK_HEADERS, crosswalk_rows)
     _write_sheet(
         wb,
         "Export Info",
@@ -584,7 +643,11 @@ _AGREEMENT_TEXT = {
 
 
 def _findings_detail_section(view: EffectiveView) -> list[str]:
-    shown = [d for d in view.deficiencies if d.writeup or d.management_response]
+    shown = [
+        d
+        for d in view.deficiencies
+        if d.writeup or d.management_response or d.remediation_verification
+    ]
     if not shown:
         return []
     lines = ["## Findings and Management Responses", ""]
@@ -639,6 +702,17 @@ def _findings_detail_section(view: EffectiveView) -> list[str]:
                     sanitize_report(f"**{label}:** {_one_line(ref.rationale)}"),
                     "",
                 ]
+        rem = d.remediation_verification
+        if rem:
+            rv = rem.values
+            lines += [
+                sanitize_report(
+                    f"**Remediation verification** ({_one_line(rv.get('status'))}; "
+                    f"verified on {_one_line(rv.get('verified_on'))} by "
+                    f"{decided_by_text(rem)}): {_one_line(rem.rationale)}"
+                ),
+                "",
+            ]
     return lines
 
 

@@ -122,6 +122,12 @@ class GenerationRunSummary(BaseModel):
     attempts: int = 0
     demo_mode: bool = False
     outcome: str = "running"
+    drafter_family: str = ""
+    qa_family: str = ""
+    cross_family_verified: bool = False
+    linter_passed: bool = True
+    linter_violations: list[str] = Field(default_factory=list)
+    cascade_tier: str = "tier_0_deterministic"
 
 
 _MAX_DECISION_VALUE = 8000
