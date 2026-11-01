@@ -28,7 +28,7 @@ import os
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from crewai.tools import tool
+from swarm.crews._compat import tool
 
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 from swarm.evidence import app_version as _app_version

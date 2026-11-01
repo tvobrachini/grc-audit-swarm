@@ -47,7 +47,15 @@ from swarm.review_decisions import (
     effective_view,
 )
 from swarm import trail as audit_trail
-from swarm.schema import DeficiencyScale, IdentitySource, ReviewDecision
+from swarm.schema import (
+    DeficiencyScale,
+    DesignConclusion,
+    FindingResult,
+    IdentitySource,
+    OperatingConclusion,
+    ReviewDecision,
+    WorkingPaperSchema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +196,7 @@ def _crewai_version() -> str:
     try:
         return _pkg_version("crewai")
     except PackageNotFoundError:
-        return "unknown"
+        return f"zero-framework-{evidence_app_version()}"
 
 
 # Fixed at import time: it cannot change while the process is running.
@@ -394,7 +402,9 @@ class AuditFlow:
         from swarm.skill_loader import detect_skills_from_scope
 
         scope = f"{self.state.theme} {self.state.business_context}"
-        self._skill_context = detect_skills_from_scope(scope)
+        self._skill_context = detect_skills_from_scope(
+            scope, frameworks=self.state.frameworks
+        )
         # Persist the ids so a reloaded flow runs later phases with the same
         # domain skills (the skill dicts themselves are not serialised).
         self.state.active_skill_ids = [
@@ -476,8 +486,17 @@ class AuditFlow:
         if demo:
             crew_info = {"provider": "demo", "model": "fixed-content"}
             qa_info = {"provider": "demo", "model": "fixed-content"}
+            drafter_family = "demo"
+            qa_family = "demo"
+            cross_family = False
+            cascade_tier = "tier_0_deterministic"
         else:
             from swarm.llm_factory import describe_crew_llm, describe_qa_llm
+            from swarm.model_routing import (
+                ModelFamily,
+                assert_disjoint_family,
+                detect_model_family,
+            )
 
             try:
                 crew_info = describe_crew_llm()
@@ -490,6 +509,30 @@ class AuditFlow:
                 qa_info = describe_qa_llm()
             except Exception:
                 qa_info = {"provider": "unknown", "model": "unknown"}
+
+            dfam = detect_model_family(
+                f"{crew_info['provider']}/{crew_info['model']}"
+                if crew_info["provider"] not in ("unknown", "custom")
+                else crew_info["model"]
+            )
+            qfam = detect_model_family(
+                f"{qa_info['provider']}/{qa_info['model']}"
+                if qa_info["provider"] not in ("unknown", "custom")
+                else qa_info["model"]
+            )
+            drafter_family = dfam.value
+            qa_family = qfam.value
+            cross_family = (
+                dfam != ModelFamily.OTHER and qfam != ModelFamily.OTHER and dfam != qfam
+            )
+            cascade_tier = "tier_2_cross_family" if cross_family else "tier_1_system1"
+            import os as _os
+
+            if _os.environ.get("AUDIT_ENFORCE_CROSS_FAMILY", "").strip() == "1":
+                assert_disjoint_family(
+                    f"{crew_info['provider']}/{crew_info['model']}",
+                    f"{qa_info['provider']}/{qa_info['model']}",
+                )
         run = GenerationRun(
             run_id=str(uuid.uuid4()),
             phase=phase,
@@ -504,6 +547,10 @@ class AuditFlow:
             prompt_fingerprint=prompt_fingerprint(phase, self._skill_context),
             started_at=_now(),
             demo_mode=demo,
+            drafter_family=drafter_family,
+            qa_family=qa_family,
+            cross_family_verified=cross_family,
+            cascade_tier=cascade_tier,
         )
         self.state.generation_runs.append(run)
         return run
@@ -1100,6 +1147,52 @@ class AuditFlow:
             return None
         return _EVIDENCE_REJECTION.format(controls=", ".join(unverified))
 
+    def lint_phase_artifact(self, phase: int, artifact: Any = None) -> Any:
+        """Run the deterministic Audit Factory linters (`D1`–`D14` + `TRAP-1`–`TRAP-5`)
+        on the phase artifact (`racm_plan`, `working_papers`, or `final_report`).
+        """
+        from swarm.linters import (
+            LintReport,
+            lint_racm,
+            lint_report,
+            lint_working_papers,
+        )
+
+        target = (
+            artifact
+            if artifact is not None
+            else getattr(self.state, _ARTIFACT_FIELDS[phase], None)
+        )
+        if target is None:
+            return LintReport()
+        try:
+            if phase == 1:
+                return lint_racm(target)
+            if phase == 2 and self.state.racm_plan is not None:
+                return lint_working_papers(
+                    target,
+                    racm=self.state.racm_plan,
+                    session_id=self.session_id,
+                    verify_vault_quotes=False,
+                )
+            if phase == 3 and self.state.racm_plan is not None:
+                papers = self.effective_working_papers()
+                if papers is not None:
+                    expected_scale = deficiency_scale_for_scope(
+                        self.state.theme,
+                        self.state.business_context,
+                        self.state.frameworks,
+                    )
+                    return lint_report(
+                        target,
+                        papers=papers,
+                        racm=self.state.racm_plan,
+                        expected_scale=expected_scale,
+                    )
+        except Exception as exc:
+            logger.debug("Deterministic linter skipped for phase %d: %s", phase, exc)
+        return LintReport()
+
     def _run_crew_with_qa(
         self,
         phase: int,
@@ -1151,8 +1244,21 @@ class AuditFlow:
 
             qa_reason = _qa_rejection(qa_output)
             evidence_reason = self._evidence_rejection(phase, artifact)
+            lint_result = self.lint_phase_artifact(phase, artifact)
+            gen_run.linter_passed = lint_result.passed
+            gen_run.linter_violations = [v.rule_id for v in lint_result.errors]
+            import os as _os
+
+            linter_reason = (
+                lint_result.to_feedback()
+                if (
+                    not lint_result.passed
+                    and _os.environ.get("AUDIT_STRICT_LINTER", "").strip() == "1"
+                )
+                else None
+            )
             qa_rejected = qa_reason is not None
-            reasons = [r for r in (qa_reason, evidence_reason) if r]
+            reasons = [r for r in (qa_reason, evidence_reason, linter_reason) if r]
             rejection = " ".join(reasons) if reasons else None
             if rejection is None:
                 break
@@ -1280,8 +1386,43 @@ class AuditFlow:
             "qa_feedback": "",
         }
 
-    def _reporting_inputs(self) -> dict[str, Any]:
+    def effective_working_papers(self) -> Optional[WorkingPaperSchema]:
+        """Working papers overlaid with active Gate 2 reviewer decisions (`D5`).
+
+        Never mutates ``self.state.working_papers`` (preserving ADR-011's
+        append-only draft immutability). When no reviewer ``challenge`` is
+        active on any finding, returns ``self.state.working_papers`` directly.
+        """
         papers = self.state.working_papers
+        if papers is None:
+            return None
+        if not self.state.review_decisions:
+            return papers
+        view = self.effective_view()
+        changed = {fv.control_id: fv for fv in view.findings if fv.differs_from_draft}
+        if not changed:
+            return papers
+        overlaid_findings = []
+        for f in papers.findings:
+            fv = changed.get(f.control_id)
+            if fv is None:
+                overlaid_findings.append(f)
+            else:
+                eff = fv.effective
+                overlaid_findings.append(
+                    f.model_copy(
+                        update={
+                            "tod_conclusion": DesignConclusion(eff.tod_conclusion),
+                            "toe_conclusion": OperatingConclusion(eff.toe_conclusion),
+                            "result": FindingResult(eff.result),
+                            "preliminary_deficiency": eff.preliminary_deficiency,
+                        }
+                    )
+                )
+        return papers.model_copy(update={"findings": overlaid_findings})
+
+    def _reporting_inputs(self) -> dict[str, Any]:
+        papers = self.effective_working_papers()
         return {
             "theme": self.state.theme,
             "scope_string": self._scope_string(),

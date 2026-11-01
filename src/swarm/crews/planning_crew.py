@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from crewai import Agent, Crew, Process, Task
+from swarm.crews._compat import Agent, Crew, Process, Task
 from swarm.schema import RiskControlMatrixSchema, QA_PushbackSchema
 from swarm.llm_factory import get_crew_llm, get_qa_llm
 
@@ -28,8 +28,9 @@ class PlanningCrew:
             **self.agents_config["analyst"], verbose=True, llm=base_llm, max_iter=5
         )
 
-        # Augment specialist backstory with domain-specific skill prompts if detected
+        # Augment specialist and RACM auditor backstories with domain-specific skill prompts if detected
         specialist_config = dict(self.agents_config["specialist"])
+        auditor_config = dict(self.agents_config["auditor"])
         if self._skill_context:
             from swarm.skill_loader import get_specialist_prompt
 
@@ -37,11 +38,12 @@ class PlanningCrew:
             specialist_config["backstory"] = (
                 specialist_config.get("backstory", "") + "\n\n" + extra
             ).strip()
+            auditor_config["backstory"] = (
+                auditor_config.get("backstory", "") + "\n\n" + extra
+            ).strip()
         specialist = Agent(**specialist_config, verbose=True, llm=base_llm, max_iter=5)
 
-        auditor = Agent(
-            **self.agents_config["auditor"], verbose=True, llm=base_llm, max_iter=5
-        )
+        auditor = Agent(**auditor_config, verbose=True, llm=base_llm, max_iter=5)
 
         # IIA Anti-Hallucination: QA Reviewer runs strictly at Temperature 0.0
         qa_llm = get_qa_llm(temperature=0.0)

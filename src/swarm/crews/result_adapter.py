@@ -1,5 +1,7 @@
-from crewai.crews.crew_output import CrewOutput
-from crewai.tasks.task_output import TaskOutput
+from swarm.crews._compat import (
+    NativeCrewOutput as CrewOutput,
+    NativeTaskOutput as TaskOutput,
+)
 
 
 class CrewResultAdapter:

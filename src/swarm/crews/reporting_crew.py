@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from crewai import Agent, Crew, Process, Task
+from swarm.crews._compat import Agent, Crew, Process, Task
 from swarm.schema import (
     DeficiencyEvaluationSetSchema,
     FinalReportSchema,

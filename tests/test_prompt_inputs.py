@@ -18,9 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from crewai.utilities.string_utils import interpolate_only
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from swarm.crews._compat import interpolate_only
 
 from swarm.schema import QA_PushbackSchema
 from flow_builders import (  # type: ignore[import-not-found]

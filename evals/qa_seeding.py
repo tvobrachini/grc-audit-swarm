@@ -309,7 +309,7 @@ def replay_reviewer(decisions: dict[str, Any]) -> Reviewer:
 
 def real_reviewer() -> Reviewer:  # pragma: no cover - needs an LLM provider
     """The Fieldwork QA agent on the configured QA model."""
-    from crewai import Agent, Crew, Process, Task
+    from swarm.crews._compat import Agent, Crew, Process, Task
 
     from swarm.crews.fieldwork_crew import FieldworkCrew
     from swarm.llm_factory import get_qa_llm
