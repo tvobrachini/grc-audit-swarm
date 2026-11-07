@@ -2,7 +2,7 @@
 
 ## How it works
 
-The workflow runs three CrewAI crews in sequence. Each crew ends with a QA reviewer agent, and each phase ends at a human gate.
+The workflow runs three zero-framework phase pipelines in sequence (`src/swarm/crews/_compat.py`, `src/swarm/llm_gateway.py`). Each phase runs deterministic audit-methodology linters (`src/swarm/linters.py`), System-1 `Jev`/`Kev` logprob primitives (`src/swarm/decision_engine.py`), and a cross-AI-family QA reviewer (`src/swarm/model_routing.py`), and each phase ends at a human gate.
 
 | Phase | Agents | Output |
 |---|---|---|

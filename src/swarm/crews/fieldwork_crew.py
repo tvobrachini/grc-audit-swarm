@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from crewai import Agent, Crew, Process, Task
+from swarm.crews._compat import Agent, Crew, Process, Task
 from swarm.schema import WorkingPaperSchema, QA_PushbackSchema
 from swarm.tools.aws_tools import make_aws_tools
 from swarm.tools.findings_tools import make_findings_tools

@@ -1,6 +1,7 @@
 import os
 import logging
-from crewai import LLM
+from swarm.crews._compat import LLM
+from swarm.model_routing import assert_disjoint_family, detect_model_family
 
 logger = logging.getLogger(__name__)
 
@@ -181,4 +182,61 @@ def get_qa_llm(temperature: float = 0.0) -> LLM:
     if base_url:
         kwargs["base_url"] = base_url
     logger.info(f"[LLM Factory] QA reviewers bound to separate model: {model}.")
+    if os.environ.get("ENFORCE_DISJOINT_QA_FAMILY", "0").strip() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        try:
+            drafter = describe_crew_llm()
+            drafter_full = f"{drafter['provider']}/{drafter['model']}"
+            assert_disjoint_family(drafter_full, model)
+        except LLMConfigurationError:
+            pass
     return LLM(**kwargs)
+
+
+def get_cross_family_qa_llm(temperature: float = 0.0) -> LLM:
+    """Return a QA reviewer LLM guaranteed to belong to a disjoint ModelFamily
+    from the drafter when multiple provider keys or ``QA_LLM_MODEL`` are configured.
+
+    Enforces Panickssery et al. (NeurIPS 2024) self-preference bias defense.
+    """
+    qa_model = os.environ.get("QA_LLM_MODEL", "").strip()
+    drafter_info = describe_crew_llm()
+    drafter_full = f"{drafter_info['provider']}/{drafter_info['model']}"
+    if qa_model:
+        assert_disjoint_family(drafter_full, qa_model)
+        return get_qa_llm(temperature=temperature)
+
+    drafter_family = detect_model_family(drafter_full)
+    # Try alternate configured providers in priority order that belong to a disjoint family
+    candidates: list[tuple[str, str, dict]] = []
+    if os.environ.get("GEMINI_API_KEY"):
+        gm = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        candidates.append((f"gemini/{gm}", "gemini", {}))
+    if os.environ.get("OPENAI_API_KEY"):
+        candidates.append(("openai/gpt-4o-mini", "openai", {}))
+    if os.environ.get("GROQ_API_KEY"):
+        candidates.append(("groq/llama-3.3-70b-versatile", "groq", {}))
+    if os.environ.get("NVIDIA_API_KEY"):
+        candidates.append(
+            (
+                "nvidia_nim/meta/llama-3.3-70b-instruct",
+                "nvidia_nim",
+                {
+                    "api_key": os.environ["NVIDIA_API_KEY"],
+                    "base_url": os.environ.get(
+                        "NVIDIA_BASE_URL", _NVIDIA_DEFAULT_BASE_URL
+                    ),
+                },
+            )
+        )
+    for cand_model, _, extra_kw in candidates:
+        if detect_model_family(cand_model) != drafter_family:
+            assert_disjoint_family(drafter_full, cand_model)
+            return LLM(
+                model=cand_model, temperature=temperature, timeout=120, **extra_kw
+            )
+
+    return get_qa_llm(temperature=temperature)
