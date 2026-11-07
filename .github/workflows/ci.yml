@@ -129,14 +129,9 @@ jobs:
             --ignore-vuln PYSEC-2026-311 \
             --ignore-vuln PYSEC-2026-3813 \
             --ignore-vuln PYSEC-2026-3814 \
-            --ignore-vuln PYSEC-2026-3815 \
-            --ignore-vuln CVE-2026-59951
+            --ignore-vuln PYSEC-2026-3815
           # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, pulled in directly
           #   by crewai; no fixed version published upstream yet.
-          # CVE-2026-59951: mcp < 1.30 leaks Streamable HTTP sessions. crewai
-          #   (up to 1.15.28) pins mcp~=1.28.1, so it cannot be bumped yet;
-          #   src/swarm/mcp_server.py runs FastMCP over stdio, which the
-          #   advisory lists as not affected.
 
   frontend:
     name: frontend
