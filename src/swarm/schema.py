@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any
 
 from pydantic import (
     BaseModel,
@@ -37,7 +37,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import SkipJsonSchema
-
 
 # ── Enum helpers ─────────────────────────────────────────────────────────────
 
@@ -146,7 +145,7 @@ class Population(BaseModel):
 
 
 class ControlTesting(BaseModel):
-    test_of_design: List[ControlTestStep] = Field(
+    test_of_design: list[ControlTestStep] = Field(
         ...,
         description=(
             "Steps to test design and implementation: is the control designed "
@@ -154,7 +153,7 @@ class ControlTesting(BaseModel):
             "configuration inspection)."
         ),
     )
-    test_of_effectiveness: List[ControlTestStep] = Field(
+    test_of_effectiveness: list[ControlTestStep] = Field(
         ...,
         description=(
             "Steps to test operating effectiveness over the period of reliance. "
@@ -164,7 +163,7 @@ class ControlTesting(BaseModel):
             "single point-in-time read is design evidence only."
         ),
     )
-    substantive_testing: Optional[List[ControlTestStep]] = Field(
+    substantive_testing: list[ControlTestStep] | None = Field(
         default=None,
         description=(
             "Substantive / follow-up procedures: what to inspect directly if "
@@ -172,11 +171,11 @@ class ControlTesting(BaseModel):
             "what an exposed bucket contained)."
         ),
     )
-    population: Optional[Population] = Field(
+    population: Population | None = Field(
         default=None,
         description="Population for the ToE sample: source and completeness procedure.",
     )
-    sample_size: Annotated[Optional[int], BeforeValidator(_lenient_int)] = Field(
+    sample_size: Annotated[int | None, BeforeValidator(_lenient_int)] = Field(
         default=None,
         ge=0,
         description=(
@@ -184,10 +183,10 @@ class ControlTesting(BaseModel):
             "control). Size by control frequency and risk."
         ),
     )
-    sampling_method: Annotated[Optional[SamplingMethod], _lenient(SamplingMethod)] = (
-        Field(default=None, description="How the sample is selected.")
+    sampling_method: Annotated[SamplingMethod | None, _lenient(SamplingMethod)] = Field(
+        default=None, description="How the sample is selected."
     )
-    period_of_reliance: Optional[str] = Field(
+    period_of_reliance: str | None = Field(
         default=None,
         description=(
             "Period the conclusion must cover (e.g. '2026-01-01 to "
@@ -202,24 +201,24 @@ class Control(BaseModel):
         ..., description="Unique immutable ID for the control (e.g. CTRL-001a)."
     )
     description: str = Field(..., description="Description of the internal control.")
-    control_owner: Optional[str] = Field(
+    control_owner: str | None = Field(
         default=None,
         description="Role accountable for performing the control (a role, not a person's name).",
     )
-    frequency: Annotated[Optional[ControlFrequency], _lenient(ControlFrequency)] = (
-        Field(default=None, description="How often the control operates.")
+    frequency: Annotated[ControlFrequency | None, _lenient(ControlFrequency)] = Field(
+        default=None, description="How often the control operates."
     )
-    nature: Annotated[Optional[ControlNature], _lenient(ControlNature)] = Field(
+    nature: Annotated[ControlNature | None, _lenient(ControlNature)] = Field(
         None, description="Manual, Automated or IT-dependent manual."
     )
-    control_type: Annotated[Optional[ControlType], _lenient(ControlType)] = Field(
+    control_type: Annotated[ControlType | None, _lenient(ControlType)] = Field(
         None, description="Preventive or Detective."
     )
-    key_control: Optional[bool] = Field(
+    key_control: bool | None = Field(
         default=None,
         description="True if the control is relied on to address the risk (a key control).",
     )
-    assertions: List[str] = Field(
+    assertions: list[str] = Field(
         default_factory=list,
         description=(
             "Objectives the control supports: financial statement assertions "
@@ -230,7 +229,7 @@ class Control(BaseModel):
             "(Confidentiality, Integrity, Availability)."
         ),
     )
-    ipe: List[str] = Field(
+    ipe: list[str] = Field(
         default_factory=list,
         description=(
             "Information produced by the entity the control relies on "
@@ -248,16 +247,16 @@ class Risk(BaseModel):
         ..., description="Unique immutable ID for the risk (e.g. RISK-001)."
     )
     description: str = Field(..., description="The risk description.")
-    likelihood: Optional[RiskRatingField] = Field(
+    likelihood: RiskRatingField | None = Field(
         None, description="Inherent likelihood before controls (Low/Medium/High)."
     )
-    impact: Optional[RiskRatingField] = Field(
+    impact: RiskRatingField | None = Field(
         None, description="Inherent impact before controls (Low/Medium/High)."
     )
-    rating_rationale: Optional[str] = Field(
+    rating_rationale: str | None = Field(
         None, description="One sentence on why this likelihood and impact."
     )
-    regulatory_mapping: List[str] = Field(
+    regulatory_mapping: list[str] = Field(
         ...,
         description=(
             "Control-framework references for this risk, e.g. 'COSO 2013 "
@@ -267,14 +266,14 @@ class Risk(BaseModel):
             "auditor, not the entity's controls, and are not mappings."
         ),
     )
-    controls: List[Control] = Field(
+    controls: list[Control] = Field(
         ..., description="List of controls mitigating this risk."
     )
 
 
 class RiskControlMatrixSchema(BaseModel):
     theme: str = Field(..., description="The audit theme.")
-    risks: List[Risk] = Field(
+    risks: list[Risk] = Field(
         ..., description="The evaluated risks and their mitigating controls."
     )
 
@@ -284,7 +283,7 @@ class QA_PushbackSchema(BaseModel):
         ...,
         description="True if no errors found, False if the drafted artifact needs rework.",
     )
-    rejection_reason: Optional[str] = Field(
+    rejection_reason: str | None = Field(
         default=None,
         description=(
             "Specific, actionable critique naming each control/finding ID and "
@@ -356,7 +355,7 @@ def _migrate_legacy_severity(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _derive_result(
-    tod: DesignConclusion, toe: OperatingConclusion, exceptions: Optional[int]
+    tod: DesignConclusion, toe: OperatingConclusion, exceptions: int | None
 ) -> FindingResult:
     if (
         tod == DesignConclusion.INEFFECTIVE
@@ -404,7 +403,7 @@ class AuditFindingSchema(BaseModel):
             ),
         )
     )
-    toe_basis: Optional[str] = Field(
+    toe_basis: str | None = Field(
         default=None,
         description=(
             "Basis for the ToE conclusion: sample tested over which period, or "
@@ -412,22 +411,22 @@ class AuditFindingSchema(BaseModel):
             "change-management ITGCs for the rest of the period')."
         ),
     )
-    items_tested: Annotated[Optional[int], BeforeValidator(_lenient_int)] = Field(
+    items_tested: Annotated[int | None, BeforeValidator(_lenient_int)] = Field(
         default=None, ge=0, description="Number of items or occurrences inspected."
     )
-    exceptions_noted: Annotated[Optional[int], BeforeValidator(_lenient_int)] = Field(
+    exceptions_noted: Annotated[int | None, BeforeValidator(_lenient_int)] = Field(
         default=None,
         ge=0,
         description="Number of exceptions found in the items tested.",
     )
-    result: Annotated[Optional[FindingResult], _lenient(FindingResult)] = Field(
+    result: Annotated[FindingResult | None, _lenient(FindingResult)] = Field(
         default=None,
         description=(
             "Overall result: No exception / Exception / Not tested. Derived "
             "from the ToD/ToE conclusions when omitted."
         ),
     )
-    preliminary_deficiency: Optional[bool] = Field(
+    preliminary_deficiency: bool | None = Field(
         default=None,
         description=(
             "True if the exception indicates a possible control deficiency. "
@@ -440,7 +439,7 @@ class AuditFindingSchema(BaseModel):
         ...,
         description="What was tested, what the evidence shows, and why the conclusions follow.",
     )
-    legacy_severity: SkipJsonSchema[Optional[str]] = Field(
+    legacy_severity: SkipJsonSchema[str | None] = Field(
         default=None,
         description=(
             "Severity label from a session created before the fieldwork / "
@@ -456,7 +455,7 @@ class AuditFindingSchema(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _consistent(self) -> "AuditFindingSchema":
+    def _consistent(self) -> AuditFindingSchema:
         if (
             self.toe_conclusion == OperatingConclusion.EFFECTIVE
             and (self.exceptions_noted or 0) > 0
@@ -496,7 +495,7 @@ class AuditFindingSchema(BaseModel):
 
 class WorkingPaperSchema(BaseModel):
     theme: str = Field(..., description="The overarching audit theme.")
-    findings: List[AuditFindingSchema] = Field(
+    findings: list[AuditFindingSchema] = Field(
         ..., description="One finding per RACM control, in RACM order."
     )
 
@@ -547,7 +546,7 @@ class DeficiencyEvaluationSchema(BaseModel):
 
     deficiency_id: str = Field(..., description="Unique ID, e.g. DEF-01.")
     title: str = Field(..., description="Short neutral title of the deficiency.")
-    related_findings: List[str] = Field(
+    related_findings: list[str] = Field(
         ...,
         min_length=1,
         description=(
@@ -555,7 +554,7 @@ class DeficiencyEvaluationSchema(BaseModel):
             "Group findings that affect the same risk, assertion or system."
         ),
     )
-    related_risks: List[str] = Field(
+    related_risks: list[str] = Field(
         default_factory=list, description="RACM risk_ids affected."
     )
     compensating_controls: str = Field(
@@ -602,7 +601,7 @@ class DeficiencyEvaluationSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _material_weakness_needs_magnitude(self) -> "DeficiencyEvaluationSchema":
+    def _material_weakness_needs_magnitude(self) -> DeficiencyEvaluationSchema:
         if self.classification == DeficiencyClassification.MATERIAL_WEAKNESS and (
             self.likelihood == RiskRating.LOW or self.magnitude != RiskRating.HIGH
         ):
@@ -615,8 +614,8 @@ class DeficiencyEvaluationSchema(BaseModel):
 
 
 def _check_scale(
-    scale: Optional[DeficiencyScale], evaluations: List[DeficiencyEvaluationSchema]
-) -> Optional[DeficiencyScale]:
+    scale: DeficiencyScale | None, evaluations: list[DeficiencyEvaluationSchema]
+) -> DeficiencyScale | None:
     """Return the scale, inferred when unset and unambiguous; raise if the
     classifications are not all on one scale."""
     used = {e.classification for e in evaluations}
@@ -640,7 +639,7 @@ class DeficiencyEvaluationSetSchema(BaseModel):
     deficiency_scale: Annotated[DeficiencyScale, _lenient(DeficiencyScale)] = Field(
         ..., description="The classification scale given in the task."
     )
-    evaluations: List[DeficiencyEvaluationSchema] = Field(
+    evaluations: list[DeficiencyEvaluationSchema] = Field(
         default_factory=list,
         description=(
             "One entry per deficiency or aggregated group. Every finding with "
@@ -649,7 +648,7 @@ class DeficiencyEvaluationSetSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _scale(self) -> "DeficiencyEvaluationSetSchema":
+    def _scale(self) -> DeficiencyEvaluationSetSchema:
         _check_scale(self.deficiency_scale, self.evaluations)
         return self
 
@@ -666,7 +665,7 @@ class FinalReportSchema(BaseModel):
     compliance_tone_approved: bool = Field(
         ..., description="Must be approved by QA Tone Gate before saving."
     )
-    deficiency_evaluations: List[DeficiencyEvaluationSchema] = Field(
+    deficiency_evaluations: list[DeficiencyEvaluationSchema] = Field(
         default_factory=list,
         description=(
             "Engagement-level deficiency evaluation, copied from the "
@@ -676,22 +675,22 @@ class FinalReportSchema(BaseModel):
     )
     # Declared after deficiency_evaluations so its validator can see them. A
     # field validator (not a model validator) so it runs only on real input.
-    deficiency_scale: Annotated[
-        Optional[DeficiencyScale], _lenient(DeficiencyScale)
-    ] = Field(
-        default=None,
-        validate_default=True,
-        description="Scale used to classify deficiencies (ICFR or risk rating).",
+    deficiency_scale: Annotated[DeficiencyScale | None, _lenient(DeficiencyScale)] = (
+        Field(
+            default=None,
+            validate_default=True,
+            description="Scale used to classify deficiencies (ICFR or risk rating).",
+        )
     )
-    oscal_sar: Optional["OSCAL_SAR_Schema"] = Field(
+    oscal_sar: OSCAL_SAR_Schema | None = Field(
         None, description="The machine-readable OSCAL Security Assessment Report."
     )
 
     @field_validator("deficiency_scale")
     @classmethod
     def _scale(
-        cls, value: Optional[DeficiencyScale], info: ValidationInfo
-    ) -> Optional[DeficiencyScale]:
+        cls, value: DeficiencyScale | None, info: ValidationInfo
+    ) -> DeficiencyScale | None:
         return _check_scale(value, info.data.get("deficiency_evaluations") or [])
 
 
@@ -715,7 +714,7 @@ class OSCAL_SAR_ImportAP(BaseModel):
             "result set was generated from."
         ),
     )
-    remarks: Optional[str] = Field(
+    remarks: str | None = Field(
         None, description="Optional remarks about the imported assessment plan."
     )
 
@@ -723,13 +722,13 @@ class OSCAL_SAR_ImportAP(BaseModel):
 class OSCAL_SAR_Observation(BaseModel):
     observation_id: str = Field(..., description="Unique identifier for the finding.")
     description: str = Field(..., description="The narrative finding or deficiency.")
-    methods: List[str] = Field(
+    methods: list[str] = Field(
         ..., description="Assessment methods used: examine, test, or interview."
     )
-    subjects: List[str] = Field(
+    subjects: list[str] = Field(
         ..., description="The control IDs or system components assessed."
     )
-    relevant_evidence: List[str] = Field(
+    relevant_evidence: list[str] = Field(
         ..., description="Vault ID hashes mapping to evidence stored in the vault."
     )
 
@@ -738,7 +737,7 @@ class OSCAL_SAR_Result(BaseModel):
     assessment_result_id: str = Field(..., description="Unique ID for this result set.")
     start_date: str = Field(..., description="ISO 8601 assessment start.")
     end_date: str = Field(..., description="ISO 8601 assessment end.")
-    observations: List[OSCAL_SAR_Observation] = Field(
+    observations: list[OSCAL_SAR_Observation] = Field(
         ..., description="Technical findings and gaps identified."
     )
 
@@ -754,7 +753,7 @@ class OSCAL_SAR_Schema(BaseModel):
 
     metadata: OSCAL_SAR_Metadata
     import_ap: OSCAL_SAR_ImportAP
-    results: List[OSCAL_SAR_Result]
+    results: list[OSCAL_SAR_Result]
 
 
 FinalReportSchema.model_rebuild()
@@ -835,7 +834,7 @@ class ReviewDecision(BaseModel):
     decided_by: str
     identity_source: IdentitySource = IdentitySource.DECLARED
     decided_at: str
-    supersedes: Optional[str] = None
+    supersedes: str | None = None
 
 
 class _DecisionValues(BaseModel):
@@ -850,11 +849,11 @@ class ChallengeValues(_DecisionValues):
     """Optional conclusion changes; policy limits which are allowed without
     rework (``review_policy.conclusion_change_allowed``)."""
 
-    tod_conclusion: Annotated[
-        Optional[DesignConclusion], _lenient(DesignConclusion)
-    ] = None
+    tod_conclusion: Annotated[DesignConclusion | None, _lenient(DesignConclusion)] = (
+        None
+    )
     toe_conclusion: Annotated[
-        Optional[OperatingConclusion], _lenient(OperatingConclusion)
+        OperatingConclusion | None, _lenient(OperatingConclusion)
     ] = None
 
 
@@ -863,8 +862,8 @@ class ClassifyValues(_DecisionValues):
         DeficiencyClassification, _lenient(DeficiencyClassification)
     ]
     # Default to the draft's values when omitted.
-    likelihood: Optional[RiskRatingField] = None
-    magnitude: Optional[RiskRatingField] = None
+    likelihood: RiskRatingField | None = None
+    magnitude: RiskRatingField | None = None
 
 
 class ScopeLimitationValues(_DecisionValues):
@@ -882,8 +881,8 @@ class WriteupValues(_DecisionValues):
 class ManagementResponseValues(_DecisionValues):
     text: str = Field(min_length=1)
     agreement: Annotated[ManagementAgreement, _lenient(ManagementAgreement)]
-    action_owner_role: Optional[str] = None
-    target_date: Optional[str] = None
+    action_owner_role: str | None = None
+    target_date: str | None = None
     received_from: str = Field(min_length=1)
     received_on: str = Field(min_length=1)
 
@@ -897,7 +896,7 @@ class RemediationVerificationValues(_DecisionValues):
 
     status: Annotated[RemediationStatus, _lenient(RemediationStatus)]
     verified_on: str = Field(min_length=1)
-    evidence_vault_id: Optional[str] = None
+    evidence_vault_id: str | None = None
 
 
 DECISION_VALUE_MODELS: dict[DecisionType, type[_DecisionValues]] = {

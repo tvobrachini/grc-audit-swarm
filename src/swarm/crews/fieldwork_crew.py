@@ -1,10 +1,12 @@
-import yaml
 from pathlib import Path
+
+import yaml
+
 from swarm.crews._compat import Agent, Crew, Process, Task
-from swarm.schema import WorkingPaperSchema, QA_PushbackSchema
+from swarm.llm_factory import get_crew_llm, get_qa_llm
+from swarm.schema import QA_PushbackSchema, WorkingPaperSchema
 from swarm.tools.aws_tools import make_aws_tools
 from swarm.tools.findings_tools import make_findings_tools
-from swarm.llm_factory import get_crew_llm, get_qa_llm
 
 
 class FieldworkCrew:
@@ -13,9 +15,9 @@ class FieldworkCrew:
         self._event_callback = event_callback
         self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent
-        with open(base_dir / "config" / "fieldwork_agents.yaml", "r") as f:
+        with open(base_dir / "config" / "fieldwork_agents.yaml") as f:
             self.agents_config = yaml.safe_load(f)
-        with open(base_dir / "config" / "fieldwork_tasks.yaml", "r") as f:
+        with open(base_dir / "config" / "fieldwork_tasks.yaml") as f:
             self.tasks_config = yaml.safe_load(f)
 
     def crew(self) -> Crew:

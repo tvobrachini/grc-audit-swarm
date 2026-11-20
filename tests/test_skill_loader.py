@@ -5,18 +5,18 @@ Guardrails for the skill loading system.
 Verifies keyword detection, YAML structure, and prompt assembly.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.skill_loader import (
-    list_available_skills,
     detect_skills_from_scope,
+    get_focus_domains,
+    get_researcher_context_hints,
     get_skill_by_id,
     get_specialist_prompt,
-    get_researcher_context_hints,
-    get_focus_domains,
+    list_available_skills,
 )
 
 

@@ -49,8 +49,9 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Callable, Mapping, NamedTuple, Optional, Sequence
+from typing import Any, NamedTuple
 
 from swarm.review_decisions import DecisionRef, EffectiveView, FindingView
 from swarm.schema import (
@@ -129,7 +130,7 @@ def token(value: str) -> str:
     return text
 
 
-def _prop(name: str, value: Any, *, remarks: Optional[str] = None) -> dict:
+def _prop(name: str, value: Any, *, remarks: str | None = None) -> dict:
     prop = {"name": name, "ns": PROJECT_NS, "value": _line(value)}
     if remarks:
         prop["remarks"] = remarks
@@ -141,11 +142,11 @@ def _props(*pairs: tuple[str, Any]) -> list[dict]:
     return [_prop(n, v) for n, v in pairs if _line(v)]
 
 
-def _yes_no(value: Optional[bool]) -> str:
+def _yes_no(value: bool | None) -> str:
     return "" if value is None else ("true" if value else "false")
 
 
-def oscal_datetime(value: Any) -> Optional[str]:
+def oscal_datetime(value: Any) -> str | None:
     """ISO 8601 with a timezone (UTC assumed when missing), or None."""
     text = _line(value)
     if not text:
@@ -171,11 +172,11 @@ def _digest(obj: Any) -> str:
 
 
 class EvidenceMeta(NamedTuple):
-    collected: Optional[str]
+    collected: str | None
     source: str
 
 
-def vault_metadata(vault_id: str) -> Optional[EvidenceMeta]:
+def vault_metadata(vault_id: str) -> EvidenceMeta | None:
     """Collection time and source operation of a vault record (read-only).
 
     Never returns payload or digest: the export cites evidence, it does not
@@ -218,7 +219,7 @@ class _Parties:
             self.by_name[name] = element_uuid(self._sid, "party", name)
         return self.by_name[name]
 
-    def as_oscal(self, sources: Optional[Mapping[str, set[str]]] = None) -> list[dict]:
+    def as_oscal(self, sources: Mapping[str, set[str]] | None = None) -> list[dict]:
         """``sources``: name -> identity sources of that party's trail entries."""
         return [
             {
@@ -306,13 +307,13 @@ def build_assessment_results(
     theme: str,
     report: FinalReportSchema,
     papers: WorkingPaperSchema,
-    racm: Optional[RiskControlMatrixSchema],
+    racm: RiskControlMatrixSchema | None,
     trail: Sequence[Mapping[str, Any]],
     prepared_by: str = "",
     markup: Callable[[str], str] = lambda s: s,
-    verify_quote: Optional[Callable[[str, str], bool]] = None,
-    evidence_lookup: Callable[[str], Optional[EvidenceMeta]] = vault_metadata,
-    view: Optional[EffectiveView] = None,
+    verify_quote: Callable[[str, str], bool] | None = None,
+    evidence_lookup: Callable[[str], EvidenceMeta | None] = vault_metadata,
+    view: EffectiveView | None = None,
     decisions: Sequence[Any] = (),
 ) -> dict:
     """Build the OSCAL AR document (a JSON-ready dict).
@@ -329,7 +330,7 @@ def build_assessment_results(
     parties = _Parties(sid)
     reviewers: list[str] = []
 
-    def _decided_props(ref: Optional[DecisionRef], prefix: str = "") -> list[dict]:
+    def _decided_props(ref: DecisionRef | None, prefix: str = "") -> list[dict]:
         if ref is None:
             return []
         reviewers.append(_line(ref.decided_by))
@@ -340,7 +341,7 @@ def build_assessment_results(
             (f"{prefix}decision-id", ref.decision_id),
         )
 
-    def _reviewer_origin(ref: Optional[DecisionRef]) -> list[dict]:
+    def _reviewer_origin(ref: DecisionRef | None) -> list[dict]:
         if ref is None:
             return []
         return [
@@ -377,7 +378,7 @@ def build_assessment_results(
     # ── Evidence → back-matter resources ─────────────────────────────────────
     resources: list[dict] = []
     evidence_uuid: dict[str, str] = {}
-    evidence_meta: dict[str, Optional[EvidenceMeta]] = {}
+    evidence_meta: dict[str, EvidenceMeta | None] = {}
     for f in papers.findings:
         vid = _line(f.vault_id_reference)
         if not vid or vid in evidence_uuid:
@@ -744,7 +745,7 @@ def build_assessment_results(
                 or last_modified
             )
             collected_is_fallback = True
-        fv: Optional[FindingView] = view.finding(f.control_id) if view else None
+        fv: FindingView | None = view.finding(f.control_id) if view else None
         tod = fv.effective.tod_conclusion if fv else str(f.tod_conclusion)
         toe = fv.effective.toe_conclusion if fv else str(f.toe_conclusion)
         result_of_record = fv.effective.result if fv else str(f.result)

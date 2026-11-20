@@ -75,7 +75,7 @@ class TestExtract:
         assert not doc.truncated
 
     def test_text_file(self):
-        doc = extract_scope_document("scope.txt", "In scope: IAM\r\n".encode())
+        doc = extract_scope_document("scope.txt", b"In scope: IAM\r\n")
         assert doc.text == "In scope: IAM"
 
     def test_page_limit(self, monkeypatch):

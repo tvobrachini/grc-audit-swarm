@@ -28,8 +28,8 @@ import os
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from swarm.crews._compat import tool
 
+from swarm.crews._compat import tool
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 from swarm.evidence import app_version as _app_version
 from swarm.tools.findings_checks import (
@@ -155,7 +155,7 @@ def make_findings_tools(session_id: str):
             try:
                 size = os.path.getsize(path)
                 check_prowler_file_size(size)
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     raw_text = f.read()
                 result = parse_prowler_findings(raw_text)
             except OSError as exc:

@@ -10,9 +10,10 @@ interface compatibility with existing unit tests and phase adapters.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Callable, Optional, Sequence
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -26,7 +27,7 @@ from swarm.model_routing import (
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_\-]*)\}")
 
 
-def interpolate_only(input_string: Optional[str], inputs: dict[str, Any]) -> str:
+def interpolate_only(input_string: str | None, inputs: dict[str, Any]) -> str:
     """Interpolate ``{key}`` placeholders from ``inputs`` without touching nested braces in values."""
     if input_string is None:
         return ""
@@ -105,7 +106,7 @@ class Agent:
         backstory: str = "",
         *,
         llm: Any = None,
-        tools: Optional[Sequence[Any]] = None,
+        tools: Sequence[Any] | None = None,
         verbose: bool = False,
         max_iter: int = 5,
         **kwargs: Any,
@@ -132,9 +133,9 @@ class Task:
         expected_output: str = "",
         *,
         name: str = "",
-        agent: Optional[Agent] = None,
-        output_pydantic: Optional[type[BaseModel]] = None,
-        context: Optional[Sequence["Task"]] = None,
+        agent: Agent | None = None,
+        output_pydantic: type[BaseModel] | None = None,
+        context: Sequence[Task] | None = None,
         **kwargs: Any,
     ):
         self.description = description
@@ -163,7 +164,7 @@ class NativeTaskOutput:
 
     name: str
     raw: str = ""
-    pydantic: Optional[BaseModel] = None
+    pydantic: BaseModel | None = None
     description: str = ""
 
 
@@ -172,7 +173,7 @@ class NativeCrewOutput:
     """Crew execution output compatible with ``CrewResultAdapter``."""
 
     raw: str = ""
-    pydantic: Optional[BaseModel] = None
+    pydantic: BaseModel | None = None
     tasks_output: list[NativeTaskOutput] = field(default_factory=list)
 
 
@@ -187,8 +188,8 @@ class Crew:
         process: str = Process.sequential,
         verbose: bool = False,
         max_rpm: int = 20,
-        step_callback: Optional[Callable[[Any], None]] = None,
-        gateway: Optional[ZeroFrameworkLLMGateway] = None,
+        step_callback: Callable[[Any], None] | None = None,
+        gateway: ZeroFrameworkLLMGateway | None = None,
         **kwargs: Any,
     ):
         self.agents = list(agents)
@@ -200,7 +201,7 @@ class Crew:
         self.gateway = gateway or ZeroFrameworkLLMGateway()
         self.kwargs = kwargs
 
-    def kickoff(self, inputs: Optional[dict[str, Any]] = None) -> NativeCrewOutput:
+    def kickoff(self, inputs: dict[str, Any] | None = None) -> NativeCrewOutput:
         """Execute tasks sequentially using deterministic tools + ZeroFrameworkLLMGateway."""
         inp = dict(inputs or {})
         completed_by_name: dict[str, NativeTaskOutput] = {}

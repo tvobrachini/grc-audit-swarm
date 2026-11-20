@@ -38,10 +38,11 @@ import tempfile
 import threading
 import time
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from swarm.review_policy import normalise_identity
 
@@ -63,7 +64,7 @@ class ReviewerTokensError(Exception):
     """The reviewer tokens file is missing, unreadable or malformed."""
 
 
-def configured_path() -> Optional[str]:
+def configured_path() -> str | None:
     """Path from ``REVIEWER_TOKENS_FILE``, or None when the feature is off."""
     value = os.environ.get(ENV_VAR, "").strip()
     return value or None
@@ -128,7 +129,7 @@ class ReviewerRegistry:
 
     entries: tuple[ReviewerEntry, ...] = ()
 
-    def authenticate(self, token: Optional[str]) -> Optional[str]:
+    def authenticate(self, token: str | None) -> str | None:
         """Name whose token this is, or None.
 
         The digest of ``token`` is compared with every stored digest in
@@ -140,13 +141,13 @@ class ReviewerRegistry:
         if not token or len(token) > MAX_TOKEN_LENGTH:
             return None
         provided = hash_token(token).encode("ascii")
-        match: Optional[str] = None
+        match: str | None = None
         for entry in self.entries:
             if hmac.compare_digest(provided, entry.token_hash.encode("ascii")):
                 match = entry.name
         return match
 
-    def find(self, name: str) -> Optional[ReviewerEntry]:
+    def find(self, name: str) -> ReviewerEntry | None:
         key = normalise_identity(name)
         return next(
             (e for e in self.entries if normalise_identity(e.name) == key), None
@@ -279,7 +280,7 @@ class FailureLimiter:
             self._failures.pop(key, None)
         return q
 
-    def retry_after(self, key: str, now: Optional[float] = None) -> Optional[int]:
+    def retry_after(self, key: str, now: float | None = None) -> int | None:
         """Seconds to wait if ``key`` is blocked, else None."""
         now = time.monotonic() if now is None else now
         with self._lock:
@@ -288,7 +289,7 @@ class FailureLimiter:
                 return None
             return max(1, int(self.window - (now - q[0])) + 1)
 
-    def record_failure(self, key: str, now: Optional[float] = None) -> None:
+    def record_failure(self, key: str, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
         with self._lock:
             q = self._prune(key, now)
@@ -371,7 +372,7 @@ def remove_reviewer(path: Path, name: str) -> bool:
     return True
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m api.reviewer_tokens",
         description=(

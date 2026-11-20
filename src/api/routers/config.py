@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import APIRouter, Depends
 
 from api import reviewer_tokens
@@ -25,7 +23,7 @@ def get_config() -> dict:
 @router.get("/reviewer")
 def get_reviewer(
     who: ReviewerIdentity = Depends(reviewer_identity),
-) -> dict[str, Optional[str]]:
+) -> dict[str, str | None]:
     """Who the ``X-Reviewer-Token`` belongs to, so a client can check a token
     before using it.
 

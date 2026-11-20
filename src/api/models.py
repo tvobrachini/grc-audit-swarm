@@ -1,8 +1,8 @@
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 from swarm.review_decisions import EffectiveView
-
 
 # Control frameworks the RACM maps to. Auditing standards (PCAOB, IIA) are not
 # control frameworks, so they are not defaults here.
@@ -30,7 +30,7 @@ class CreateSessionRequest(BaseModel):
     theme: str
     business_context: str
     frameworks: list[str] = list(DEFAULT_FRAMEWORKS)
-    name: Optional[str] = None
+    name: str | None = None
     # Identity of the preparer (declared, or from the reviewer token); the
     # preparer may not approve gates, override QA or return work on this audit.
     prepared_by: str = _identity_field()
@@ -78,10 +78,10 @@ class TrailVerification(BaseModel):
     status: str
     entries: int
     legacy_entries: int = 0
-    first_broken_index: Optional[int] = None
+    first_broken_index: int | None = None
     keyed: bool = False
     anchored: bool = False
-    head_hash: Optional[str] = None
+    head_hash: str | None = None
     changed_since_approval: list[str] = Field(default_factory=list)
     # Reviewer decisions that no longer match their trail entry (status
     # ``decision_changed``; see ADR-011).
@@ -118,7 +118,7 @@ class GenerationRunSummary(BaseModel):
     app_version: str
     prompt_fingerprint: str
     started_at: str
-    ended_at: Optional[str] = None
+    ended_at: str | None = None
     attempts: int = 0
     demo_mode: bool = False
     outcome: str = "running"
@@ -156,13 +156,13 @@ class RecordDecisionRequest(BaseModel):
     decision_type: str = Field(min_length=1, max_length=64)
     subject_id: str = Field(default="", max_length=_MAX_IDENTITY)
     # Optional: derived from decision_type; checked when given.
-    subject_type: Optional[str] = Field(default=None, max_length=32)
+    subject_type: str | None = Field(default=None, max_length=32)
     values: dict[str, Any] = Field(default_factory=dict)
     rationale: str = Field(default="", max_length=_MAX_NOTES)
     # Identity of the reviewer (declared, or from the reviewer token).
     decided_by: str = _identity_field()
     # decision_id of the active decision this one corrects.
-    supersedes: Optional[str] = Field(default=None, max_length=64)
+    supersedes: str | None = Field(default=None, max_length=64)
 
     _decided_by_strip = field_validator("decided_by")(_strip)
 
@@ -200,13 +200,13 @@ class ReviewDecisionRecord(BaseModel):
     decided_by: str
     identity_source: str
     decided_at: str
-    supersedes: Optional[str] = None
+    supersedes: str | None = None
     state: str = "active"
 
 
 class ReviewDecisionsResponse(BaseModel):
     decisions: list[ReviewDecisionRecord] = Field(default_factory=list)
-    effective: Optional[EffectiveView] = None
+    effective: EffectiveView | None = None
 
 
 class SessionDetail(BaseModel):
@@ -220,20 +220,20 @@ class SessionDetail(BaseModel):
     business_context: str
     frameworks: list[str]
     current_human_dossier: str
-    racm_plan: Optional[dict[str, Any]]
-    working_papers: Optional[dict[str, Any]]
-    final_report: Optional[dict[str, Any]]
+    racm_plan: dict[str, Any] | None
+    working_papers: dict[str, Any] | None
+    final_report: dict[str, Any] | None
     approval_trail: list[dict[str, str]]
-    qa_rejection_reason: Optional[str]
+    qa_rejection_reason: str | None
     prepared_by: str = ""
-    trail_verification: Optional[TrailVerification] = None
+    trail_verification: TrailVerification | None = None
     generation_runs: list[GenerationRunSummary] = Field(default_factory=list)
     # Reviewer decisions (ADR-011): every decision as recorded, with its
     # state, and the effective view (AI draft + active decisions) that the
     # report and exports render. ``review_decisions_required`` says whether
     # gate approvals on this audit need them.
     review_decisions: list[ReviewDecisionRecord] = Field(default_factory=list)
-    effective: Optional[EffectiveView] = None
+    effective: EffectiveView | None = None
     review_decisions_required: bool = False
 
 
@@ -241,7 +241,7 @@ class VerifyEvidenceRequest(BaseModel):
     vault_id: str
     exact_quote: str
     # When given, a record bound to a different audit session does not verify.
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
 
 def _phase_from_status(status: str) -> int:

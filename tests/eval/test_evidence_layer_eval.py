@@ -41,14 +41,14 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 from unittest.mock import patch
 
 import boto3
 import pytest
 from botocore.exceptions import ClientError
-
 from moto import mock_aws
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))

@@ -29,8 +29,9 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
 
 from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
@@ -38,27 +39,27 @@ from swarm.schema import (
     Control,
     ControlFrequency,
     ControlNature,
-    ControlTestStep,
     ControlTesting,
+    ControlTestStep,
     ControlType,
     DeficiencyClassification,
     DeficiencyEvaluationSchema,
     DeficiencyScale,
     DesignConclusion,
     FinalReportSchema,
+    FindingResult,
+    OperatingConclusion,
     OSCAL_SAR_ImportAP,
     OSCAL_SAR_Metadata,
     OSCAL_SAR_Observation,
     OSCAL_SAR_Result,
     OSCAL_SAR_Schema,
-    OperatingConclusion,
     Population,
     QA_PushbackSchema,
     Risk,
     RiskControlMatrixSchema,
     RiskRating,
     SamplingMethod,
-    FindingResult,
     WorkingPaperSchema,
 )
 
@@ -98,7 +99,7 @@ def demo_mode_enabled() -> bool:
     return True
 
 
-def demo_reject_phase() -> Optional[int]:
+def demo_reject_phase() -> int | None:
     raw = os.environ.get("DEMO_QA_REJECT_PHASE", "").strip()
     return int(raw) if raw in {"1", "2", "3"} else None
 
@@ -382,7 +383,7 @@ _DEMO_FINDINGS: dict[str, dict[str, Any]] = {
 
 
 def _register_demo_evidence(
-    control_id: str, evidence: str, session_id: Optional[str] = None
+    control_id: str, evidence: str, session_id: str | None = None
 ) -> str:
     """Store a synthetic evidence record in the vault and return its vault ID.
 
@@ -404,9 +405,7 @@ def _register_demo_evidence(
     return record["vault_id"]
 
 
-def _demo_finding(
-    control_id: str, session_id: Optional[str] = None
-) -> AuditFindingSchema:
+def _demo_finding(control_id: str, session_id: str | None = None) -> AuditFindingSchema:
     spec = _DEMO_FINDINGS.get(control_id)
     if spec is None:
         return AuditFindingSchema(
@@ -438,7 +437,7 @@ def _demo_finding(
 
 
 def demo_working_papers(
-    theme: str = "", test_plan: str = "", session_id: Optional[str] = None
+    theme: str = "", test_plan: str = "", session_id: str | None = None
 ) -> WorkingPaperSchema:
     return WorkingPaperSchema(
         theme=f"[{DEMO_LABEL}] {theme or 'AWS Cloud Security'}",
@@ -644,10 +643,10 @@ class DemoCrew:
     def __init__(
         self,
         phase: int,
-        event_callback: Optional[Callable[[Any], None]] = None,
+        event_callback: Callable[[Any], None] | None = None,
         *,
         reject: bool = False,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> None:
         if phase not in _PHASE_TASKS:
             raise ValueError("phase must be 1, 2, or 3")

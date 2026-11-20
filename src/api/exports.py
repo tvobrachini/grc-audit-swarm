@@ -24,9 +24,10 @@ from __future__ import annotations
 import io
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -124,13 +125,13 @@ def _to_bytes(wb: Workbook) -> bytes:
     return buf.getvalue()
 
 
-def _steps(steps: Optional[list[Any]]) -> str:
+def _steps(steps: list[Any] | None) -> str:
     return "; ".join(
         f"{s.step_description} (Expect: {s.expected_result})" for s in steps or []
     )
 
 
-def _yes_no(value: Optional[bool]) -> str:
+def _yes_no(value: bool | None) -> str:
     return "" if value is None else ("Yes" if value else "No")
 
 
@@ -240,11 +241,11 @@ _REVIEW_STATUS_TEXT = {
 }
 
 
-def identity_sources(view: Optional[EffectiveView]) -> set[str]:
+def identity_sources(view: EffectiveView | None) -> set[str]:
     """``identity_source`` of every active decision in ``view``."""
     if view is None:
         return set()
-    refs: list[Optional[DecisionRef]] = [view.engagement_conclusion]
+    refs: list[DecisionRef | None] = [view.engagement_conclusion]
     for f in view.findings:
         refs += [f.review, f.scope_limitation]
     for d in view.deficiencies:
@@ -309,8 +310,8 @@ RACM_CROSSWALK_HEADERS = [
 def working_papers_xlsx(
     papers: WorkingPaperSchema,
     ctx: ExportContext,
-    view: Optional[EffectiveView] = None,
-    racm: Optional[RiskControlMatrixSchema] = None,
+    view: EffectiveView | None = None,
+    racm: RiskControlMatrixSchema | None = None,
 ) -> bytes:
     from swarm.evidence import EvidenceAssuranceProtocol
 
@@ -451,7 +452,7 @@ def _with_draft(record: Any, draft: Any) -> str:
 def _deficiency_section(
     report: FinalReportSchema,
     ctx: ExportContext,
-    view: Optional[EffectiveView] = None,
+    view: EffectiveView | None = None,
 ) -> list[str]:
     decided = (
         [d for d in view.deficiencies if d.classification_decision] if view else []
@@ -561,7 +562,7 @@ def _proposed_deficiency_section(
     return lines
 
 
-def _narrative_note(view: Optional[EffectiveView]) -> list[str]:
+def _narrative_note(view: EffectiveView | None) -> list[str]:
     if view is None or not any(d.classification_decision for d in view.deficiencies):
         return []
     return [
@@ -738,7 +739,7 @@ def _trail_line(e: dict[str, str]) -> str:
     return sanitize_report(entry)
 
 
-def _has_reviewer_decisions(view: Optional[EffectiveView]) -> bool:
+def _has_reviewer_decisions(view: EffectiveView | None) -> bool:
     if view is None:
         return False
     if view.engagement_conclusion is not None:
@@ -750,7 +751,7 @@ def _has_reviewer_decisions(view: Optional[EffectiveView]) -> bool:
     return False
 
 
-def _conclusions_of_record_section(view: Optional[EffectiveView]) -> list[str]:
+def _conclusions_of_record_section(view: EffectiveView | None) -> list[str]:
     """A short, reviewer-facing summary of the decisions of record.
 
     Shown only once at least one reviewer decision has been recorded; it
@@ -813,7 +814,7 @@ def report_markdown(
     report: FinalReportSchema,
     trail: list[dict[str, str]],
     ctx: ExportContext,
-    view: Optional[EffectiveView] = None,
+    view: EffectiveView | None = None,
 ) -> str:
     exec_summary_heading = (
         "## Executive Summary (AI-drafted summary)"
@@ -851,13 +852,13 @@ def report_markdown(
 def oscal_json(
     report: FinalReportSchema,
     papers: WorkingPaperSchema,
-    racm: Optional[RiskControlMatrixSchema],
+    racm: RiskControlMatrixSchema | None,
     trail: list[dict[str, str]],
     ctx: ExportContext,
     *,
     theme: str = "",
     prepared_by: str = "",
-    view: Optional[EffectiveView] = None,
+    view: EffectiveView | None = None,
     decisions: Iterable[ReviewDecision] = (),
 ) -> bytes:
     """The session as an OSCAL Assessment Results document (JSON).

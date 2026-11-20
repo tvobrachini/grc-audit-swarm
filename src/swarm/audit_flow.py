@@ -2,21 +2,14 @@ import hashlib
 import logging
 import re
 import uuid
-from datetime import datetime, UTC
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
-from swarm.state.schema import (  # noqa: F401 (re-exported for backwards compat)
-    AuditState,
-    GenerationRun,
-)
-from swarm.state.machine import (
-    AuditStatus,
-    AuditStateMachine,
-    InvalidTransitionError,
-)
-from swarm.crews.planning_crew import PlanningCrew
+from swarm import trail as audit_trail
 from swarm.crews.fieldwork_crew import FieldworkCrew
+from swarm.crews.planning_crew import PlanningCrew
 from swarm.crews.reporting_crew import ReportingCrew
 from swarm.crews.result_adapter import CrewResultAdapter
 from swarm.demo import (
@@ -27,14 +20,9 @@ from swarm.demo import (
 )
 from swarm.evidence import (
     app_version as evidence_app_version,
-    unverified_findings,
 )
-from swarm.review_policy import (
-    MissingReviewDecisionsError,
-    ReviewBlockedError,
-    SegregationOfDutiesError,
-    UnverifiedEvidenceError,
-    sod_violation,
+from swarm.evidence import (
+    unverified_findings,
 )
 from swarm.review_decisions import (
     DecisionConflictError,
@@ -45,7 +33,13 @@ from swarm.review_decisions import (
     decision_states,
     effective_view,
 )
-from swarm import trail as audit_trail
+from swarm.review_policy import (
+    MissingReviewDecisionsError,
+    ReviewBlockedError,
+    SegregationOfDutiesError,
+    UnverifiedEvidenceError,
+    sod_violation,
+)
 from swarm.schema import (
     DeficiencyScale,
     DesignConclusion,
@@ -54,6 +48,15 @@ from swarm.schema import (
     OperatingConclusion,
     ReviewDecision,
     WorkingPaperSchema,
+)
+from swarm.state.machine import (
+    AuditStateMachine,
+    AuditStatus,
+    InvalidTransitionError,
+)
+from swarm.state.schema import (  # noqa: F401 (re-exported for backwards compat)
+    AuditState,
+    GenerationRun,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,7 +131,7 @@ class PhaseArtifactMissingError(RuntimeError):
     """Raised when an action needs a phase artifact that does not exist."""
 
 
-def _qa_rejection(qa_output: Any) -> Optional[str]:
+def _qa_rejection(qa_output: Any) -> str | None:
     """Return None if QA approved, else the rejection reason.
 
     Fails closed: a missing/unparseable QA result (the crew runtime sets ``.pydantic`` to
@@ -393,7 +396,7 @@ class AuditFlow:
         # or loaded). Evidence registered during its crews is bound to it, and
         # the Gate 2 quote check only accepts evidence bound to it (or
         # unbound legacy records). None outside the API: no session check.
-        self.session_id: Optional[str] = None
+        self.session_id: str | None = None
 
     def _commit_status(self) -> None:
         self.state.status = self.machine.status.value
@@ -557,7 +560,7 @@ class AuditFlow:
         self.state.generation_runs.append(run)
         return run
 
-    def _latest_run_for_phase(self, phase: int) -> Optional[GenerationRun]:
+    def _latest_run_for_phase(self, phase: int) -> GenerationRun | None:
         for run in reversed(self.state.generation_runs):
             if run.phase == phase:
                 return run
@@ -578,7 +581,7 @@ class AuditFlow:
             "generation_model": f"{run.provider}/{run.model}",
         }
 
-    def verify_trail(self, anchor: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    def verify_trail(self, anchor: dict[str, Any] | None = None) -> dict[str, Any]:
         """Verify the approval trail's hash chain (see :mod:`swarm.trail`).
 
         Also reports gate-approved artifacts that changed after approval.
@@ -667,10 +670,10 @@ class AuditFlow:
         decision_type: str,
         subject_id: str,
         decided_by: str,
-        values: Optional[dict[str, Any]] = None,
+        values: dict[str, Any] | None = None,
         rationale: str = "",
-        subject_type: Optional[str] = None,
-        supersedes: Optional[str] = None,
+        subject_type: str | None = None,
+        supersedes: str | None = None,
         identity_source: str = IdentitySource.DECLARED.value,
     ) -> ReviewDecision:
         """Append one reviewer decision and stamp it in the trail.
@@ -753,7 +756,7 @@ class AuditFlow:
         ]
         return [n for n in names if n] or [""]
 
-    def _check_sod(self, action: str, human_id: str, gate: Optional[int] = None):
+    def _check_sod(self, action: str, human_id: str, gate: int | None = None):
         for preparer in self._preparers():
             violation = sod_violation(
                 action, human_id, preparer, self.state.approval_trail, gate=gate
@@ -1084,7 +1087,7 @@ class AuditFlow:
 
     # ── Shared phase runner ──────────────────────────────────────────────────
 
-    def _carried_feedback(self, phase: int) -> Optional[str]:
+    def _carried_feedback(self, phase: int) -> str | None:
         """Feedback text a human-initiated re-run of ``phase`` starts with.
 
         * a retry out of QA_REJECTED_PHASE_n carries the QA rejection reason
@@ -1130,7 +1133,7 @@ class AuditFlow:
             "Retry the phase once the cause is fixed."
         )
 
-    def _evidence_rejection(self, phase: int, artifact: Any) -> Optional[str]:
+    def _evidence_rejection(self, phase: int, artifact: Any) -> str | None:
         """Deterministic check of the Fieldwork artifact's evidence quotes.
 
         None when it passes (or does not apply). Fails closed: an unexpected
@@ -1221,7 +1224,7 @@ class AuditFlow:
         # Feedback the run started with (reviewer notes / earlier QA reason)
         # is kept when an auto-retry adds the new QA reason.
         seeded_feedback = str(inputs.get(feedback_key, "") or "")
-        rejection: Optional[str] = None
+        rejection: str | None = None
         qa_rejected = False
         artifact: Any = None
         # Generation provenance for this attempted run (ADR-010): started
@@ -1388,7 +1391,7 @@ class AuditFlow:
             "qa_feedback": "",
         }
 
-    def effective_working_papers(self) -> Optional[WorkingPaperSchema]:
+    def effective_working_papers(self) -> WorkingPaperSchema | None:
         """Working papers overlaid with active Gate 2 reviewer decisions (`D5`).
 
         Never mutates ``self.state.working_papers`` (preserving ADR-011's

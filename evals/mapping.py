@@ -23,7 +23,7 @@ run so each mapping can be audited and challenged.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from evals.answer_key import AnswerKey, Scenario
 
@@ -68,7 +68,7 @@ def map_finding(
         text_source = "finding_test_conclusion (control not in RACM)"
     lowered = text.lower()
 
-    cited_source: Optional[str] = None
+    cited_source: str | None = None
     vault_id = str(finding.get("vault_id_reference") or "")
     if vault_id and vault_id in vault:
         cited_source = vault[vault_id].get("source")

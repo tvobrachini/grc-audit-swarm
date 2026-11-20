@@ -1,5 +1,7 @@
 import logging
+
 from fastapi import APIRouter, HTTPException
+
 from api.models import VerifyEvidenceRequest
 
 router = APIRouter()

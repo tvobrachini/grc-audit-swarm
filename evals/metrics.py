@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from evals.answer_key import AnswerKey, Expectation, Scenario
 
@@ -99,7 +100,7 @@ def score_finding(
         "actual": actual,
         "citation": citation,
     }
-    exp: Optional[Expectation] = key.expectation(scenario, area) if area else None
+    exp: Expectation | None = key.expectation(scenario, area) if area else None
     if exp is None:
         score["outcome"] = "unmatched"
         return score
@@ -148,7 +149,7 @@ def area_outcome(scores: Iterable[dict[str, Any]], area: str) -> str:
 
 
 def score_deficiencies(
-    report: Optional[dict[str, Any]],
+    report: dict[str, Any] | None,
     scores: list[dict[str, Any]],
     key: AnswerKey,
     scenario: Scenario,

@@ -53,7 +53,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from typing import Any, Iterable, Mapping, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from swarm.evidence import derive_labelled_key
 
@@ -105,11 +106,11 @@ def canonical_entry(entry: Mapping[str, Any]) -> bytes:
     return _canonical({k: v for k, v in entry.items() if k != "entry_hash"})
 
 
-def _trail_key() -> Optional[bytes]:
+def _trail_key() -> bytes | None:
     return derive_labelled_key(TRAIL_KEY_LABEL)
 
 
-def _digest(data: bytes, alg: str, key: Optional[bytes]) -> str:
+def _digest(data: bytes, alg: str, key: bytes | None) -> str:
     if alg == ALG_KEYED:
         if key is None:
             raise ValueError("hmac-sha256 digest requires the trail key")
@@ -121,7 +122,7 @@ def _is_chained(entry: Mapping[str, Any]) -> bool:
     return any(f in entry for f in _HASH_FIELDS)
 
 
-def _legacy_seal(prefix: list[Mapping[str, Any]], alg: str, key: Optional[bytes]):
+def _legacy_seal(prefix: list[Mapping[str, Any]], alg: str, key: bytes | None):
     """``prev_hash`` of the first chained entry.
 
     GENESIS for a trail that was chained from the start; otherwise a digest
@@ -155,7 +156,7 @@ def append_entry(trail: list[dict[str, str]], entry: dict[str, str]) -> dict:
     return stored
 
 
-def head(trail: list[Mapping[str, Any]]) -> tuple[int, Optional[str]]:
+def head(trail: list[Mapping[str, Any]]) -> tuple[int, str | None]:
     """(entry count, entry_hash of the last entry or None if unchained/empty)."""
     if not trail:
         return 0, None
@@ -197,13 +198,13 @@ def _result(
     status: str,
     trail: list[Mapping[str, Any]],
     *,
-    first_broken_index: Optional[int] = None,
+    first_broken_index: int | None = None,
     legacy_entries: int = 0,
     keyed: bool = False,
     anchored: bool = False,
     detail: str = "",
-    changed: Optional[list[str]] = None,
-    decisions_changed: Optional[list[str]] = None,
+    changed: list[str] | None = None,
+    decisions_changed: list[str] | None = None,
 ) -> dict[str, Any]:
     count, head_hash = head(trail)
     return {
@@ -223,9 +224,9 @@ def _result(
 
 def verify_trail(
     trail: list[Mapping[str, Any]],
-    anchor: Optional[Mapping[str, Any]] = None,
-    artifacts: Optional[Mapping[str, Any]] = None,
-    decisions: Optional[Iterable[Any]] = None,
+    anchor: Mapping[str, Any] | None = None,
+    artifacts: Mapping[str, Any] | None = None,
+    decisions: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     """Recompute the chain and report the first problem found.
 
@@ -281,8 +282,8 @@ def verify_trail(
 
     key = _trail_key()
     keyed_entries = 0
-    last_plain: Optional[int] = None
-    expected_prev: Optional[str] = None
+    last_plain: int | None = None
+    expected_prev: str | None = None
     for i in range(first, len(trail)):
         entry = trail[i]
         stored_hash = entry.get("entry_hash")
@@ -436,7 +437,7 @@ def verify_trail(
 def changed_since_approval(
     trail: Iterable[Mapping[str, Any]],
     artifacts: Mapping[str, Any],
-    decisions: Optional[Iterable[Any]] = None,
+    decisions: Iterable[Any] | None = None,
 ) -> list[str]:
     """Gate labels whose approved artifact no longer matches its digest.
 
@@ -446,7 +447,7 @@ def changed_since_approval(
     must still exist and hash to it. Decisions recorded after the approval
     (management responses after COMPLETED) are not part of it.
     """
-    latest: dict[str, tuple[str, str, Optional[str], list[str]]] = {}
+    latest: dict[str, tuple[str, str, str | None, list[str]]] = {}
     recorded: dict[int, list[str]] = {}
     for e in trail:
         if e.get("action") == "review_decision":

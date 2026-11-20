@@ -16,10 +16,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from review_helpers import record_demo_decisions  # type: ignore[import-not-found]
+
 from api.job_store import get_queue, remove_flow
 from swarm import session_manager
 from swarm.audit_flow import AuditFlow, racm_test_plan
-from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.demo import (
     DEMO_LABEL,
     DemoCrew,
@@ -29,16 +30,16 @@ from swarm.demo import (
     demo_racm,
     demo_working_papers,
 )
-from review_helpers import record_demo_decisions  # type: ignore[import-not-found]
+from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
     ControlNature,
     DeficiencyClassification,
     DeficiencyScale,
     DesignConclusion,
     FinalReportSchema,
+    FindingResult,
     OperatingConclusion,
     RiskControlMatrixSchema,
-    FindingResult,
     WorkingPaperSchema,
 )
 

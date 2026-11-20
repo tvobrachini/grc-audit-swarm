@@ -26,16 +26,16 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Iterator, Optional, Protocol
+from typing import Any, Protocol
 
 import evals  # noqa: F401  (puts src/ on sys.path)
 from evals import mapping as mapping_mod
 from evals import metrics
 from evals.answer_key import AnswerKey, Scenario
 from evals.aws_sim import simulated_account
-
 from swarm.audit_flow import AuditFlow
 from swarm.crews.result_adapter import CrewResultAdapter
 from swarm.evidence import EvidenceAssuranceProtocol
@@ -310,7 +310,7 @@ class EvalAuditFlow(AuditFlow):
 
 
 @contextlib.contextmanager
-def _env(**values: Optional[str]) -> Iterator[None]:
+def _env(**values: str | None) -> Iterator[None]:
     saved = {k: os.environ.get(k) for k in values}
     try:
         for k, v in values.items():
@@ -342,7 +342,7 @@ def read_vault(vault_dir: Path) -> dict[str, dict[str, Any]]:
     return records
 
 
-def _dump(model: Any) -> Optional[dict[str, Any]]:
+def _dump(model: Any) -> dict[str, Any] | None:
     return None if model is None else model.model_dump(mode="json")
 
 
@@ -416,7 +416,7 @@ def _drive(flow: AuditFlow, on_qa_reject: str) -> dict[str, Any]:
         (2, flow.generate_fieldwork, flow.begin_phase_3, REVIEWER),
         (3, flow.generate_reporting, flow.finalize_audit, MANAGER),
     ]
-    stopped_at: Optional[str] = None
+    stopped_at: str | None = None
     for phase, generate, approve, approver in steps:
         generate()
         status = flow.state.status
@@ -574,7 +574,7 @@ def score_record(
     }
 
 
-def _sum_usage(kickoffs: list[dict[str, Any]]) -> Optional[dict[str, int]]:
+def _sum_usage(kickoffs: list[dict[str, Any]]) -> dict[str, int] | None:
     total: dict[str, int] = {}
     for k in kickoffs:
         for name, value in (k.get("token_usage") or {}).items():

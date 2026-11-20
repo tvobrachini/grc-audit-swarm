@@ -25,9 +25,10 @@ import logging
 import math
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Optional, Protocol, Sequence
+from typing import Protocol
 
 from swarm.linters import lint_distortion_traps
 from swarm.schema import (
@@ -54,7 +55,7 @@ class CascadeAction(StrEnum):
 class NoulResult:
     """Calibrated binary System-1 decision (`Noul`: Yes/No/Null)."""
 
-    value: Optional[bool]
+    value: bool | None
     probability: float  # P(True) in [0.0, 1.0]
     confidence: float  # Calibrated confidence in [0.0, 1.0]
     backend: str = "heuristic"
@@ -232,7 +233,7 @@ class JevDecisionEngine(HeuristicLogprobDecisionEngine):
 
     backend_name = "typesafe-jev"
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "jev-latest"):
+    def __init__(self, api_key: str | None = None, model: str = "jev-latest"):
         self.api_key = api_key or os.environ.get("TYPESAFE_API_KEY", "")
         self.model = model
 
@@ -293,7 +294,7 @@ class KevDecisionEngine(HeuristicLogprobDecisionEngine):
 
     backend_name = "open-kev"
 
-    def __init__(self, endpoint_url: Optional[str] = None):
+    def __init__(self, endpoint_url: str | None = None):
         self.endpoint_url = endpoint_url or os.environ.get("KEV_API_URL", "")
 
 
@@ -310,10 +311,10 @@ def get_decision_engine() -> DecisionEngine:
 
 
 def compute_control_complexity(
-    control: Optional[Control],
+    control: Control | None,
     *,
     has_exception: bool = False,
-    regulatory_mappings: Optional[Sequence[str]] = None,
+    regulatory_mappings: Sequence[str] | None = None,
 ) -> float:
     """Compute the pre-routing complexity score C(q) in [0.0, 1.0].
 
@@ -341,9 +342,9 @@ def compute_control_complexity(
 
 def evaluate_premise_entailment(
     finding: AuditFindingSchema,
-    control: Optional[Control] = None,
+    control: Control | None = None,
     *,
-    engine: Optional[DecisionEngine] = None,
+    engine: DecisionEngine | None = None,
 ) -> float:
     """Evaluate P_entail(y_1, D_quote) on the ISOLATED quote (Tang et al., EMNLP 2024 MiniCheck).
 
@@ -378,12 +379,12 @@ def evaluate_premise_entailment(
 
 def evaluate_finding_cascade(
     finding: AuditFindingSchema,
-    control: Optional[Control] = None,
+    control: Control | None = None,
     *,
     quote_verified_in_vault: bool = True,
     p_seq: float = 0.90,
-    is_sox_or_key: Optional[bool] = None,
-    engine: Optional[DecisionEngine] = None,
+    is_sox_or_key: bool | None = None,
+    engine: DecisionEngine | None = None,
 ) -> CascadeDecision:
     """Compute the Composite Trustworthiness Score S_hat(q, y_1) and cascade action.
 

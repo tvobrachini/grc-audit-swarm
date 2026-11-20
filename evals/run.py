@@ -22,7 +22,7 @@ import sys
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import evals
 from evals import metrics
@@ -81,7 +81,7 @@ def describe_models() -> tuple[str, str, str]:
     return provider or "unknown", name or model, qa or f"same as crew ({model})"
 
 
-def check_real_run_allowed(env_file: Optional[str]) -> Optional[str]:
+def check_real_run_allowed(env_file: str | None) -> str | None:
     """None if a real run may start, else the reason it may not."""
     if in_ci():
         return (
@@ -143,11 +143,11 @@ def evaluate(
     *,
     runs: int,
     out: Path,
-    replay: Optional[Path] = None,
+    replay: Path | None = None,
     on_qa_reject: str = "override",
     qa_seeding: bool = True,
-    prices: tuple[Optional[float], Optional[float]] = (None, None),
-    models: Optional[tuple[str, str, str]] = None,
+    prices: tuple[float | None, float | None] = (None, None),
+    models: tuple[str, str, str] | None = None,
 ) -> dict[str, Any]:
     """Run, score and write the report. Returns the results dict."""
     started = datetime.now(UTC)
@@ -216,7 +216,7 @@ def evaluate(
             }
         )
 
-    qa_result: Optional[dict[str, Any]] = None
+    qa_result: dict[str, Any] | None = None
     if qa_seeding:
         reviewer = (
             replay_reviewer(qa_decisions) if replay is not None else real_reviewer()
@@ -270,7 +270,7 @@ def evaluate(
 
 def _usage(
     kickoffs: list[dict[str, Any]],
-    prices: tuple[Optional[float], Optional[float]],
+    prices: tuple[float | None, float | None],
     mode: str,
 ) -> dict[str, Any]:
     total: dict[str, int] = {}
@@ -346,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,

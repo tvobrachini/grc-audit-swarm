@@ -20,7 +20,12 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from flow_builders import make_papers, make_racm, make_report  # type: ignore[import-not-found]
+from flow_builders import (  # type: ignore[import-not-found]
+    make_papers,
+    make_racm,
+    make_report,
+)
+
 from swarm.audit_flow import AuditFlow
 from swarm.decision_engine import (
     CascadeAction,
@@ -66,8 +71,8 @@ from swarm.schema import (
     Control,
     ControlFrequency,
     ControlNature,
-    ControlTestStep,
     ControlTesting,
+    ControlTestStep,
     DeficiencyClassification,
     DeficiencyEvaluationSchema,
     DeficiencyScale,
@@ -81,7 +86,6 @@ from swarm.tools.aws_checks import (
     collect_access_key_age,
     collect_root_account_summary,
 )
-
 
 # ── 1. Skill Loader Word-Boundary & New Framework Skills ─────────────────────
 
@@ -596,6 +600,11 @@ class TestEndToEndAuditFactoryPipeline:
         self, tmp_path, monkeypatch
     ):
         import json
+
+        from review_helpers import (
+            record_flow_decisions,  # type: ignore[import-not-found]
+        )
+
         from api.exports import (
             ExportContext,
             oscal_json,
@@ -603,7 +612,6 @@ class TestEndToEndAuditFactoryPipeline:
             report_markdown,
             working_papers_xlsx,
         )
-        from review_helpers import record_flow_decisions  # type: ignore[import-not-found]
         from swarm.trail import verify_trail
 
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path / "vault"))
@@ -727,8 +735,8 @@ class TestEndToEndAuditFactoryPipeline:
 
     def test_end_to_end_native_crew_zero_framework_runtime(self, tmp_path, monkeypatch):
         """Run PlanningCrew, FieldworkCrew, and ReportingCrew through NativeCrew (DEMO_MODE=0)."""
-        from swarm.crews.planning_crew import PlanningCrew
         from swarm.crews.fieldwork_crew import FieldworkCrew
+        from swarm.crews.planning_crew import PlanningCrew
         from swarm.crews.reporting_crew import ReportingCrew
         from swarm.schema import (
             DeficiencyEvaluationSetSchema,
@@ -846,7 +854,12 @@ class TestEndToEndAuditFactoryPipeline:
         """Test IIA GIAS 15.2 remediation_verification, RACM Crosswalk xlsx, and OSCAL drift."""
         import io
         import json
+
         from openpyxl import load_workbook
+        from review_helpers import (
+            record_flow_decisions,  # type: ignore[import-not-found]
+        )
+
         from api.exports import (
             RACM_CROSSWALK_HEADERS,
             ExportContext,
@@ -854,7 +867,6 @@ class TestEndToEndAuditFactoryPipeline:
             report_markdown,
             working_papers_xlsx,
         )
-        from review_helpers import record_flow_decisions  # type: ignore[import-not-found]
         from swarm.oscal_ar import evaluate_oscal_drift
 
         monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path / "vault"))

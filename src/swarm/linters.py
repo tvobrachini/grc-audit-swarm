@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import datetime
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Optional, Sequence
 
 from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.oscal_ar import vault_metadata
@@ -361,8 +361,8 @@ def lint_racm(
 
 
 def _extract_year_bounds(
-    period_text: Optional[str],
-) -> Optional[tuple[datetime.date, datetime.date]]:
+    period_text: str | None,
+) -> tuple[datetime.date, datetime.date] | None:
     """Extract ISO date range (YYYY-MM-DD .. YYYY-MM-DD) or FY year from period_of_reliance."""
     if not period_text:
         return None
@@ -406,9 +406,9 @@ def classify_evidence_tier(source_operation: str) -> EvidenceHierarchyTier:
 
 def lint_distortion_traps(
     finding: AuditFindingSchema,
-    control: Optional[Control] = None,
-    all_findings: Optional[Sequence[AuditFindingSchema]] = None,
-    all_controls: Optional[dict[str, Control]] = None,
+    control: Control | None = None,
+    all_findings: Sequence[AuditFindingSchema] | None = None,
+    all_controls: dict[str, Control] | None = None,
 ) -> list[LintViolation]:
     """Check the 5 Audit Distortion Traps (Gao et al. ALCE / Min et al. FActScore / Tang et al. MiniCheck).
 
@@ -548,9 +548,9 @@ def lint_distortion_traps(
 
 def lint_working_papers(
     papers: WorkingPaperSchema,
-    racm: Optional[RiskControlMatrixSchema] = None,
+    racm: RiskControlMatrixSchema | None = None,
     *,
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     verify_vault_quotes: bool = True,
     tolerable_deviation_rate: float = 0.0,
 ) -> LintReport:
@@ -759,10 +759,10 @@ def lint_working_papers(
 
 def lint_deficiency_evaluations(
     evaluations: Sequence[DeficiencyEvaluationSchema],
-    papers: Optional[WorkingPaperSchema] = None,
-    racm: Optional[RiskControlMatrixSchema] = None,
+    papers: WorkingPaperSchema | None = None,
+    racm: RiskControlMatrixSchema | None = None,
     *,
-    expected_scale: Optional[DeficiencyScale] = None,
+    expected_scale: DeficiencyScale | None = None,
 ) -> LintReport:
     """Deterministically validate Phase 3 Deficiency Evaluations (Rules D4, D9, D14)."""
     report = LintReport()
@@ -879,10 +879,10 @@ def lint_deficiency_evaluations(
 
 def lint_report(
     final_report: FinalReportSchema,
-    papers: Optional[WorkingPaperSchema] = None,
-    racm: Optional[RiskControlMatrixSchema] = None,
+    papers: WorkingPaperSchema | None = None,
+    racm: RiskControlMatrixSchema | None = None,
     *,
-    expected_scale: Optional[DeficiencyScale] = None,
+    expected_scale: DeficiencyScale | None = None,
 ) -> LintReport:
     """Deterministically validate a Phase 3 FinalReportSchema (Rules D4, D9, D14)."""
     report = lint_deficiency_evaluations(
@@ -926,7 +926,7 @@ def lint_report(
     return report
 
 
-def _check_slop_text(text: Optional[str], subject_id: str, report: LintReport) -> None:
+def _check_slop_text(text: str | None, subject_id: str, report: LintReport) -> None:
     if not text:
         return
     lower = text.lower()

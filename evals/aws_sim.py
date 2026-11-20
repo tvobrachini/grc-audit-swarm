@@ -19,7 +19,8 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch
 
 import boto3

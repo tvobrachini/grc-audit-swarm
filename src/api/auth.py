@@ -2,7 +2,6 @@ import logging
 import os
 import secrets
 from dataclasses import dataclass
-from typing import Optional
 
 from fastapi import Header, HTTPException, Request, status
 
@@ -64,7 +63,7 @@ class ReviewerAuthError(Exception):
         status_code: int,
         code: str,
         detail: str,
-        headers: Optional[dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(detail)
         self.status_code = status_code
@@ -81,7 +80,7 @@ class ReviewerIdentity:
     configured, else None (the caller's typed name is used, as declared).
     """
 
-    name: Optional[str] = None
+    name: str | None = None
 
     @property
     def authenticated(self) -> bool:
@@ -91,7 +90,7 @@ class ReviewerIdentity:
     def source(self) -> str:
         return "authenticated" if self.authenticated else "declared"
 
-    def resolve(self, typed: Optional[str], field: str) -> tuple[str, str]:
+    def resolve(self, typed: str | None, field: str) -> tuple[str, str]:
         """(identity to record, identity_source) for a typed name field.
 
         Declared mode returns the typed name unchanged (the flow rejects a
@@ -119,7 +118,7 @@ def _client_key(request: Request) -> str:
 
 def reviewer_identity(
     request: Request,
-    x_reviewer_token: Optional[str] = Header(default=None),
+    x_reviewer_token: str | None = Header(default=None),
 ) -> ReviewerIdentity:
     """Authenticate the ``X-Reviewer-Token`` header when tokens are configured.
 

@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
@@ -53,6 +53,12 @@ from swarm.review_decisions import (
     decision_states,
     effective_view,
 )
+from swarm.schema import (
+    FinalReportSchema,
+    ReviewDecision,
+    RiskControlMatrixSchema,
+    WorkingPaperSchema,
+)
 from swarm.session_manager import (
     delete_session,
     get_session,
@@ -60,14 +66,8 @@ from swarm.session_manager import (
     list_sessions,
     save_session,
 )
-from swarm.trail import verify_trail
-from swarm.schema import (
-    FinalReportSchema,
-    ReviewDecision,
-    RiskControlMatrixSchema,
-    WorkingPaperSchema,
-)
 from swarm.state.repository import FlowRepository
+from swarm.trail import verify_trail
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,7 @@ def _build_summary(session_id: str, data: dict[str, Any]) -> SessionSummary:
     )
 
 
-def _prepared_by(data: dict[str, Any], flow: Optional[AuditFlow]) -> str:
+def _prepared_by(data: dict[str, Any], flow: AuditFlow | None) -> str:
     """Preparer from the flow, the snapshot, or the session metadata ("" if legacy)."""
     if flow is not None and flow.state.prepared_by:
         return flow.state.prepared_by
@@ -201,7 +201,7 @@ def _decision_records(
 
 def _flow_review(
     flow: AuditFlow,
-) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView]]:
+) -> tuple[list[ReviewDecisionRecord], EffectiveView | None]:
     return (
         _decision_records(flow.state.review_decisions, flow.decision_states()),
         flow.effective_view(),
@@ -219,7 +219,7 @@ def _typed(schema: type, raw: Any) -> Any:
 
 def _snapshot_review(
     snapshot: dict[str, Any],
-) -> tuple[list[ReviewDecisionRecord], Optional[EffectiveView], bool]:
+) -> tuple[list[ReviewDecisionRecord], EffectiveView | None, bool]:
     """Decisions and effective view from a persisted snapshot.
 
     Tolerant of a snapshot from before decisions existed (no decisions, an
@@ -244,7 +244,7 @@ def _snapshot_review(
     )
     try:
         states = dict(decision_states(ctx, decisions))
-        view: Optional[EffectiveView] = effective_view(
+        view: EffectiveView | None = effective_view(
             ctx, decisions, decisions_required=required
         )
     except Exception:
@@ -419,7 +419,7 @@ def create_session_with_document(
     theme: str = Form(..., min_length=1),
     business_context: str = Form(""),
     frameworks: list[str] = Form(default_factory=lambda: list(DEFAULT_FRAMEWORKS)),
-    name: Optional[str] = Form(None),
+    name: str | None = Form(None),
     prepared_by: str = Form("", max_length=200),
     document: UploadFile = File(...),
     who: ReviewerIdentity = Depends(reviewer_identity),
@@ -451,15 +451,13 @@ def _create_and_launch(
     theme: str,
     business_context: str,
     frameworks: list[str],
-    name: Optional[str],
+    name: str | None,
     prepared_by: str,
     identity_source: str = "declared",
 ) -> SessionSummary:
     session_id = str(uuid.uuid4())
     name = name or f"{theme[:40]} audit"
-    created_at = (
-        datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
-    )
+    created_at = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
 
     flow = AuditFlow()
     flow.state.theme = theme

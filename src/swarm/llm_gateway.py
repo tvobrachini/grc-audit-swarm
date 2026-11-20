@@ -24,9 +24,10 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Optional, Sequence, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -69,11 +70,11 @@ class ControlProbeResult:
     reason: str
     vault_id: str = ""
     exact_quote: str = ""
-    items_tested: Optional[int] = None
-    exceptions_noted: Optional[int] = None
+    items_tested: int | None = None
+    exceptions_noted: int | None = None
     tod_conclusion: DesignConclusion = DesignConclusion.NOT_TESTED
     toe_conclusion: OperatingConclusion = OperatingConclusion.NOT_TESTED
-    toe_basis: Optional[str] = None
+    toe_basis: str | None = None
 
     def to_finding(self) -> AuditFindingSchema:
         """Convert a deterministic probe result into a schema-valid AuditFindingSchema."""
@@ -137,7 +138,7 @@ def format_line_indexed_evidence(vault_id: str, raw_payload: str) -> str:
 
 
 def extract_quote_by_lines(
-    raw_payload: str, start_line: int, end_line: Optional[int] = None
+    raw_payload: str, start_line: int, end_line: int | None = None
 ) -> str:
     """Extract the byte-exact substring from ``raw_payload`` for 1-based line range ``[start_line, end_line]``.
 
@@ -187,7 +188,7 @@ class ZeroFrameworkLLMGateway:
     def __init__(
         self,
         *,
-        completion_fn: Optional[Callable[..., Any]] = None,
+        completion_fn: Callable[..., Any] | None = None,
     ):
         self._completion_fn = completion_fn
         self.receipts: list[LLMCallReceipt] = []
@@ -200,7 +201,7 @@ class ZeroFrameworkLLMGateway:
         spec: ModelSpec,
         system_prompt: str,
         user_prompt: str,
-        response_model: Type[T],
+        response_model: type[T],
     ) -> T:
         """Call ``spec.model_id`` enforcing ``response_model`` JSON schema and record an LLMCallReceipt."""
         t0 = time.monotonic()

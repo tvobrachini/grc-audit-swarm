@@ -15,9 +15,9 @@ sycophancy:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional, Sequence
 
 from swarm.schema import QA_PushbackSchema
 
@@ -224,7 +224,7 @@ def select_cross_family_critic(
     drafter_model: str,
     *,
     effort: EffortLevel = EffortLevel.MEDIUM,
-    available_families: Optional[Sequence[ModelFamily]] = None,
+    available_families: Sequence[ModelFamily] | None = None,
 ) -> ModelSpec:
     """Select a critic model guaranteed to be from a disjoint model family."""
     drafter_family = detect_model_family(drafter_model)
@@ -274,7 +274,7 @@ class PoLLJuryVote:
     model_id: str
     family: ModelFamily
     approved: bool
-    rejection_reason: Optional[str] = None
+    rejection_reason: str | None = None
     weight: float = 1.0
 
 

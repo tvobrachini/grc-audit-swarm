@@ -21,9 +21,6 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.crews._compat import interpolate_only
-
-from swarm.schema import QA_PushbackSchema
 from flow_builders import (  # type: ignore[import-not-found]
     PHASES,
     crew_result,
@@ -32,6 +29,9 @@ from flow_builders import (  # type: ignore[import-not-found]
     make_racm,
     make_report,
 )
+
+from swarm.crews._compat import interpolate_only
+from swarm.schema import QA_PushbackSchema
 
 CONFIG_DIR = Path(__file__).parent.parent / "src" / "swarm" / "config"
 # Same pattern the crew runtime uses for template variables.

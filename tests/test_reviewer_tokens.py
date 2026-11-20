@@ -22,6 +22,7 @@ from openpyxl import load_workbook
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from review_helpers import record_demo_decisions  # type: ignore[import-not-found]
+
 from api import reviewer_tokens as rt
 from api.auth import ReviewerIdentity
 from api.exports import (
@@ -743,7 +744,8 @@ def test_reviewer_tokens_mandatory_flag(monkeypatch):
 
 def test_reviewer_identity_refuses_when_tokens_mandatory_and_unset(monkeypatch):
     from fastapi import Request
-    from api.auth import reviewer_identity, ReviewerAuthError
+
+    from api.auth import ReviewerAuthError, reviewer_identity
 
     monkeypatch.delenv("DEMO_MODE", raising=False)
     monkeypatch.setenv("REVIEWER_TOKENS_MANDATORY", "1")

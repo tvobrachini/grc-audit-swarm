@@ -16,8 +16,8 @@ import hashlib
 import hmac
 import json
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from swarm.schema import (
     ControlFrequency,

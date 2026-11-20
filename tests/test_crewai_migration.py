@@ -1,18 +1,19 @@
+import json
 import os
 import sys
-import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.schema import RiskControlMatrixSchema, FinalReportSchema
-from swarm.evidence import EvidenceAssuranceProtocol
 from pydantic import ValidationError
+
+from swarm.evidence import EvidenceAssuranceProtocol
+from swarm.schema import FinalReportSchema, RiskControlMatrixSchema
 
 
 def load_mock_data():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     mock_path = os.path.join(base_dir, "mock_data", "aws_s3_audit.json")
-    with open(mock_path, "r") as f:
+    with open(mock_path) as f:
         return json.load(f)
 
 

@@ -35,6 +35,13 @@ jev = ["typesafe>=0.1.0"]
 Repository = "https://github.com/tvobrachini/grc-audit-swarm"
 Issues = "https://github.com/tvobrachini/grc-audit-swarm/issues"
 
+[tool.ruff.lint]
+# Explicit so a newer ruff cannot silently widen the default rule set.
+# E4/E7/E9/F: ruff's long-standing defaults. I: import order. UP: modern syntax.
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+# UP042 (str, Enum -> StrEnum) changes str()/format() output of the enums; not a safe auto-fix.
+ignore = ["UP042"]
+
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 skips = ["B101", "B105"] # Skip assert and password false-positives

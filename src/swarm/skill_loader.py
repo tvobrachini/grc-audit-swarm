@@ -10,26 +10,28 @@ A "Skill" is the GRC Audit Swarm equivalent of a Claude Skill:
   - Swappable without touching agent code
 """
 
+import copy
 import logging
 import os
 import re
+from collections.abc import Sequence
+from typing import Any
+
 import yaml
-import copy
-from typing import List, Dict, Optional, Any, Sequence
 
 logger = logging.getLogger(__name__)
 
 SKILLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../skills")
 
-_SKILLS_CACHE: Optional[List[Dict[str, Any]]] = None
+_SKILLS_CACHE: list[dict[str, Any]] | None = None
 
 
-def _load_skill_file(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
+def _load_skill_file(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def list_available_skills() -> List[Dict[str, Any]]:
+def list_available_skills() -> list[dict[str, Any]]:
     """Return all skills found in the skills/ directory."""
     global _SKILLS_CACHE
     if _SKILLS_CACHE is not None:
@@ -71,8 +73,8 @@ def _keyword_matches(keyword: str, text: str) -> bool:
 
 def detect_skills_from_scope(
     scope_text: str,
-    frameworks: Optional[Sequence[str]] = None,
-) -> List[Dict[str, Any]]:
+    frameworks: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
     """
     Auto-detect which skills apply based on word-boundary keyword matching
     against the scope text (and optional explicit framework list).
@@ -108,7 +110,7 @@ def detect_skills_from_scope(
     return matched
 
 
-def get_skill_by_id(skill_id: str) -> Optional[Dict[str, Any]]:
+def get_skill_by_id(skill_id: str) -> dict[str, Any] | None:
     """Load a specific skill by its id field."""
     for skill in list_available_skills():
         if skill.get("id") == skill_id:
@@ -116,7 +118,7 @@ def get_skill_by_id(skill_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_specialist_prompt(matched_skills: List[Dict[str, Any]]) -> str:
+def get_specialist_prompt(matched_skills: list[dict[str, Any]]) -> str:
     """
     Combine specialist system prompts from all matched skills.
     Used by the Specialist agent.
@@ -136,7 +138,7 @@ def get_specialist_prompt(matched_skills: List[Dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def get_researcher_context_hints(matched_skills: List[Dict[str, Any]]) -> str:
+def get_researcher_context_hints(matched_skills: list[dict[str, Any]]) -> str:
     """
     Combine researcher context hints from all matched skills.
     Used by the Researcher agent to guide web searches.
@@ -151,7 +153,7 @@ def get_researcher_context_hints(matched_skills: List[Dict[str, Any]]) -> str:
     return "\n\n".join(hints)
 
 
-def get_focus_domains(matched_skills: List[Dict[str, Any]]) -> List[str]:
+def get_focus_domains(matched_skills: list[dict[str, Any]]) -> list[str]:
     """Return a deduplicated list of priority control domains across all matched skills."""
     seen = set()
     domains = []
