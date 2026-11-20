@@ -13,7 +13,7 @@ from swarm.schema import FinalReportSchema, RiskControlMatrixSchema
 def load_mock_data():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     mock_path = os.path.join(base_dir, "mock_data", "aws_s3_audit.json")
-    with open(mock_path) as f:
+    with open(mock_path, "r") as f:
         return json.load(f)
 
 

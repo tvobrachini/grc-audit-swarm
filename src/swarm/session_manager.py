@@ -46,7 +46,7 @@ class _CorruptSessionsFile(Exception):
 def _read_file() -> dict:
     """Parse the sessions file. Raises FileNotFoundError or _CorruptSessionsFile."""
     try:
-        with open(SESSIONS_PATH, encoding="utf-8") as f:
+        with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (ValueError, UnicodeDecodeError) as exc:  # JSONDecodeError ⊂ ValueError
         raise _CorruptSessionsFile(f"{type(exc).__name__}: {exc}") from exc
@@ -209,7 +209,7 @@ def _anchors_path() -> str:
 
 def _load_anchors() -> dict:
     try:
-        with open(_anchors_path(), encoding="utf-8") as f:
+        with open(_anchors_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
         return {}

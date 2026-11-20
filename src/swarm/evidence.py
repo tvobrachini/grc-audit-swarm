@@ -331,7 +331,7 @@ class EvidenceAssuranceProtocol:
             return False
 
         try:
-            with open(filepath) as f:
+            with open(filepath, "r") as f:
                 evidence_record = json.load(f)
 
             payload = evidence_record["raw_payload"]
@@ -423,7 +423,7 @@ class EvidenceAssuranceProtocol:
                 continue
             filepath = os.path.join(evidence_dir, name)
             try:
-                with open(filepath) as f:
+                with open(filepath, "r") as f:
                     record = json.load(f)
 
                 if not record.get("encrypted"):

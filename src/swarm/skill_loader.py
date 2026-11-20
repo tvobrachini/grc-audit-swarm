@@ -27,7 +27,7 @@ _SKILLS_CACHE: list[dict[str, Any]] | None = None
 
 
 def _load_skill_file(path: str) -> dict[str, Any]:
-    with open(path, encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 

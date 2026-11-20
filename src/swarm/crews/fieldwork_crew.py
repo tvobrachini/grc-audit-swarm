@@ -15,9 +15,9 @@ class FieldworkCrew:
         self._event_callback = event_callback
         self._skill_context = skill_context or []
         base_dir = Path(__file__).parent.parent
-        with open(base_dir / "config" / "fieldwork_agents.yaml") as f:
+        with open(base_dir / "config" / "fieldwork_agents.yaml", "r") as f:
             self.agents_config = yaml.safe_load(f)
-        with open(base_dir / "config" / "fieldwork_tasks.yaml") as f:
+        with open(base_dir / "config" / "fieldwork_tasks.yaml", "r") as f:
             self.tasks_config = yaml.safe_load(f)
 
     def crew(self) -> Crew:
