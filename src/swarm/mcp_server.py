@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("AWS-Audit-Agent")
 
-# The evidence logic is shared with the CrewAI tools (swarm.tools.aws_checks).
-# Unlike the CrewAI tools, this server does not register results in the
+# The evidence logic is shared with the agent tools (swarm.tools.aws_checks).
+# Unlike the agent tools, this server does not register results in the
 # evidence vault.
 
 

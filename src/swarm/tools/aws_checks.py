@@ -1,8 +1,8 @@
-"""Read-only AWS evidence collection, shared by the CrewAI tools and the MCP server.
+"""Read-only AWS evidence collection, shared by the agent tools and the MCP server.
 
 Every function here takes already-built boto3 clients and returns plain Python
 data. Nothing in this module writes to AWS, touches the evidence vault, or
-imports CrewAI, so the same logic backs ``swarm.tools.aws_tools`` (which adds
+imports an agent framework, so the same logic backs ``swarm.tools.aws_tools`` (which adds
 redaction and vault registration) and ``swarm.mcp_server``.
 
 S3 public-access semantics (see DECISIONS.md, ADR-003):

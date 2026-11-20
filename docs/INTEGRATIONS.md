@@ -93,7 +93,7 @@ this reduces prompt-injection risk but does not remove it.
 
 **Where it runs.**
 
-- As a CrewAI tool, "Import Prowler Findings" (`src/swarm/tools/findings_tools.py`),
+- As an agent tool, "Import Prowler Findings" (`src/swarm/tools/findings_tools.py`),
   available to the Fieldwork Evidence Collector alongside the AWS reads.
 - As an API upload, `POST /api/sessions/{id}/imports/prowler`
   (`src/api/routers/imports.py`): multipart-upload a `.json` file for an
@@ -142,7 +142,7 @@ tool calls no other Security Hub or Config API, and never calls
 `BatchUpdateFindings` or anything else that would change a finding's state
 or workflow.
 
-**Where it runs.** As a CrewAI tool, "Get Security Hub Findings"
+**Where it runs.** As an agent tool, "Get Security Hub Findings"
 (`src/swarm/tools/findings_tools.py`), available to the Fieldwork Evidence
 Collector. There is no upload/API route for Security Hub — the account
 being audited is already reachable via the same credentials the other AWS
@@ -151,13 +151,13 @@ tools use.
 ## Testing notes
 
 - Parsing logic (`src/swarm/tools/findings_checks.py`) is pure Python with
-  no AWS or CrewAI dependency, tested directly in
+  no AWS or agent-framework dependency, tested directly in
   `tests/test_findings_checks.py` against hand-built fixtures in
   `tests/fixtures/findings/`: an OCSF sample and a legacy Prowler sample
   (each with PASS/FAIL/MANUAL, multiple regions, AWS account IDs to redact,
   and a deliberately malformed record), and an ASFF sample (a FAILED and a
   PASSED finding, plus a malformed record with no `Id`).
-- The CrewAI tool wrappers (`tests/test_findings_tools.py`) exercise vault
+- The agent tool wrappers (`tests/test_findings_tools.py`) exercise vault
   registration, redaction, and env-var wiring, and use
   `botocore.stub.Stubber` for Security Hub rather than moto: moto's
   Security Hub support does not cover `GetFindings` pagination in the

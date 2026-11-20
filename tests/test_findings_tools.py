@@ -1,4 +1,4 @@
-"""Tests for the CrewAI findings-import tools (vault registration, redaction,
+"""Tests for the findings-import tools (vault registration, redaction,
 env-var wiring, filters, pagination via botocore Stubber).
 
 moto's Security Hub support is partial/absent for GetFindings pagination in

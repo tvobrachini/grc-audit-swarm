@@ -1,7 +1,7 @@
 """
 Evidence-layer evaluation: planted misconfigurations in an in-memory AWS account.
 
-Scope. This evaluates the deterministic evidence collection only: the CrewAI
+Scope. This evaluates the deterministic evidence collection only: the agent
 tool functions in swarm.tools.aws_tools, run against a moto account seeded with
 known misconfigurations and known-good controls. Each scenario declares the
 evidence it expects, and the test checks the tool output, that the output is

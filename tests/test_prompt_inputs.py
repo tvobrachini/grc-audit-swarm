@@ -34,7 +34,7 @@ from flow_builders import (  # type: ignore[import-not-found]
 )
 
 CONFIG_DIR = Path(__file__).parent.parent / "src" / "swarm" / "config"
-# Same pattern CrewAI uses for template variables.
+# Same pattern the crew runtime uses for template variables.
 _PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_\-]*)}")
 
 CREW_CONFIGS = {
@@ -101,7 +101,7 @@ def test_every_yaml_placeholder_is_supplied(phase):
     for inputs in _captured_inputs(phase):
         missing = required - set(inputs)
         assert not missing, f"phase {phase} kickoff inputs lack {sorted(missing)}"
-        # And CrewAI itself can interpolate every template with these inputs.
+        # And the crew runtime can interpolate every template with these inputs.
         for template in _yaml_templates(phase):
             interpolate_only(template, inputs)
 

@@ -1,6 +1,6 @@
 """
 Tests for AuditFlow orchestration logic.
-All CrewAI crew calls are mocked — no LLM keys required.
+All crew calls are mocked — no LLM keys required.
 Covers: Phase 3 auto-retry, approval trail stamping, QA rejection states.
 """
 

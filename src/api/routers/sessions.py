@@ -76,7 +76,7 @@ _repo = FlowRepository()
 
 
 def _make_event_callback(session_id: str):
-    """Returns a step_callback for CrewAI that pushes agent_step events to SSE queue."""
+    """Returns a step_callback for the crew runtime that pushes agent_step events to SSE queue."""
 
     def callback(step_output) -> None:
         try:

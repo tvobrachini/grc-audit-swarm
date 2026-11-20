@@ -3,7 +3,6 @@ import logging
 import re
 import uuid
 from datetime import datetime, UTC
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -132,7 +131,7 @@ class PhaseArtifactMissingError(RuntimeError):
 def _qa_rejection(qa_output: Any) -> Optional[str]:
     """Return None if QA approved, else the rejection reason.
 
-    Fails closed: a missing/unparseable QA result (CrewAI sets ``.pydantic`` to
+    Fails closed: a missing/unparseable QA result (the crew runtime sets ``.pydantic`` to
     None when the LLM output can't be parsed) is a rejection, never a pass.
     """
     if qa_output is None:
@@ -192,15 +191,18 @@ def prompt_fingerprint(phase: int, skill_context: list[Any]) -> str:
     return digest.hexdigest()
 
 
-def _crewai_version() -> str:
-    try:
-        return _pkg_version("crewai")
-    except PackageNotFoundError:
-        return f"zero-framework-{evidence_app_version()}"
+def _runtime_version() -> str:
+    """Version label of the agent runtime recorded with each generation run.
+
+    The runtime is the in-repo zero-framework layer (ADR-013), so it is
+    labelled with the app version. The run field is still named
+    ``crewai_version`` so stored runs and API clients keep working.
+    """
+    return f"zero-framework-{evidence_app_version()}"
 
 
 # Fixed at import time: it cannot change while the process is running.
-_CREWAI_VERSION = _crewai_version()
+_RUNTIME_VERSION = _runtime_version()
 _APP_VERSION = evidence_app_version()
 
 # Crew / QA temperatures, matching the crews' Agent construction
@@ -542,7 +544,7 @@ class AuditFlow:
             qa_model=qa_info["model"],
             temperature=0.0 if demo else _CREW_TEMPERATURE,
             qa_temperature=0.0 if demo else _QA_TEMPERATURE,
-            crewai_version=_CREWAI_VERSION,
+            crewai_version=_RUNTIME_VERSION,
             app_version=_APP_VERSION,
             prompt_fingerprint=prompt_fingerprint(phase, self._skill_context),
             started_at=_now(),
@@ -1358,7 +1360,7 @@ class AuditFlow:
 
     # ── Crew inputs ──────────────────────────────────────────────────────────
     # Every ``{placeholder}`` in the crews' YAML task/agent configs must be a
-    # key here (CrewAI raises on a missing one; tests/test_prompt_inputs.py
+    # key here (the crew runtime raises on a missing one; tests/test_prompt_inputs.py
     # checks all three crews).
 
     def _scope_string(self) -> str:

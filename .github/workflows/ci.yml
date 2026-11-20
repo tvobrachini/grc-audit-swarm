@@ -125,13 +125,7 @@ jobs:
 
       - name: Dependency Vulnerability Scan (pip-audit)
         run: |
-          uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps \
-            --ignore-vuln PYSEC-2026-311 \
-            --ignore-vuln PYSEC-2026-3813 \
-            --ignore-vuln PYSEC-2026-3814 \
-            --ignore-vuln PYSEC-2026-3815
-          # PYSEC-2026-311/3813/3814/3815: chromadb 1.1.1, pulled in directly
-          #   by crewai; no fixed version published upstream yet.
+          uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps
 
   frontend:
     name: frontend

@@ -114,7 +114,7 @@ class GenerationRunSummary(BaseModel):
     qa_model: str
     temperature: float
     qa_temperature: float
-    crewai_version: str
+    crewai_version: str  # legacy name; holds the agent-runtime version label
     app_version: str
     prompt_fingerprint: str
     started_at: str

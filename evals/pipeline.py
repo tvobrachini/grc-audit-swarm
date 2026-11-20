@@ -199,7 +199,7 @@ def _qa_for_attempt(spec: Any, attempt: int) -> QA_PushbackSchema:
 
 
 def collect_evidence() -> dict[str, dict[str, str]]:
-    """Run every evidence tool once (the real CrewAI tools, against whatever
+    """Run every evidence tool once (the real agent tools, against whatever
     AWS the tools are wired to); return tool name -> {vault_id, output}."""
     from swarm.tools import aws_tools
 

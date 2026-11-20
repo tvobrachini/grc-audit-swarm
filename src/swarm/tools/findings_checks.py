@@ -1,5 +1,5 @@
 """Read-only parsing of third-party security-tool findings, shared by the
-CrewAI tools (``swarm.tools.findings_tools``) and the optional upload API
+agent tools (``swarm.tools.findings_tools``) and the optional upload API
 route (``api.routers.imports``).
 
 Two sources are supported:
@@ -12,7 +12,7 @@ Two sources are supported:
 * **AWS Security Hub** findings in AWS Security Finding Format (ASFF), as
   returned by ``securityhub:GetFindings``.
 
-Nothing here writes anywhere, calls the evidence vault, or imports CrewAI —
+Nothing here writes anywhere, calls the evidence vault, or imports an agent framework —
 see ``swarm.tools.aws_checks`` for the same separation on the AWS side.
 
 **Honesty, by construction, not just in the docs:** a finding here records
