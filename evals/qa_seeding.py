@@ -20,13 +20,13 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import evals  # noqa: F401  (puts src/ on sys.path)
 from evals.aws_sim import simulated_account
 from evals.pipeline import _env, collect_evidence, expand_racm
-
 from swarm.audit_flow import racm_test_plan
 
 THEME = "IAM and S3 baseline (QA seeding engagement)"
@@ -178,7 +178,7 @@ def _append_unknown(papers: dict[str, Any], v: dict[str, str]) -> None:
 
 # id -> (defect description, control the defect is planted on, mutation).
 # Good seeds have mutation None.
-SEEDS: dict[str, tuple[str, Optional[str], Any]] = {
+SEEDS: dict[str, tuple[str, str | None, Any]] = {
     "good-reference": ("Correct working papers (reference).", None, None),
     "good-alternative-framing": (
         "Correct papers; MFA gap framed as ToD Effective / ToE Exceptions noted.",
@@ -310,7 +310,6 @@ def replay_reviewer(decisions: dict[str, Any]) -> Reviewer:
 def real_reviewer() -> Reviewer:  # pragma: no cover - needs an LLM provider
     """The Fieldwork QA agent on the configured QA model."""
     from swarm.crews._compat import Agent, Crew, Process, Task
-
     from swarm.crews.fieldwork_crew import FieldworkCrew
     from swarm.llm_factory import get_qa_llm
     from swarm.schema import QA_PushbackSchema

@@ -1,17 +1,19 @@
+import base64
+import datetime
 import hashlib
 import hmac
 import json
 import logging
-import re
-import uuid
 import os
-import datetime
-import base64
+import re
 import tempfile
+import uuid
+from collections.abc import Iterable
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +114,7 @@ def _derive_hmac_key(key_b64: str, label: bytes = _HMAC_KEY_LABEL) -> bytes:
     return hmac.new(raw_key, label, hashlib.sha256).digest()
 
 
-def derive_labelled_key(label: bytes) -> Optional[bytes]:
+def derive_labelled_key(label: bytes) -> bytes | None:
     """HMAC key for ``label`` derived from VAULT_ENCRYPTION_KEY, or None if unset."""
     key_b64 = os.environ.get("VAULT_ENCRYPTION_KEY")
     if not key_b64:
@@ -154,7 +156,7 @@ def _sanitize_metadata(value: Any) -> Any:
     return value
 
 
-def _digest_input(payload: str, metadata: Optional[dict[str, Any]]) -> str:
+def _digest_input(payload: str, metadata: dict[str, Any] | None) -> str:
     """Text whose hash is the record's integrity digest.
 
     Binds non-sensitive collection metadata (region, operation, caller
@@ -172,7 +174,7 @@ def _digest_input(payload: str, metadata: Optional[dict[str, Any]]) -> str:
     return payload + "\x00" + canonical_metadata
 
 
-def record_session_id(record: dict[str, Any]) -> Optional[str]:
+def record_session_id(record: dict[str, Any]) -> str | None:
     """Session a vault record is bound to, or None for an unbound record.
 
     ``metadata.session_id`` is written by :meth:`register_evidence`; records
@@ -194,7 +196,7 @@ def _write_record_atomically(filepath: str, record: dict[str, Any]) -> None:
     """Write a vault record via a temp file in the same dir + os.replace, so a
     crash never leaves a truncated record behind."""
     dir_path = os.path.dirname(filepath) or "."
-    tmp_path: Optional[str] = None
+    tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
             "w", dir=dir_path, delete=False, suffix=".tmp", encoding="utf-8"
@@ -222,8 +224,8 @@ class EvidenceAssuranceProtocol:
         raw_payload: str,
         source_mcp_operation: str,
         *,
-        metadata: Optional[dict[str, Any]] = None,
-        session_id: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> dict:
         """
         Receives raw payload from an MCP, scrubs AWS account IDs, computes an
@@ -295,7 +297,7 @@ class EvidenceAssuranceProtocol:
 
     @staticmethod
     def verify_exact_quote(
-        vault_id: str, exact_quote_claim: str, *, session_id: Optional[str] = None
+        vault_id: str, exact_quote_claim: str, *, session_id: str | None = None
     ) -> bool:
         """
         Check that a cited quote appears verbatim in a stored evidence record.
@@ -493,7 +495,7 @@ def finding_marked_not_tested(finding: Any) -> bool:
 
 
 def unverified_findings(
-    findings: Iterable[Any], *, session_id: Optional[str] = None
+    findings: Iterable[Any], *, session_id: str | None = None
 ) -> list[str]:
     """Control IDs of findings whose evidence quote is not found in the vault.
 

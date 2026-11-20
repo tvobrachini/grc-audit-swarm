@@ -1,5 +1,7 @@
 from swarm.crews._compat import (
     NativeCrewOutput as CrewOutput,
+)
+from swarm.crews._compat import (
     NativeTaskOutput as TaskOutput,
 )
 

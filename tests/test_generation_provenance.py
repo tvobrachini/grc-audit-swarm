@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from swarm import session_manager
 from swarm.audit_flow import AuditFlow, prompt_fingerprint
 from swarm.evidence import EvidenceAssuranceProtocol
-from swarm.llm_factory import describe_crew_llm, describe_qa_llm, LLMConfigurationError
+from swarm.llm_factory import LLMConfigurationError, describe_crew_llm, describe_qa_llm
 from swarm.state.repository import FlowRepository
 
 # Env vars that could hold a secret; none of them may ever appear as a value
@@ -403,8 +403,9 @@ class TestEvidenceMetadata:
         # Simulate a legacy encrypted record with metadata but a plain
         # sha256 (pre-HMAC), then migrate it.
         monkeypatch.setenv("VAULT_ENCRYPTION_KEY", key)
-        from swarm.evidence import _get_fernet, _digest_input
         import hashlib as _hashlib
+
+        from swarm.evidence import _digest_input, _get_fernet
 
         payload = "legacy encrypted payload"
         metadata = {"tool": "t", "region": "us-east-1"}

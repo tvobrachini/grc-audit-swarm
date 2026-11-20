@@ -21,8 +21,9 @@ import logging
 import os
 import tempfile
 import threading
+from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class _CorruptSessionsFile(Exception):
     pass
 
 
-def _read_file() -> Dict:
+def _read_file() -> dict:
     """Parse the sessions file. Raises FileNotFoundError or _CorruptSessionsFile."""
     try:
         with open(SESSIONS_PATH, "r", encoding="utf-8") as f:
@@ -69,7 +70,7 @@ def _backup_corrupt_file(reason: str) -> None:
     )
 
 
-def _load() -> Dict:
+def _load() -> dict:
     """Read the sessions map.
 
     A file that exists but cannot be parsed is renamed to
@@ -97,7 +98,7 @@ def _load() -> Dict:
             return {}
 
 
-def _save(data: Dict, path: Optional[str] = None) -> None:
+def _save(data: dict, path: str | None = None) -> None:
     """Write a JSON map atomically (temp file in the same dir + os.replace)."""
     path = path or SESSIONS_PATH
     dir_path = os.path.dirname(path) or "."
@@ -123,7 +124,7 @@ def save_session(
     thread_id: str,
     name: str,
     scope_text: str = "",
-    chat_history: Optional[list] = None,
+    chat_history: list | None = None,
     **extra_fields: Any,
 ) -> None:
     """Register/update an audit session by thread_id.
@@ -165,7 +166,7 @@ def update_session(thread_id: str, **fields) -> bool:
         return True
 
 
-def list_sessions() -> Dict:
+def list_sessions() -> dict:
     """Return all saved sessions, newest first."""
     data = _load()
     return dict(
@@ -187,7 +188,7 @@ def delete_session(thread_id: str) -> None:
             _save(anchors, _anchors_path())
 
 
-def get_session(thread_id: str) -> Optional[Dict]:
+def get_session(thread_id: str) -> dict | None:
     return _load().get(thread_id)
 
 
@@ -206,7 +207,7 @@ def _anchors_path() -> str:
     )
 
 
-def _load_anchors() -> Dict:
+def _load_anchors() -> dict:
     try:
         with open(_anchors_path(), "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -218,7 +219,7 @@ def _load_anchors() -> Dict:
     return data if isinstance(data, dict) else {}
 
 
-def get_trail_anchor(thread_id: str) -> Optional[Dict]:
+def get_trail_anchor(thread_id: str) -> dict | None:
     """``{"count", "head_hash", "updated_at"}`` for the session, if anchored."""
     try:
         anchor = _load_anchors().get(thread_id)

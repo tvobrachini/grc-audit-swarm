@@ -3,7 +3,6 @@ Shared Pydantic state models used across agents, workers, and the flow orchestra
 """
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List, Dict
 
 from swarm.schema import (
     FinalReportSchema,
@@ -40,7 +39,7 @@ class GenerationRun(BaseModel):
     # config + skills.
     prompt_fingerprint: str
     started_at: str
-    ended_at: Optional[str] = None
+    ended_at: str | None = None
     # Crew attempts made in this run (auto-retry: 1 or 2 — see
     # AuditFlow._MAX_QA_ATTEMPTS).
     attempts: int = 0
@@ -52,7 +51,7 @@ class GenerationRun(BaseModel):
     qa_family: str = ""
     cross_family_verified: bool = False
     linter_passed: bool = True
-    linter_violations: List[str] = Field(default_factory=list)
+    linter_violations: list[str] = Field(default_factory=list)
     cascade_tier: str = "tier_0_deterministic"
 
 
@@ -66,20 +65,20 @@ class AuditState(BaseModel):
 
     theme: str = ""
     business_context: str = ""
-    frameworks: List[str] = Field(default_factory=list)
+    frameworks: list[str] = Field(default_factory=list)
 
     # Artifact payloads saved after each phase — typed for schema validation on load
-    racm_plan: Optional[RiskControlMatrixSchema] = None
-    working_papers: Optional[WorkingPaperSchema] = None
-    final_report: Optional[FinalReportSchema] = None
+    racm_plan: RiskControlMatrixSchema | None = None
+    working_papers: WorkingPaperSchema | None = None
+    final_report: FinalReportSchema | None = None
 
     # Human review routing and dossier state
     current_human_dossier: str = ""
     status: str = "WAITING_FOR_SCOPE"
-    qa_rejection_reason: Optional[str] = None
+    qa_rejection_reason: str | None = None
 
     # Skill system (used by specialist + worker)
-    active_skill_ids: List[str] = Field(default_factory=list)
+    active_skill_ids: list[str] = Field(default_factory=list)
 
     # Declared identity of the person who prepared (created) the audit. The
     # preparer may not review their own work (swarm.review_policy). Empty for
@@ -89,18 +88,18 @@ class AuditState(BaseModel):
     # Audit trail log (see Standard 12.3, formerly IIA 2340). Append-only and
     # hash-chained: only swarm.trail.append_entry (via AuditFlow._stamp_trail)
     # may add entries; swarm.trail.verify_trail checks the chain.
-    approval_trail: List[Dict[str, str]] = Field(default_factory=list)
+    approval_trail: list[dict[str, str]] = Field(default_factory=list)
 
     # Generation provenance: one entry per attempted phase run (see
     # GenerationRun and DECISIONS.md, ADR-010). Never mutated in place after
     # its owning run finishes; a retry appends a new entry instead.
-    generation_runs: List[GenerationRun] = Field(default_factory=list)
+    generation_runs: list[GenerationRun] = Field(default_factory=list)
 
     # Reviewer decisions (see swarm.review_decisions and DECISIONS.md,
     # ADR-011). Append-only: only AuditFlow.record_decision adds to it, and
     # each addition is also a chained ``review_decision`` trail entry. The AI
     # drafts above never change because of a decision.
-    review_decisions: List[ReviewDecision] = Field(default_factory=list)
+    review_decisions: list[ReviewDecision] = Field(default_factory=list)
 
     # Whether gate approvals on this audit require reviewer decisions
     # (review_policy gate preconditions). Set when the audit is created

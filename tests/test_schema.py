@@ -22,14 +22,14 @@ from swarm.schema import (
     DeficiencyScale,
     DesignConclusion,
     FinalReportSchema,
+    FindingResult,
+    OperatingConclusion,
     OSCAL_SAR_ImportAP,
     OSCAL_SAR_Metadata,
     OSCAL_SAR_Schema,
-    OperatingConclusion,
     Risk,
     RiskControlMatrixSchema,
     SamplingMethod,
-    FindingResult,
     WorkingPaperSchema,
 )
 

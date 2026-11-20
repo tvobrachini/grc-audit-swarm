@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Optional
+from typing import Any
 
 from evals import metrics
 
@@ -24,7 +24,7 @@ METRIC_LABELS = {
 }
 
 
-def fmt(m: Optional[dict[str, Any]]) -> str:
+def fmt(m: dict[str, Any] | None) -> str:
     if not m or m.get("rate") is None:
         return f"n/a ({(m or {}).get('num', 0)}/{(m or {}).get('den', 0)})"
     return f"{m['rate'] * 100:.1f}% ({m['num']}/{m['den']})"

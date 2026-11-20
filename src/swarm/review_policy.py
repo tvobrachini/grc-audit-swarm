@@ -14,7 +14,8 @@ through :func:`sod_violation`.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 # Reviewer actions the preparer of the audit may not perform on their own work.
 PREPARER_EXCLUDED_ACTIONS = frozenset(
@@ -45,19 +46,19 @@ class UnverifiedEvidenceError(ReviewBlockedError):
     """Gate 2 cannot be approved while evidence quotes are unverified."""
 
 
-def normalise_identity(value: Optional[str]) -> str:
+def normalise_identity(value: str | None) -> str:
     """Case- and whitespace-insensitive form of a declared identity."""
     if not isinstance(value, str):
         return ""
     return " ".join(value.split()).casefold()
 
 
-def same_person(a: Optional[str], b: Optional[str]) -> bool:
+def same_person(a: str | None, b: str | None) -> bool:
     na, nb = normalise_identity(a), normalise_identity(b)
     return bool(na) and na == nb
 
 
-def gate_approver(trail: Iterable[Mapping[str, Any]], gate: int) -> Optional[str]:
+def gate_approver(trail: Iterable[Mapping[str, Any]], gate: int) -> str | None:
     """Declared identity of the most recent approval of ``gate``, if any."""
     label = GATE_LABELS[gate]
     approver = None
@@ -70,10 +71,10 @@ def gate_approver(trail: Iterable[Mapping[str, Any]], gate: int) -> Optional[str
 def sod_violation(
     action: str,
     human_id: str,
-    prepared_by: Optional[str],
+    prepared_by: str | None,
     trail: Iterable[Mapping[str, Any]],
-    gate: Optional[int] = None,
-) -> Optional[str]:
+    gate: int | None = None,
+) -> str | None:
     """Return why ``human_id`` may not perform ``action``, or None if allowed.
 
     Rules:
@@ -205,8 +206,8 @@ REVIEWER_CHANGE_RATE_PUBLISHED = False
 
 
 def decision_sod_violation(
-    decision_type: str, human_id: str, prepared_by: Optional[str]
-) -> Optional[str]:
+    decision_type: str, human_id: str, prepared_by: str | None
+) -> str | None:
     """Why ``human_id`` may not record ``decision_type``, or None."""
     if decision_type in PREPARER_EXCLUDED_DECISIONS and same_person(
         human_id, prepared_by
@@ -218,7 +219,7 @@ def decision_sod_violation(
     return None
 
 
-def decision_status_violation(decision_type: str, status: str) -> Optional[str]:
+def decision_status_violation(decision_type: str, status: str) -> str | None:
     """Why a ``decision_type`` decision cannot be recorded at ``status``."""
     allowed = DECISION_RECORDABLE_STATUSES.get(decision_type)
     if allowed is None:
@@ -238,7 +239,7 @@ def conclusion_change_allowed(draft: str, new: str) -> bool:
     return new == CONCLUSION_DOWNGRADE_TARGET and draft in CONCLUSION_DOWNGRADE_FROM
 
 
-def finding_needs_review(result: Optional[str], key_control: Optional[bool]) -> bool:
+def finding_needs_review(result: str | None, key_control: bool | None) -> bool:
     """Whether a finding needs a sign-off or challenge before Gate 2."""
     return (GATE_2_REVIEW_EXCEPTIONS and result == "Exception") or bool(
         GATE_2_REVIEW_KEY_CONTROLS and key_control
@@ -246,7 +247,7 @@ def finding_needs_review(result: Optional[str], key_control: Optional[bool]) -> 
 
 
 def finding_needs_scope_limitation(
-    effective_result: Optional[str], key_control: Optional[bool]
+    effective_result: str | None, key_control: bool | None
 ) -> bool:
     """Whether a finding needs a scope-limitation decision before Gate 3."""
     return bool(

@@ -16,15 +16,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from evals import run as eval_run  # noqa: E402
 from evals.answer_key import (  # noqa: E402
-    Expectation,
     UNREVIEWED_BANNER,
     AnswerKey,
+    Expectation,
     load_answer_key,
     select_scenarios,
 )
 from evals.aws_sim import mfa_less_indexes, simulated_account  # noqa: E402
 from evals.pipeline import collect_evidence, score_record  # noqa: E402
-
 from swarm.audit_flow import deficiency_scale_for_scope  # noqa: E402
 
 REPLAY = Path(__file__).resolve().parent.parent / "evals" / "fixtures" / "replay"

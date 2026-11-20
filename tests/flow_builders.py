@@ -11,8 +11,8 @@ from swarm.evidence import EvidenceAssuranceProtocol
 from swarm.schema import (
     AuditFindingSchema,
     Control,
-    ControlTestStep,
     ControlTesting,
+    ControlTestStep,
     FinalReportSchema,
     Population,
     QA_PushbackSchema,

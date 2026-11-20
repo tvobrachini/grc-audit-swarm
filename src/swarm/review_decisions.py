@@ -27,9 +27,10 @@ Policy (who may decide what, when, and what each gate needs) lives in
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any, Iterable, Literal, Mapping, Optional, Sequence, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -125,34 +126,34 @@ class DecisionConflictError(ReviewBlockedError):
 
 @dataclass(frozen=True)
 class DecisionContext:
-    racm: Optional[RiskControlMatrixSchema]
-    papers: Optional[WorkingPaperSchema]
-    report: Optional[FinalReportSchema]
+    racm: RiskControlMatrixSchema | None
+    papers: WorkingPaperSchema | None
+    report: FinalReportSchema | None
 
     def artifact(self, name: str) -> Any:
         return {"working_papers": self.papers, "final_report": self.report}.get(name)
 
-    def digests(self) -> dict[str, Optional[str]]:
+    def digests(self) -> dict[str, str | None]:
         return {
             name: (artifact_digest(a) if a is not None else None)
             for name in ("working_papers", "final_report")
             for a in [self.artifact(name)]
         }
 
-    def finding(self, control_id: str) -> Optional[AuditFindingSchema]:
+    def finding(self, control_id: str) -> AuditFindingSchema | None:
         for f in self.papers.findings if self.papers else []:
             if f.control_id == control_id:
                 return f
         return None
 
-    def deficiency(self, deficiency_id: str) -> Optional[DeficiencyEvaluationSchema]:
+    def deficiency(self, deficiency_id: str) -> DeficiencyEvaluationSchema | None:
         for e in self.report.deficiency_evaluations if self.report else []:
             if e.deficiency_id == deficiency_id:
                 return e
         return None
 
-    def key_controls(self) -> dict[str, Optional[bool]]:
-        out: dict[str, Optional[bool]] = {}
+    def key_controls(self) -> dict[str, bool | None]:
+        out: dict[str, bool | None] = {}
         for risk in self.racm.risks if self.racm else []:
             for c in risk.controls:
                 out.setdefault(c.control_id, c.key_control)
@@ -216,7 +217,7 @@ def _validation_message(exc: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def _iso_date(value: Optional[str], what: str) -> Optional[str]:
+def _iso_date(value: str | None, what: str) -> str | None:
     if value is None or not value.strip():
         return None
     try:
@@ -228,7 +229,7 @@ def _iso_date(value: Optional[str], what: str) -> Optional[str]:
 
 
 def _effective_conclusions(
-    finding: AuditFindingSchema, review: Optional[ReviewDecision]
+    finding: AuditFindingSchema, review: ReviewDecision | None
 ) -> tuple[str, str, str]:
     """(ToD, ToE, result) after an active challenge's conclusion changes."""
     tod = str(finding.tod_conclusion)
@@ -368,12 +369,12 @@ def build_decision(
     decision_type: str,
     subject_id: str,
     decided_by: str,
-    values: Optional[Mapping[str, Any]] = None,
+    values: Mapping[str, Any] | None = None,
     rationale: str = "",
-    subject_type: Optional[str] = None,
-    supersedes: Optional[str] = None,
+    subject_type: str | None = None,
+    supersedes: str | None = None,
     identity_source: str = policy.DEFAULT_IDENTITY_SOURCE,
-    now: Optional[str] = None,
+    now: str | None = None,
 ) -> ReviewDecision:
     """Validate a decision request against policy and the current drafts.
 
@@ -559,10 +560,10 @@ class DecisionRef(BaseModel):
     decided_at: str
     rationale: str = ""
     values: dict[str, str] = Field(default_factory=dict)
-    supersedes: Optional[str] = None
+    supersedes: str | None = None
 
     @classmethod
-    def of(cls, d: Optional[ReviewDecision]) -> Optional["DecisionRef"]:
+    def of(cls, d: ReviewDecision | None) -> DecisionRef | None:
         if d is None:
             return None
         return cls(
@@ -586,13 +587,13 @@ class FindingConclusions(BaseModel):
 
 class FindingView(BaseModel):
     control_id: str
-    key_control: Optional[bool] = None
+    key_control: bool | None = None
     draft: FindingConclusions
     effective: FindingConclusions
     # signed_off | challenged | not_reviewed
     review_status: str
-    review: Optional[DecisionRef] = None
-    scope_limitation: Optional[DecisionRef] = None
+    review: DecisionRef | None = None
+    scope_limitation: DecisionRef | None = None
     differs_from_draft: bool = False
     review_required_for_gate_2: bool = False
 
@@ -611,11 +612,11 @@ class DeficiencyView(BaseModel):
     effective: Classification
     # "reviewer" once a classify decision is active, else "ai_draft".
     classification_source: str
-    classification_decision: Optional[DecisionRef] = None
+    classification_decision: DecisionRef | None = None
     differs_from_draft: bool = False
-    writeup: Optional[DecisionRef] = None
-    management_response: Optional[DecisionRef] = None
-    remediation_verification: Optional[DecisionRef] = None
+    writeup: DecisionRef | None = None
+    management_response: DecisionRef | None = None
+    remediation_verification: DecisionRef | None = None
 
 
 class ReviewerChangeRate(BaseModel):
@@ -625,7 +626,7 @@ class ReviewerChangeRate(BaseModel):
 
     subjects_decided: int
     subjects_changed: int
-    rate: Optional[float] = None
+    rate: float | None = None
     published: bool = policy.REVIEWER_CHANGE_RATE_PUBLISHED
 
 
@@ -642,19 +643,19 @@ class EffectiveView(BaseModel):
     """The conclusion of record: AI drafts plus active reviewer decisions."""
 
     decisions_required: bool
-    deficiency_scale: Optional[str] = None
+    deficiency_scale: str | None = None
     findings: list[FindingView] = Field(default_factory=list)
     deficiencies: list[DeficiencyView] = Field(default_factory=list)
-    engagement_conclusion: Optional[DecisionRef] = None
+    engagement_conclusion: DecisionRef | None = None
     missing_for_gate: dict[str, list[MissingDecision]] = Field(default_factory=dict)
     reviewer_change_rate: ReviewerChangeRate
     stale_decision_ids: list[str] = Field(default_factory=list)
     superseded_decision_ids: list[str] = Field(default_factory=list)
 
-    def finding(self, control_id: str) -> Optional[FindingView]:
+    def finding(self, control_id: str) -> FindingView | None:
         return next((f for f in self.findings if f.control_id == control_id), None)
 
-    def deficiency(self, deficiency_id: str) -> Optional[DeficiencyView]:
+    def deficiency(self, deficiency_id: str) -> DeficiencyView | None:
         return next(
             (d for d in self.deficiencies if d.deficiency_id == deficiency_id), None
         )
@@ -761,7 +762,7 @@ def _missing(
     ctx: DecisionContext,
     findings: list[FindingView],
     deficiencies: list[DeficiencyView],
-    conclusion: Optional[DecisionRef],
+    conclusion: DecisionRef | None,
 ) -> dict[str, list[MissingDecision]]:
     out: dict[str, list[MissingDecision]] = {}
     if ctx.papers is not None:

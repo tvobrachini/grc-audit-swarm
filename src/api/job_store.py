@@ -5,9 +5,9 @@ Intentionally simple: no persistence, restarts lose in-flight jobs (acceptable l
 
 import asyncio
 import threading
-from typing import Any, Optional
+from typing import Any
 
-_main_loop: Optional[asyncio.AbstractEventLoop] = None
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 
 def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -53,7 +53,7 @@ _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 
-def get_flow(session_id: str) -> Optional[Any]:
+def get_flow(session_id: str) -> Any | None:
     with _flows_lock:
         return _flows.get(session_id)
 
@@ -77,7 +77,7 @@ def remove_flow(session_id: str) -> None:
     discard_session_lock(session_id)
 
 
-def peek_queue(session_id: str) -> Optional[asyncio.Queue]:
+def peek_queue(session_id: str) -> asyncio.Queue | None:
     """Return the session's event queue if one exists, without creating it."""
     with _queues_lock:
         return _event_queues.get(session_id)
@@ -121,11 +121,11 @@ def push_event(session_id: str, event: dict) -> None:
         q.put_nowait(event)
 
 
-def set_job(job_id: str, status: str, error: Optional[str] = None) -> None:
+def set_job(job_id: str, status: str, error: str | None = None) -> None:
     with _jobs_lock:
         _jobs[job_id] = {"status": status, "error": error}
 
 
-def get_job(job_id: str) -> Optional[dict]:
+def get_job(job_id: str) -> dict | None:
     with _jobs_lock:
         return _jobs.get(job_id)

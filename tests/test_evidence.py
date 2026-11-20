@@ -20,7 +20,6 @@ from swarm.evidence import (
     unverified_findings,
 )
 
-
 # ─── Account ID Redaction ─────────────────────────────────────────────────────
 
 
@@ -168,6 +167,7 @@ class TestVerifyExactQuote:
     def test_encrypted_vault_verify_works_with_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+
         from swarm.evidence import _build_fernet
 
         _build_fernet.cache_clear()
@@ -192,6 +192,7 @@ class TestVerifyExactQuote:
     def test_encrypted_vault_verify_fails_without_key(self, tmp_path, monkeypatch):
         import base64
         import os as _os
+
         from swarm.evidence import _build_fernet
 
         _build_fernet.cache_clear()
@@ -373,7 +374,7 @@ class TestEncryptedVaultKeyedDigest:
         result = EvidenceAssuranceProtocol.register_evidence("plain payload", "op")
         record = self._read(tmp_path, result["vault_id"])
         assert "hmac_sha256" not in record
-        assert record["sha256"] == hashlib.sha256("plain payload".encode()).hexdigest()
+        assert record["sha256"] == hashlib.sha256(b"plain payload").hexdigest()
 
 
 class TestMigrateLegacyDigests:

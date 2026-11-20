@@ -1,12 +1,13 @@
+import json
 import os
 import sys
-import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from swarm.schema import RiskControlMatrixSchema, FinalReportSchema
-from swarm.evidence import EvidenceAssuranceProtocol
 from pydantic import ValidationError
+
+from swarm.evidence import EvidenceAssuranceProtocol
+from swarm.schema import FinalReportSchema, RiskControlMatrixSchema
 
 
 def load_mock_data():

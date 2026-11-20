@@ -18,10 +18,11 @@ from flow_builders import (  # type: ignore[import-not-found]
     crew_result,
     make_flow,
     make_papers,
-    make_verified_papers,
     make_racm,
+    make_verified_papers,
     run_phase,
 )
+
 from swarm import session_manager
 from swarm.audit_flow import (
     QA_UNPARSEABLE_REASON,
@@ -35,7 +36,6 @@ from swarm.state.machine import (
     InvalidTransitionError,
 )
 from swarm.state.repository import FlowRepository
-
 
 # ── QA gates fail closed / missing artifact is an error ───────────────
 

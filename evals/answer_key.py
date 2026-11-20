@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import evals  # noqa: F401  (puts src/ on sys.path)
 from swarm.schema import (
+    SCALE_CLASSIFICATIONS,
     DeficiencyClassification,
     DeficiencyScale,
     DesignConclusion,
     FindingResult,
     OperatingConclusion,
-    SCALE_CLASSIFICATIONS,
 )
 
 DEFAULT_ANSWER_KEY = Path(__file__).parent / "scenarios" / "answer_key.v1.yaml"
@@ -50,9 +50,9 @@ class Expectation(BaseModel):
 
     in_scope: bool = False
     expected_result: FindingResult
-    acceptable_tod: Optional[list[DesignConclusion]] = None
-    acceptable_toe: Optional[list[OperatingConclusion]] = None
-    expected_exceptions: Optional[int] = None
+    acceptable_tod: list[DesignConclusion] | None = None
+    acceptable_toe: list[OperatingConclusion] | None = None
+    expected_exceptions: int | None = None
     deficiency_acceptable: list[DeficiencyClassification] = Field(default_factory=list)
     rationale: str = ""
 
@@ -64,10 +64,10 @@ class Area(BaseModel):
     evidence_kind: EvidenceKind
     evidence_sources: list[str] = Field(default_factory=list)
     keywords: list[Keyword]
-    default_expectation: Optional[Expectation] = None
+    default_expectation: Expectation | None = None
 
     @model_validator(mode="after")
-    def _no_tool_means_not_tested(self) -> "Area":
+    def _no_tool_means_not_tested(self) -> Area:
         if self.evidence_kind == "none":
             if (
                 self.default_expectation is None
@@ -98,14 +98,14 @@ class AnswerKey(BaseModel):
 
     version: str
     status: str
-    reviewed_by: Optional[str] = None
-    reviewed_on: Optional[str] = None
+    reviewed_by: str | None = None
+    reviewed_on: str | None = None
     authored_with: str = ""
     areas: dict[str, Area]
     scenarios: list[Scenario]
 
     @model_validator(mode="after")
-    def _consistent(self) -> "AnswerKey":
+    def _consistent(self) -> AnswerKey:
         ids = [s.id for s in self.scenarios]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate scenario id")
@@ -156,7 +156,7 @@ class AnswerKey(BaseModel):
                 return s
         raise KeyError(f"unknown scenario {scenario_id!r}")
 
-    def expectation(self, scenario: Scenario, area: str) -> Optional[Expectation]:
+    def expectation(self, scenario: Scenario, area: str) -> Expectation | None:
         """The scenario's expectation for ``area``, else the area's default
         (no-tool areas are 'Not tested' in every scenario), else None."""
         if area in scenario.areas:

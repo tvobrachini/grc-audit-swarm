@@ -1,7 +1,7 @@
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -10,8 +10,8 @@ if TYPE_CHECKING:
 
 from swarm.schema import FinalReportSchema, RiskControlMatrixSchema, WorkingPaperSchema
 from swarm.session_manager import get_session, save_trail_anchor, update_session
-from swarm.trail import head as trail_head
 from swarm.state.machine import AuditStatus
+from swarm.trail import head as trail_head
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class FlowRepository:
                     )
         return saved
 
-    def load(self, session_id: str) -> Optional[LoadResult]:
+    def load(self, session_id: str) -> LoadResult | None:
         from swarm.audit_flow import AuditFlow
 
         meta = get_session(session_id)

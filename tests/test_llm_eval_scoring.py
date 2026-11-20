@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter
 import sys
+from collections import Counter
 
 import pytest
 
@@ -25,7 +25,6 @@ from evals.qa_seeding import (  # noqa: E402
     seed_papers,
 )
 from evals.report import fmt  # noqa: E402
-
 from swarm.schema import WorkingPaperSchema  # noqa: E402
 
 KEY = load_answer_key()

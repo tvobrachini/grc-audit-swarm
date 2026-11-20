@@ -12,7 +12,12 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from flow_builders import make_papers, make_racm, make_report  # type: ignore[import-not-found]
+from flow_builders import (  # type: ignore[import-not-found]
+    make_papers,
+    make_racm,
+    make_report,
+)
+
 from api.exports import (
     RACM_HEADERS,
     WORKING_PAPER_HEADERS,

@@ -1,7 +1,7 @@
 import logging
 import os
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 

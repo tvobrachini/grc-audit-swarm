@@ -11,12 +11,12 @@ Flags:
     --skip-aws      Inject mock working papers instead of running real Fieldwork crew
 """
 
-import sys
-import os
-import logging
 import argparse
+import logging
+import os
+import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # ── env bootstrap ──────────────────────────────────────────────────────────────
 from dotenv import load_dotenv
@@ -119,7 +119,7 @@ def run_phase1(flow) -> bool:
     print(f"  Theme:   {flow.state.theme}")
     print(f"  Context: {flow.state.business_context}")
     print(f"  Frameworks: {flow.state.frameworks}\n")
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     try:
         flow.generate_planning()
     except Exception:
@@ -127,7 +127,7 @@ def run_phase1(flow) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 1: {status}  ({elapsed:.1f}s)")
 
@@ -157,7 +157,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
             "  [--skip-aws] Injecting mock working papers, skipping real AWS tools.\n"
         )
         from swarm.evidence import EvidenceAssuranceProtocol
-        from swarm.schema import WorkingPaperSchema, AuditFindingSchema
+        from swarm.schema import AuditFindingSchema, WorkingPaperSchema
 
         # Register the mock evidence so the Gate 2 quote verification passes.
         mock_vault_id = EvidenceAssuranceProtocol.register_evidence(
@@ -186,7 +186,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
         print("  ✅ Mock working papers injected.")
         return True
 
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     flow.begin_phase_2(MONITOR_IN_CHARGE)
     try:
         flow.generate_fieldwork()
@@ -195,7 +195,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 2: {status}  ({elapsed:.1f}s)")
 
@@ -239,7 +239,7 @@ def run_phase2(flow, skip_aws: bool) -> bool:
 
 def run_phase3(flow) -> bool:
     section("PHASE 3 — REPORTING CREW")
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     flow.begin_phase_3(MONITOR_IN_CHARGE)
     try:
         flow.generate_reporting()
@@ -248,7 +248,7 @@ def run_phase3(flow) -> bool:
         traceback.print_exc()
         return False
 
-    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    elapsed = (datetime.now(UTC) - t0).total_seconds()
     status = flow.state.status
     print(f"\n  Status after Phase 3: {status}  ({elapsed:.1f}s)")
 
