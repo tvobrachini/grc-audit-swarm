@@ -1,7 +1,7 @@
 # Case Study: Keeping Audit Discipline in an Agent Workflow
 
 **Role:** Personal project by Tiago Brachini (IT audit, ITGC/SOX, cloud security)
-**Stack:** Python, CrewAI, boto3, FastAPI, React, pytest
+**Stack:** Python, boto3, FastAPI, React, pytest (zero-framework agent runtime, see DECISIONS.md ADR-013)
 **Status:** Working prototype. Not benchmarked. Not used on a real engagement.
 
 ---
@@ -30,7 +30,7 @@ This project asks a narrow question: if agents draft the work, can the workflow 
 | Reviewer pushback | Each crew ends with a QA reviewer agent. A rejection, or a QA answer that cannot be parsed, fails the phase closed. The crew is re-run once with the reason as feedback. After that a person decides: retry, or accept the draft with a written justification and then approve the gate as usual. | `_run_crew_with_qa` in `audit_flow.py` |
 | Test design vs effectiveness | The RACM schema requires test-of-design, test-of-effectiveness and substantive steps for every control. The Planning QA prompt rejects inquiry-only effectiveness tests and missing substantive steps. | `src/swarm/schema.py`, `src/swarm/config/planning_tasks.yaml` |
 | Evidence integrity (inspired by PCAOB AS 1215 and IIA Standard 14.6, formerly 2330) | Evidence is redacted, stored with a SHA-256 digest (or a keyed HMAC plus Fernet encryption when a key is set), and each quote in the working papers is checked word for word against the stored record | `src/swarm/evidence.py` |
-| Scope and access limits | Evidence tools make read-only AWS calls. The README lists the eight IAM actions they need. AWS account IDs are redacted before storage and before the model sees the output. | `src/swarm/tools/aws_checks.py` (boto3 reads), `aws_tools.py` (CrewAI wrappers) |
+| Scope and access limits | Evidence tools make read-only AWS calls. The README lists the eight IAM actions they need. AWS account IDs are redacted before storage and before the model sees the output. | `src/swarm/tools/aws_checks.py` (boto3 reads), `aws_tools.py` (tool wrappers) |
 | Consistent inputs between phases | Fieldwork receives the approved RACM. Reporting receives the scope, a RACM summary and the approved working papers. A test checks that every prompt placeholder is filled. | `tests/test_prompt_inputs.py` |
 | Conclusion of record (ADR-011) | Reviewer decisions (sign-off/challenge, scope limitation, classification, five-part write-up, management response, engagement conclusion) are appended to the trail and never change the AI draft. Exports render the "effective view": the reviewer's decision where one exists, the AI draft labelled otherwise, and both together when they differ. | `src/swarm/review_decisions.py`, `frontend/src/components/audit/decisions/` |
 | Reviewer identity (ADR-012) | By default a reviewer's name in the trail is declared (typed by the caller behind one shared API token). An operator can opt into per-reviewer tokens (`REVIEWER_TOKENS_FILE`) so the trail instead records an identity the application authenticated, still without SSO or MFA. | `src/api/reviewer_tokens.py` |
@@ -70,7 +70,7 @@ If the approach holds up, a reviewer would spend their time challenging a struct
 1. `src/swarm/audit_flow.py`: phase orchestration, the fail-closed QA retry loop, gate actions and the approval trail.
 2. `src/swarm/state/machine.py`: the allowed state transitions.
 3. `src/swarm/evidence.py`: redaction, digests, optional encryption, quote verification and `migrate-digests`.
-4. `src/swarm/tools/aws_checks.py` (boto3 reads) and `aws_tools.py` (CrewAI wrappers): the read-only AWS evidence tools.
+4. `src/swarm/tools/aws_checks.py` (boto3 reads) and `aws_tools.py` (tool wrappers): the read-only AWS evidence tools.
 5. `src/swarm/crews/` and `src/swarm/config/`: the crews and their agent and task prompts.
 6. `src/api/` and `frontend/src/`: the FastAPI backend and the React UI (gates, retry and override, findings with vault checks, exports, and reviewer decisions in `frontend/src/components/audit/decisions/`).
 7. `src/swarm/review_decisions.py`: reviewer decisions, the effective view and per-reviewer tokens (ADR-011, ADR-012).

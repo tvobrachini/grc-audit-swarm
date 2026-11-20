@@ -80,11 +80,11 @@ flowchart TD
 
 What it does not cover: there is no OSCAL assessment plan, system security plan, catalog or profile — control IDs are the engagement's own RACM IDs, not catalog IDs. Schema validation does not check OSCAL's Metaschema constraints or FedRAMP-specific rules; no external OSCAL validator runs in CI. See DECISIONS.md ADR-005 for the full mapping and limits.
 
-## What I built vs what CrewAI provides
+## What I built vs what the runtime layer provides
 
-| CrewAI provides | This project adds |
+| The runtime layer provides | This project adds |
 |---|---|
-| Agent, task and crew abstractions; sequential execution; LLM calls; parsing task output into Pydantic models | The audit state machine, three human gates, retry and supervisor-override actions, and the approval trail |
+| Agent, task and crew abstractions through a small compatibility layer (`src/swarm/crews/_compat.py`, which replaced CrewAI, see DECISIONS.md ADR-013); sequential execution; LLM calls through an httpx gateway; parsing task output into Pydantic models | The audit state machine, three human gates, retry and supervisor-override actions, and the approval trail |
 | | Fail-closed QA gates and the automatic retry that feeds the rejection reason back, in every phase |
 | | The evidence vault: account-ID redaction, SHA-256 or keyed HMAC digests, optional encryption, exact-quote verification, and a digest migration command |
 | | Read-only AWS evidence tools (boto3) and the matching minimal IAM policy |
@@ -110,7 +110,7 @@ src/
     config/              # YAML agent and task prompts per crew; MCP server config
     tools/
       aws_checks.py      # Read-only boto3 evidence logic (shared with the MCP server)
-      aws_tools.py       # CrewAI tool wrappers: redaction and vault registration
+      aws_tools.py       # Agent tool wrappers: redaction and vault registration
     evidence.py          # Evidence vault, redaction, quote check, migrate-digests
     schema.py            # RACM, working paper, final report, oscal_sar and reviewer-decision models
     oscal_ar.py           # Deterministic converter: gate-reviewed artifacts -> OSCAL 1.2.1 Assessment Results
