@@ -23,7 +23,7 @@ class LLMConfigurationError(RuntimeError):
 
 def get_crew_llm(temperature: float = 0.1, prefer_fast: bool = False) -> LLM:
     """
-    Dynamically instantiate a native CrewAI LLM based on environment variables.
+    Dynamically instantiate an LLM based on environment variables.
     Priority:
       1. Ollama (Local - No limits, zero cost)
       2. NVIDIA NIM (DeepSeek / Llama 3.3 via H100s)

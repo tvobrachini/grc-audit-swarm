@@ -5,7 +5,7 @@ from swarm.crews._compat import (
 
 
 class CrewResultAdapter:
-    """Maps CrewAI task outputs by name instead of array index."""
+    """Maps task outputs by name instead of array index."""
 
     def __init__(self, crew_output: CrewOutput) -> None:
         self._output = crew_output

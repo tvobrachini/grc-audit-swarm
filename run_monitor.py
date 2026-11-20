@@ -1,7 +1,7 @@
 """
 Monitored headless run of the GRC Audit Swarm.
 Exercises AuditFlow phases 1→2→3 directly (no API or UI).
-All CrewAI, LLM, and tool output is captured and printed with phase labels.
+All crew, LLM, and tool output is captured and printed with phase labels.
 
 Usage:
     python run_monitor.py [--phase1-only] [--skip-aws]

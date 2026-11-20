@@ -1,4 +1,4 @@
-"""CrewAI tools for read-only AWS evidence collection.
+"""Agent tools for read-only AWS evidence collection.
 
 The collection logic lives in ``swarm.tools.aws_checks`` (shared with the MCP
 server). These wrappers add what the audit path needs: every raw result is

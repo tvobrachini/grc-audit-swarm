@@ -1,4 +1,4 @@
-"""CrewAI tools that import existing security-tool findings as evidence.
+"""Agent tools that import existing security-tool findings as evidence.
 
 Two read-only sources, both parsed by ``swarm.tools.findings_checks``:
 

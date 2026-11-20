@@ -32,7 +32,7 @@ class GenerationRun(BaseModel):
     qa_model: str
     temperature: float
     qa_temperature: float
-    crewai_version: str
+    crewai_version: str  # legacy name; holds the agent-runtime version label
     app_version: str
     # SHA-256 over the phase's agent/task YAML config and any skill text
     # injected into an agent's backstory (see

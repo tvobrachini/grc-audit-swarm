@@ -1,5 +1,5 @@
 """Tests for the pure Prowler/Security Hub findings parsing logic
-(``swarm.tools.findings_checks``). No CrewAI, no vault, no AWS calls here —
+(``swarm.tools.findings_checks``). No agent framework, no vault, no AWS calls here —
 see ``tests/test_findings_tools.py`` for the tool wrappers and vault
 registration.
 """

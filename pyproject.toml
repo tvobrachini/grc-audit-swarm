@@ -55,6 +55,6 @@ dev = [
 ]
 
 [tool.uv]
-# crewai pins mcp~=1.28.1, which has CVE-2026-59951 (fixed in 1.30.0).
-# Remove this override once crewai allows a fixed mcp release.
+# mcp>=1.30.0 is a direct requirement (CVE-2026-59951 is fixed in 1.30.0).
+# The override keeps any transitive pin from resolving to an older mcp.
 override-dependencies = ["mcp>=1.30.0,<2"]

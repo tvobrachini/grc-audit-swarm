@@ -1,7 +1,7 @@
 """Upload a Prowler JSON findings file and register it as evidence for a session.
 
 This is a convenience on top of the same read-only import the Evidence
-Collector agent can run itself via the 'Import Prowler Findings' CrewAI tool
+Collector agent can run itself via the 'Import Prowler Findings' agent tool
 (``swarm.tools.findings_tools``): someone reviewing a session in the UI can
 also attach a Prowler export directly, without setting an environment
 variable and re-running fieldwork. It only reads and parses the upload and

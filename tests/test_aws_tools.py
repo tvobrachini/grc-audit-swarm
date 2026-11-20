@@ -1,5 +1,5 @@
 """
-Tests for the CrewAI AWS evidence tools (vault registration, redaction, errors).
+Tests for the AWS evidence tools (vault registration, redaction, errors).
 The decision logic itself is tested in test_aws_checks.py and tests/eval/.
 All AWS API calls are stubbed — no real credentials required.
 """

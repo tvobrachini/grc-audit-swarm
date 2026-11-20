@@ -104,7 +104,7 @@ Outputs in `--out`:
 
 The runner refuses to start without a configured provider, when `DEMO_MODE` is on, or when a CI environment is detected (`CI`, `GITHUB_ACTIONS`, ...). It prints a clear message and exits with code 2.
 
-**Cost warning.** A real run is scenarios × runs × 3 phase crews, up to two attempts each, and each crew makes several LLM calls. It adds 12 QA-seed reviews per run. The full default (13 scenarios × 3 runs) is several hundred model calls with long prompts. Start with `--runs 1` on a few scenarios and watch your provider's usage page. Token totals come from CrewAI's usage metrics when the provider reports them. The harness has no price table, so it estimates cost only from the prices you pass.
+**Cost warning.** A real run is scenarios × runs × 3 phase crews, up to two attempts each, and each crew makes several LLM calls. It adds 12 QA-seed reviews per run. The full default (13 scenarios × 3 runs) is several hundred model calls with long prompts. Start with `--runs 1` on a few scenarios and watch your provider's usage page. Token totals come from the runtime's usage metrics when the provider reports them. The harness has no price table, so it estimates cost only from the prices you pass.
 
 ### Offline replay (CI)
 
