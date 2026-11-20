@@ -8,7 +8,7 @@ Standards such as IIA Standards 12.3 (formerly 2340) and 14.6 (formerly 2330) an
 
 ## ADR-001: Sequential crews with a fail-closed QA reviewer in each
 
-**Status:** Accepted
+**Status:** Accepted. The CrewAI runtime named below was later replaced by a zero-framework compatibility layer that keeps the same Agent, Task and Crew contract (see ADR-013).
 
 **Decision.** The workflow runs as three sequential CrewAI crews: Planning (5 agents), Fieldwork (3 agents) and Reporting (4 agents, 5 tasks). Each crew includes a QA reviewer agent built with `get_crew_llm(temperature=0.0)` (`src/swarm/crews/*_crew.py`), while the working agents use `temperature=0.1`. `AuditFlow._run_crew_with_qa` (`src/swarm/audit_flow.py`) handles all three phases the same way:
 
