@@ -2,7 +2,7 @@
 
 ## How it works
 
-The workflow runs three zero-framework phase pipelines in sequence (`src/swarm/crews/_compat.py`, `src/swarm/llm_gateway.py`). Each phase runs deterministic audit-methodology linters (`src/swarm/linters.py`), System-1 `Jev`/`Kev` logprob primitives (`src/swarm/decision_engine.py`), and a cross-AI-family QA reviewer (`src/swarm/model_routing.py`), and each phase ends at a human gate.
+The workflow runs three zero-framework phase pipelines in sequence (`src/swarm/crews/_compat.py`, `src/swarm/llm_gateway.py`). Each phase runs deterministic audit-methodology linters (`src/swarm/linters.py`) and a fail-closed QA reviewer (optionally on a disjoint model family via `src/swarm/model_routing.py`), and each phase ends at a human gate. Optional library primitives for System-1 `Jev`/`Kev` logprob scoring (`src/swarm/decision_engine.py`), deterministic HMAC-SHA256 audit sampling (`src/swarm/sampling.py`), and `PoLL` jury aggregation (`src/swarm/model_routing.py`) are also available for custom workflows.
 
 | Phase | Agents | Output |
 |---|---|---|
@@ -68,7 +68,7 @@ flowchart TD
     g3 -- "approve" --> done(["Completed: report, exports and approval trail"])
 ```
 
-**Evidence.** The Field Evidence Collector calls three boto3-based tools: IAM password policy, IAM users with MFA status, and S3 buckets with a PUBLIC / NOT_PUBLIC / UNKNOWN verdict per bucket (from the bucket policy status, ACL grants, and account- and bucket-level Block Public Access). A read that is denied makes the verdict UNKNOWN rather than a guess. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
+**Evidence.** The Field Evidence Collector calls nine read-only boto3 tools: IAM password policy, IAM users with MFA status, IAM root account summary, IAM access key age/rotation, S3 buckets with a PUBLIC / NOT_PUBLIC / UNKNOWN verdict per bucket (from the bucket policy status, ACL grants, and account- and bucket-level Block Public Access), CloudTrail multi-region trails, KMS CMK rotation, GuardDuty detectors, and IAM Access Analyzer — plus optional Prowler JSON and AWS Security Hub findings imports. A read that is denied makes the verdict UNKNOWN rather than a guess. Each result has AWS account IDs redacted and is written to the evidence vault, and the agent receives a vault ID with the output. The field auditor must quote evidence exactly. The UI checks each quote against the vault and shows "Quote verified in vault" or "Quote not verified".
 
 **Outputs.** The UI shows the RACM, a findings board with per-finding vault checks, the report and the approval trail. Four downloads are available once the artifact exists (`GET /api/sessions/{id}/export/...`): `racm.xlsx`, `working-papers.xlsx`, `report.md` and `oscal.json`. Spreadsheet cells are sanitized against formula injection.
 
@@ -100,42 +100,58 @@ What it does not cover: there is no OSCAL assessment plan, system security plan,
 src/
   swarm/
     audit_flow.py        # AuditFlow: runs the phases, QA retry, gates, approval trail, provenance
+    prompt_inputs.py     # Compact prompt-input builders passed between phases
+    provenance.py        # GenerationRun provenance and prompt fingerprinting
+    trail.py             # Hash-chained approval trail and verification logic
+    linters.py           # Deterministic audit-methodology linters (D1-D4, D6-D14), distortion traps, anti-slop
+    decision_engine.py   # Optional System-1 Jev/Kev logprob primitives and escalation scoring
+    model_routing.py     # Model-family detection, disjoint-family checks, optional PoLL jury helpers
+    llm_gateway.py       # Direct httpx structured LLM gateway with LLMCallReceipt hashes
+    llm_factory.py       # LLM provider selection and QA model configuration
+    sampling.py          # Deterministic HMAC-SHA256 audit sampling and AICPA sample tables
     review_policy.py     # Segregation of duties and reviewer-decision policy
     review_decisions.py  # Reviewer decisions: validation, effective view, gate preconditions
     state/
       machine.py         # AuditStateMachine: allowed transitions, InvalidTransitionError
       schema.py          # AuditState (incl. review_decisions), GenerationRun
       repository.py      # Save / load a flow with its artifacts
-    crews/               # PlanningCrew, FieldworkCrew, ReportingCrew, result adapter
+    crews/               # PlanningCrew, FieldworkCrew, ReportingCrew, zero-framework _compat runtime
     config/              # YAML agent and task prompts per crew; MCP server config
     tools/
-      aws_checks.py      # Read-only boto3 evidence logic (shared with the MCP server)
+      aws_checks.py      # 9 read-only boto3 evidence collectors (shared with the MCP server)
       aws_tools.py       # Agent tool wrappers: redaction and vault registration
+      findings_checks.py # Prowler (OCSF/legacy) and Security Hub (ASFF) parsers and normalizers
+      findings_tools.py  # Agent tool wrappers for Prowler and Security Hub findings
     evidence.py          # Evidence vault, redaction, quote check, migrate-digests
     schema.py            # RACM, working paper, final report, oscal_sar and reviewer-decision models
-    oscal_ar.py           # Deterministic converter: gate-reviewed artifacts -> OSCAL 1.2.1 Assessment Results
+    oscal_ar.py          # Deterministic converter: gate-reviewed artifacts -> OSCAL 1.2.1 Assessment Results
     demo.py              # DEMO_MODE stand-in crews and labeled demo artifacts
-    llm_factory.py       # LLM provider selection
-    mcp_server.py        # Standalone MCP server exposing the AWS reads (no redaction or vault)
+    mcp_server.py        # Standalone MCP server exposing the 9 AWS reads (redacts account IDs; no vault)
     session_manager.py   # Session file persistence
     skill_loader.py      # Loads domain skill prompts from skills/
   api/
     main.py              # FastAPI app, auth, CORS, upload size limit
     auth.py              # Bearer-token check
+    reviewer_tokens.py   # Optional per-reviewer token store, verification, and CLI
+    origin_check.py      # Cross-site write protection (Origin / Sec-Fetch-Site)
     executor.py          # Thread pool for phase jobs
     job_store.py         # Job status tracking
     models.py            # Request/response models
-    routers/             # sessions (gates, retry, override), exports, phases (jobs, stream), evidence, config
+    routers/             # sessions (gates, retry, override), exports, phases (jobs, stream),
+                         # evidence, imports (Prowler upload), config
     exports.py           # xlsx / Markdown / OSCAL JSON builders with formula-injection sanitizing
     scope_document.py    # PDF and text scope-document extraction and wrapping
 frontend/                # React + Vite UI, served by nginx in Compose (nginx.conf.template)
-skills/                  # Domain skill prompts (AWS, ITGC, PCI DSS, HIPAA, GDPR)
+skills/                  # Domain skill prompts (AWS, ITGC, ISO 27001, SOC 2 TSC, PCI DSS, HIPAA, GDPR)
+scripts/
+  demo_walkthrough.py    # Drives a DEMO_MODE audit through the API and writes sample exports
+  seed_aws_emulator.py   # Seeds local Moto AWS emulator (--profile misconfigured | hardened)
 tests/                   # pytest suite; tests/eval/ holds the moto evidence-layer evaluation;
                          # tests/fixtures/oscal/ vendors the NIST OSCAL 1.2.1 schema
-evals/                   # LLM-layer evaluation: scenarios, draft answer key, runner, metrics, replay fixtures
+evals/                   # LLM-layer evaluation: scenarios, signed-off answer key, runner, metrics, replay fixtures
 run_monitor.py           # Headless run of all three crews
 aws_safety_heartbeat.py  # Checks a lab AWS account for running EC2 / RDS resources
-Dockerfile, docker-compose.yml
+Dockerfile, docker-compose.yml, docker-compose.emulator.yml
 ```
 
 ## Testing and CI

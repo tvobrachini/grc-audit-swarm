@@ -21,8 +21,9 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 
 | Variable | Purpose |
 |---|---|
-| `QA_LLM_MODEL` | Optional LiteLLM model string (for example `openai/gpt-4o-mini`) for the QA reviewer agents. Unset: QA uses the same provider as the other agents. |
+| `QA_LLM_MODEL` | Optional `provider/model` string (for example `openai/gpt-4o-mini`) for the QA reviewer agents. Unset: QA uses the same provider as the other agents. |
 | `QA_LLM_API_KEY`, `QA_LLM_BASE_URL` | Optional key and endpoint passed only to the QA model's client. |
+| `ENFORCE_DISJOINT_QA_FAMILY` | `1` (or `true`, `yes`) refuses to configure a QA model from the same model family as the primary drafting model (`src/swarm/llm_factory.py`). |
 
 ## Other settings
 
@@ -42,7 +43,11 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `SESSIONS_PATH` | Session file (default `data/audit_sessions.json`). |
 | `TRAIL_ANCHORS_PATH` | Approval-trail anchor file: entry count and last hash per audit (default `trail_anchors.json` next to the sessions file). It only adds protection if it is stored where someone who can edit the sessions file cannot edit it — see [Security and data handling](SECURITY-AND-DATA.md#approval-trail-hash-chain-and-anchor-file). |
 | `PHASE_EXECUTOR_MAX_WORKERS` | Worker threads for phase jobs in the API (default 10). |
+| `AUDIT_STRICT_LINTER` | Set to `1` to fail closed on deterministic audit-methodology linter errors (`src/swarm/audit_flow.py`), treating them as QA rejections that trigger a retry. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Standard boto3 credentials for live evidence collection. Any boto3 credential source works. `run_monitor.py`'s environment check also accepts `AWS_REGION` in place of `AWS_DEFAULT_REGION`. |
+| `AWS_ENDPOINT_URL` | Optional standard boto3 endpoint override for pointing AWS evidence collectors at a local emulator such as Moto (`docker-compose.emulator.yml`, `http://127.0.0.1:5000`) or LocalStack. |
+| `PROWLER_FINDINGS_PATH` | Optional local file path to a Prowler JSON export (OCSF or legacy) read by the Fieldwork Prowler evidence tool (`src/swarm/tools/findings_tools.py`). |
+| `SECURITYHUB_PRODUCT_NAME`, `SECURITYHUB_GENERATOR_ID`, `SECURITYHUB_COMPLIANCE_STATUS`, `SECURITYHUB_MAX_FINDINGS` | Optional filters and result cap (default `1000`) for the live AWS Security Hub findings tool (`src/swarm/tools/findings_tools.py`). |
 
 Generate a vault key:
 

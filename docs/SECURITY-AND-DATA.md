@@ -21,13 +21,24 @@
       "Effect": "Allow",
       "Action": [
         "iam:GetAccountPasswordPolicy",
+        "iam:GetAccountSummary",
         "iam:ListUsers",
         "iam:ListMFADevices",
+        "iam:ListAccessKeys",
         "s3:ListAllMyBuckets",
         "s3:GetAccountPublicAccessBlock",
         "s3:GetBucketPublicAccessBlock",
         "s3:GetBucketPolicyStatus",
         "s3:GetBucketAcl",
+        "cloudtrail:DescribeTrails",
+        "cloudtrail:GetTrailStatus",
+        "kms:ListKeys",
+        "kms:DescribeKey",
+        "kms:GetKeyRotationStatus",
+        "guardduty:ListDetectors",
+        "guardduty:GetDetector",
+        "access-analyzer:ListAnalyzers",
+        "access-analyzer:ListFindings",
         "securityhub:GetFindings"
       ],
       "Resource": "*"
@@ -36,7 +47,7 @@
 }
 ```
 
-These map to the boto3 calls in `src/swarm/tools/aws_checks.py`: `iam.get_account_password_policy`, `iam.list_users`, `iam.list_mfa_devices`, `s3.list_buckets`, `s3control.get_public_access_block` (account-level Block Public Access), `s3.get_public_access_block`, `s3.get_bucket_policy_status` and `s3.get_bucket_acl`. The S3 check also calls `sts.get_caller_identity` to get the account ID for the S3 Control call, and (since generation provenance was added) to record the caller's ARN as evidence metadata with the account ID redacted; that call needs no IAM permission of its own. If one of the S3 read permissions is missing, the affected buckets are reported as UNKNOWN (with the reason) rather than public or not public. `securityhub:GetFindings` is the one call `src/swarm/tools/findings_tools.py` makes for the "Get Security Hub Findings" tool (paginated, filtered to active/non-suppressed findings) — see [Integrations](INTEGRATIONS.md). The Prowler import reads a local JSON file and calls no AWS API at all. The separate `aws_safety_heartbeat.py` script (a cost check for a lab account) also uses `sts:GetCallerIdentity`, `ec2:DescribeInstances` and `rds:DescribeDBInstances`, which the audit itself does not need.
+These map to the boto3 calls in `src/swarm/tools/aws_checks.py`: `iam.get_account_password_policy`, `iam.get_account_summary`, `iam.list_users`, `iam.list_mfa_devices`, `iam.list_access_keys`, `s3.list_buckets`, `s3control.get_public_access_block` (account-level Block Public Access), `s3.get_public_access_block`, `s3.get_bucket_policy_status`, `s3.get_bucket_acl`, `cloudtrail.describe_trails`, `cloudtrail.get_trail_status`, `kms.list_keys`, `kms.describe_key`, `kms.get_key_rotation_status`, `guardduty.list_detectors`, `guardduty.get_detector`, `accessanalyzer.list_analyzers`, and `accessanalyzer.list_findings`. The S3 check also calls `sts.get_caller_identity` to get the account ID for the S3 Control call, and (since generation provenance was added) to record the caller's ARN as evidence metadata with the account ID redacted; that call needs no IAM permission of its own. If one of the S3 read permissions is missing, the affected buckets are reported as UNKNOWN (with the reason) rather than public or not public. `securityhub:GetFindings` is the one call `src/swarm/tools/findings_tools.py` makes for the "Get Security Hub Findings" tool (paginated, filtered to active/non-suppressed findings) — see [Integrations](INTEGRATIONS.md). The Prowler import reads a local JSON file and calls no AWS API at all. The separate `aws_safety_heartbeat.py` script (a cost check for a lab account) also uses `sts:GetCallerIdentity`, `ec2:DescribeInstances` and `rds:DescribeDBInstances`, which the audit itself does not need.
 
 </details>
 
@@ -76,7 +87,7 @@ Opt-in (`REVIEWER_TOKENS_FILE`, DECISIONS.md ADR-012). The file lists reviewer n
 
 When the file is configured:
 
-- Creating an audit, approving a gate, returning work, retrying a phase, overriding a QA rejection and recording a reviewer decision each need a valid `X-Reviewer-Token` header **in addition to** the shared API token. Reading sessions, exports and evidence, deleting an unapproved draft and uploading imports need only the shared token.
+- Creating an audit, approving a gate, returning work, retrying a phase, overriding a QA rejection, recording a reviewer decision, deleting an unapproved draft, and uploading a Prowler import each need a valid `X-Reviewer-Token` header **in addition to** the shared API token. Reading sessions, exports and evidence needs only the shared token.
 - The token's name replaces the typed name (`prepared_by`, `human_id`, `decided_by`). A typed name may be left out; if it is present and names someone else, the request is refused with 403 rather than silently rewritten.
 - Decisions and every new trail entry carry `identity_source: "authenticated"`. The entry hash covers it, so changing it later is detected as an edit.
 - Refusals: 401 `reviewer_token_missing` or `reviewer_token_invalid`, 403 `reviewer_name_mismatch`, 429 `reviewer_token_rate_limited` (with `Retry-After`) after 10 invalid tokens from one client address in 60 seconds, 503 `reviewer_tokens_unavailable` if the file is missing or malformed. The API never falls back to declared names when the file is set but unusable.

@@ -2,17 +2,17 @@
 
 This file summarises what GRC Audit Swarm does at each tagged version. It is not a line-by-line commit log; the full history is in `git log`.
 
-## Unreleased
+## v0.2.0 — 2026-11-21
 
-**Zero-Framework Audit Factory, 3-Tier Cascade & IIA GIAS 15.2 Remediation Follow-Up (ADR-013)**
-- Replaced `crewai` with a zero-framework runtime (`src/swarm/crews/_compat.py`) and direct `httpx` structured gateway (`src/swarm/llm_gateway.py`) that emits cryptographic `LLMCallReceipt` hashes (`prompt_sha256`, `response_sha256`, latency, token usage).
-- Added 13 deterministic Python audit-methodology linters in `src/swarm/linters.py` (`D1`–`D4`, `D6`–`D14`; rule `D5`, the Gate 2 to Phase 3 effective-view handoff, is enforced in `src/swarm/audit_flow.py`), 5 Distortion Traps (`TRAP-1`–`TRAP-5`), and an anti-slop lexicon linter (`src/swarm/linters.py`), plus surgical single-control retry (`merge_surgical_finding_retries`).
-- Added System-1 `Jev`/`Kev` single-token logprob primitives (`Noul`, `Choice`, `Score`), RouteLLM complexity scoring $C(q)$, FrugalGPT/AutoMix composite trustworthiness $\hat{S}(q, y_1)$, and Economic Value of Escalation ($\Delta\text{IBC}$) (`src/swarm/decision_engine.py`).
-- Added disjoint-family QA routing (`detect_model_family`, `assert_disjoint_family`), Panel of LLM Evaluators (`aggregate_poll_jury`), and blind PCAOB falsification prompts (`src/swarm/model_routing.py`), surfaced in `GenerationRun` provenance and the UI (`AuditTrailPane.tsx`).
-- Expanded deterministic AWS evidence tools (`collect_root_account_summary`, `collect_access_key_age`, CloudTrail, KMS, GuardDuty) and added seeded HMAC-SHA256 audit sampling and AICPA sample tables (`src/swarm/sampling.py`).
+**Zero-Framework Runtime, Direct `httpx` Gateway & IIA GIAS 15.2 Remediation Follow-Up (ADR-013)**
+- Replaced `crewai` and `litellm` with a zero-framework runtime (`src/swarm/crews/_compat.py`) and direct `httpx` structured LLM gateway (`src/swarm/llm_gateway.py`) that emits cryptographic `LLMCallReceipt` hashes (`prompt_sha256`, `response_sha256`, latency, token usage).
+- Added 13 deterministic Python audit-methodology linters in `src/swarm/linters.py` (`D1`–`D4`, `D6`–`D14`; rule `D5`, the Gate 2 to Phase 3 effective-view handoff, is enforced in `src/swarm/audit_flow.py`), 5 Distortion Traps (`TRAP-1`–`TRAP-5`), an anti-slop lexicon linter, fail-closed strict linter enforcement (`AUDIT_STRICT_LINTER=1`), and surgical single-control retry (`merge_surgical_finding_retries`).
+- Added optional library primitives for System-1 `Jev`/`Kev` single-token logprob scoring (`src/swarm/decision_engine.py`), disjoint-family QA routing and Panel of LLM Evaluators (`PoLL`) jury helpers (`src/swarm/model_routing.py`), and seeded HMAC-SHA256 audit sampling with AICPA sample tables (`src/swarm/sampling.py`), with provenance surfaced in `GenerationRun` and the UI (`AuditTrailPane.tsx`).
+- Expanded live read-only AWS evidence collection to 9 collectors (IAM password policy, IAM user MFA, IAM root account summary, IAM access key age/rotation, S3 Block Public Access, CloudTrail multi-region trails, KMS CMK rotation, GuardDuty detectors, and IAM Access Analyzer) in both `aws_tools.py` and `mcp_server.py`, and added local Moto AWS emulator support (`docker-compose.emulator.yml`, `scripts/seed_aws_emulator.py`).
+- Standalone MCP server (`src/swarm/mcp_server.py`) now exposes all 9 AWS collectors and redacts AWS account IDs on both success and error outputs.
+- Structural deepening: extracted `prompt_inputs.py`, `provenance.py`, and `trail.py` from `audit_flow.py`, and refactored `oscal_ar.py` while populating OSCAL 1.2.1 `assessment-results.local-definitions.objectives-and-methods`, adding `evaluate_oscal_drift()`, and adding the `"RACM Crosswalk"` worksheet to `working-papers.xlsx` (`src/api/exports.py`).
 - Added `skills/iso_27001.yaml` (ISO/IEC 27001:2022) and `skills/soc2_tsc.yaml` (AICPA SOC 2 2017/2022 TSC), and updated `skills/aws_cloud_security.yaml` and `skills/pci_dss.yaml` (PCI-DSS v4.0.1).
-- Populated OSCAL 1.2.1 `assessment-results.local-definitions.objectives-and-methods`, added `evaluate_oscal_drift()` (`src/swarm/oscal_ar.py`), and added the `"RACM Crosswalk"` worksheet to `working-papers.xlsx` (`src/api/exports.py`).
-- Added post-issuance `remediation_verification` reviewer decisions per IIA GIAS Standard 15.2 across the backend, exports, and React UI (`DeficiencyDecisions.tsx`).
+- Added post-issuance `remediation_verification` reviewer decisions per IIA GIAS Standard 15.2 across the backend, exports, and React UI (`DeficiencyDecisions.tsx`), alongside frontend polish.
 
 **Evaluation answer key**
 - The LLM-layer answer key (`evals/scenarios/answer_key.v1.yaml`, v1.0.0) is reviewed and signed off by the owner; evaluation reports no longer open with the "not yet reviewed" banner.
@@ -32,7 +32,8 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 **Fixes**
 - Scanner imports: fields are collapsed to one line (newlines, Unicode line separators and control characters removed; titles/ids capped), so a crafted finding title can no longer forge a separate `[PASS]` line in the evidence text; output given to agents is wrapped as untrusted scanner data.
 - Scanner imports: failing and higher-severity checks are listed first and every check keeps its header line with counts, so the 300-line detail cap cannot hide a critical FAIL.
-- API: state-changing requests from another site's page are refused (403 `origin_not_allowed`), closing a cross-site request path through the Compose nginx proxy, which adds the API token to every request.
+- API: state-changing requests from another site's page are refused (403 `origin_not_allowed`, including fail-closed handling in `src/api/origin_check.py`), closing a cross-site request path through the Compose nginx proxy, which adds the API token to every request.
+- AWS tools: fixed IAM access-key age pagination and error handling in `collect_access_key_age`.
 - API: the Prowler upload requires `uploaded_by` (or a reviewer token) and records it in the vault record; deleting a draft requires `deleted_by` (or a reviewer token) and logs it.
 - Compose nginx: the Prowler import route accepts up to 11 MB, matching the API's 10 MB file limit (6 MB elsewhere).
 - Trail anchor: a trail cut back and extended again no longer moves the anchor; the save is refused and verification reports `anchor_mismatch`. Exports verify the trail and return 409 for a trail that shows a change, and state the verification status in the report and OSCAL. Vault records are bound to their audit session, and the Gate 2 quote check refuses another session's record. Vault records are written atomically.
@@ -46,7 +47,7 @@ This file summarises what GRC Audit Swarm does at each tagged version. It is not
 - Crews receive the audit's `session_id` explicitly, so the evidence each run registers is bound to that audit.
 
 **Evaluation**
-- Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields. The key remains an unsigned draft.
+- Two answer-key setups that scored correct answers as wrong were fixed, and the key now rejects unknown fields.
 - The harness's automated reviewer records the decisions each gate now requires; offline replay metrics are unchanged.
 
 **Docs and demo**
