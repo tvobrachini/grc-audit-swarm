@@ -239,3 +239,84 @@ class TestListPublicS3Buckets:
 
         assert "Vault ID:" not in result
         assert "Error listing S3 buckets: NoRegionError" in result
+
+
+# ─── Newly wired collectors in make_aws_tools ────────────────────────────────
+
+
+class TestExtendedAwsTools:
+    def test_make_aws_tools_exposes_all_nine_tools(self):
+        from swarm.tools.aws_tools import make_aws_tools
+
+        tools = make_aws_tools("sess-1")
+        assert len(tools) == 9
+
+    def test_new_tools_register_vault_and_redact_account_ids(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        from swarm.tools import aws_tools
+
+        cases = [
+            (
+                aws_tools.get_root_account_summary,
+                "swarm.tools.aws_tools.collect_root_account_summary",
+                {"Verdict": "PASS", "Arn": f"arn:aws:iam::{ACCOUNT_ID}:root"},
+                "aws.iam.get_account_summary",
+            ),
+            (
+                aws_tools.get_access_key_age,
+                "swarm.tools.aws_tools.collect_access_key_age",
+                {"Verdict": "PASS", "Owner": ACCOUNT_ID},
+                "aws.iam.list_access_keys",
+            ),
+            (
+                aws_tools.get_cloudtrail_trails,
+                "swarm.tools.aws_tools.collect_cloudtrail_trails",
+                {
+                    "Verdict": "PASS",
+                    "TrailARN": f"arn:aws:cloudtrail:us-east-1:{ACCOUNT_ID}:trail/t",
+                },
+                "aws.cloudtrail.describe_trails",
+            ),
+            (
+                aws_tools.get_kms_key_rotation,
+                "swarm.tools.aws_tools.collect_kms_key_rotation",
+                {
+                    "Verdict": "PASS",
+                    "Arn": f"arn:aws:kms:us-east-1:{ACCOUNT_ID}:key/k1",
+                },
+                "aws.kms.get_key_rotation_status",
+            ),
+            (
+                aws_tools.get_guardduty_detectors,
+                "swarm.tools.aws_tools.collect_guardduty_detectors",
+                {"Verdict": "PASS", "Account": ACCOUNT_ID},
+                "aws.guardduty.list_detectors",
+            ),
+            (
+                aws_tools.get_iam_access_analyzer,
+                "swarm.tools.aws_tools.collect_iam_access_analyzer",
+                {
+                    "Verdict": "PASS",
+                    "Arn": f"arn:aws:access-analyzer:us-east-1:{ACCOUNT_ID}:analyzer/a",
+                },
+                "aws.accessanalyzer.list_analyzers",
+            ),
+        ]
+
+        mock_client = MagicMock()
+        mock_client.meta.region_name = "us-east-1"
+
+        for tool_obj, collector_path, payload, expected_source in cases:
+            with (
+                patch("swarm.tools.aws_tools._boto_client", return_value=mock_client),
+                patch(collector_path, return_value=payload),
+            ):
+                result = tool_obj.run("")
+            vault_id, raw = _split(result)
+            assert ACCOUNT_ID not in result
+            assert "[REDACTED]" in raw
+            record = json.loads((tmp_path / f"{vault_id}.json").read_text())
+            assert record["mcp_source"] == expected_source
+            assert ACCOUNT_ID not in json.dumps(record)

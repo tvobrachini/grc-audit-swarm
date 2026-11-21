@@ -12,7 +12,13 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from swarm.mcp_server import (  # noqa: E402
+    get_access_key_age,
+    get_cloudtrail_trails,
+    get_guardduty_detectors,
+    get_iam_access_analyzer,
     get_iam_password_policy,
+    get_kms_key_rotation,
+    get_root_account_summary,
     list_iam_users_with_mfa,
     list_public_s3_buckets,
 )
@@ -142,3 +148,72 @@ class TestListPublicS3Buckets:
             result = list_public_s3_buckets()
 
         assert result == "Error listing S3 buckets: AccessDenied"
+
+
+# ─── Redaction & new MCP tools ───────────────────────────────────────────────
+
+
+class TestMcpRedactionAndNewTools:
+    def test_existing_tools_redact_account_ids(self):
+        account_id = "123456789012"
+        mock_client = MagicMock()
+        mock_client.get_account_password_policy.return_value = {
+            "PasswordPolicy": {"AccountId": account_id, "MinimumPasswordLength": 14}
+        }
+        with patch("boto3.client", return_value=mock_client):
+            out = get_iam_password_policy()
+        assert account_id not in out
+        assert "[REDACTED]" in out
+
+    def test_new_mcp_tools_wire_collectors_and_redact_account_ids(self):
+        account_id = "123456789012"
+        cases = [
+            (
+                get_root_account_summary,
+                "swarm.mcp_server.collect_root_account_summary",
+                {"Verdict": "PASS", "Arn": f"arn:aws:iam::{account_id}:root"},
+            ),
+            (
+                get_access_key_age,
+                "swarm.mcp_server.collect_access_key_age",
+                {"Verdict": "PASS", "Owner": account_id},
+            ),
+            (
+                get_cloudtrail_trails,
+                "swarm.mcp_server.collect_cloudtrail_trails",
+                {
+                    "Verdict": "PASS",
+                    "TrailARN": f"arn:aws:cloudtrail:us-east-1:{account_id}:trail/t",
+                },
+            ),
+            (
+                get_kms_key_rotation,
+                "swarm.mcp_server.collect_kms_key_rotation",
+                {
+                    "Verdict": "PASS",
+                    "Arn": f"arn:aws:kms:us-east-1:{account_id}:key/k1",
+                },
+            ),
+            (
+                get_guardduty_detectors,
+                "swarm.mcp_server.collect_guardduty_detectors",
+                {"Verdict": "PASS", "Account": account_id},
+            ),
+            (
+                get_iam_access_analyzer,
+                "swarm.mcp_server.collect_iam_access_analyzer",
+                {
+                    "Verdict": "PASS",
+                    "Arn": f"arn:aws:access-analyzer:us-east-1:{account_id}:analyzer/a",
+                },
+            ),
+        ]
+        for fn, collector_path, payload in cases:
+            with (
+                patch("boto3.client", return_value=MagicMock()),
+                patch(collector_path, return_value=payload),
+            ):
+                out = fn()
+            assert account_id not in out
+            assert "[REDACTED]" in out
+            assert json.loads(out)["Verdict"] == "PASS"
