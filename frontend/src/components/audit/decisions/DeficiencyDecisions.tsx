@@ -121,46 +121,50 @@ export function DeficiencyDecisions({ session, deficiencyId }: Props) {
         )}
       </div>
 
-      <ReviewerFields />
+      {(atGate3 || isCompleted) && (
+        <>
+          <ReviewerFields />
 
-      <div className="flex flex-wrap gap-2">
-        {atGate3 && (
-          <>
+          <div className="flex flex-wrap gap-2">
+            {atGate3 && (
+              <>
+                <button
+                  onClick={() => setDialog("classify")}
+                  disabled={!canSubmitName || record.isPending}
+                  className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
+                >
+                  Classify
+                </button>
+                <button
+                  onClick={() => setDialog("writeup")}
+                  disabled={!canSubmitName || record.isPending}
+                  className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
+                >
+                  {view.writeup ? "Edit write-up" : "Write-up"}
+                </button>
+              </>
+            )}
             <button
-              onClick={() => setDialog("classify")}
+              onClick={() => setDialog("management_response")}
               disabled={!canSubmitName || record.isPending}
               className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
             >
-              Classify
+              {view.management_response
+                ? "Edit management response"
+                : "Management response"}
             </button>
-            <button
-              onClick={() => setDialog("writeup")}
-              disabled={!canSubmitName || record.isPending}
-              className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
-            >
-              {view.writeup ? "Edit write-up" : "Write-up"}
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => setDialog("management_response")}
-          disabled={!canSubmitName || record.isPending}
-          className="rounded-lg border border-violet-700/40 px-3 py-1.5 text-xs text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
-        >
-          {view.management_response
-            ? "Edit management response"
-            : "Management response"}
-        </button>
-        {isCompleted && (
-          <button
-            onClick={() => setDialog("remediation_verification")}
-            disabled={!canSubmitName || record.isPending}
-            className="rounded-lg border border-emerald-700/40 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-50"
-          >
-            {remediation ? "Update remediation" : "Verify remediation"}
-          </button>
-        )}
-      </div>
+            {isCompleted && (
+              <button
+                onClick={() => setDialog("remediation_verification")}
+                disabled={!canSubmitName || record.isPending}
+                className="rounded-lg border border-emerald-700/40 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-50"
+              >
+                {remediation ? "Update remediation" : "Verify remediation"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       {record.isError && (
         <p role="alert" className="text-[11px] text-red-400">
@@ -589,7 +593,7 @@ function RemediationVerificationForm({
   const existing = view.remediation_verification?.values ?? {};
   const [status, setStatus] = useState(existing.status ?? "remediated");
   const [verifiedOn, setVerifiedOn] = useState(
-    existing.verified_on ?? "2026-10-25",
+    () => existing.verified_on ?? new Date().toISOString().slice(0, 10),
   );
   const [evidenceVaultId, setEvidenceVaultId] = useState(
     existing.evidence_vault_id ?? "",

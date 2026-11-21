@@ -328,12 +328,14 @@ async function request<T>(
   init?: RequestInit,
   extraHeaders: Record<string, string> = {}
 ): Promise<T> {
+  const { headers: initHeaders, ...restInit } = init ?? {};
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...authHeaders(),
     ...extraHeaders,
+    ...(initHeaders as Record<string, string> | undefined),
   };
-  const res = await fetch(`${API_URL}${path}`, { headers, ...init });
+  const res = await fetch(`${API_URL}${path}`, { ...restInit, headers });
   await raiseForStatus(res);
   return res.json() as Promise<T>;
 }

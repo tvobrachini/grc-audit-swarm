@@ -105,6 +105,8 @@ function ControlCard({ control }: { control: Control }) {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] overflow-hidden">
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-[var(--color-bg-elevated)]"
       >
@@ -250,6 +252,8 @@ function RiskRow({ risk }: { risk: Risk }) {
   return (
     <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-hidden">
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[var(--color-bg-elevated)]/80"
       >
@@ -361,7 +365,7 @@ export function RACMTree({ session }: Props) {
         )}
       </div>
 
-      <ApprovalGate session={session} />
+      <ApprovalGate key={session.status} session={session} />
     </div>
   );
 }

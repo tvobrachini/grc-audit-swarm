@@ -118,4 +118,70 @@ describe("FindingsBoard", () => {
     const stat = screen.getByText("ToE not tested").parentElement!;
     expect(stat).toHaveTextContent("2");
   });
+
+  it("displays effective conclusions in badge and summary counters when challenged", () => {
+    const finding = {
+      control_id: "CTRL-010",
+      vault_id_reference: "vault-10",
+      exact_quote_from_evidence: "quote",
+      tod_conclusion: "Effective",
+      toe_conclusion: "Effective",
+      result: "No exception",
+      preliminary_deficiency: false,
+      test_conclusion: "Draft said effective.",
+    };
+    const session = makeSession({
+      status: "WAITING_HUMAN_GATE_2",
+      phase: 2,
+      working_papers: { theme: "IAM review", findings: [finding] },
+      effective: {
+        decisions_required: true,
+        deficiency_scale: null,
+        findings: [
+          {
+            control_id: "CTRL-010",
+            key_control: true,
+            draft: {
+              tod_conclusion: "Effective",
+              toe_conclusion: "Effective",
+              result: "No exception",
+              preliminary_deficiency: false,
+            },
+            effective: {
+              tod_conclusion: "Effective",
+              toe_conclusion: "Not tested",
+              result: "Not tested",
+              preliminary_deficiency: false,
+            },
+            review_status: "challenged",
+            review: null,
+            scope_limitation: null,
+            differs_from_draft: true,
+            review_required_for_gate_2: true,
+          },
+        ],
+        deficiencies: [],
+        engagement_conclusion: null,
+        missing_for_gate: {},
+        reviewer_change_rate: {
+          subjects_decided: 1,
+          subjects_changed: 1,
+          rate: 1,
+          published: false,
+        },
+        stale_decision_ids: [],
+        superseded_decision_ids: [],
+      },
+    });
+
+    renderWithClient(<FindingsBoard session={session} />);
+
+    expect(screen.getByText(/1 × Not tested/)).toBeInTheDocument();
+    expect(screen.queryByText(/1 × No exception/)).not.toBeInTheDocument();
+    expect(screen.getByText("ToE not tested").parentElement!).toHaveTextContent("1");
+    expect(screen.getByText("AI draft: No exception")).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /CTRL-010/i });
+    expect(toggle).toHaveAttribute("type", "button");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
 });
