@@ -1,0 +1,25 @@
+# Local AWS emulator overlay (moto_server) for running the full UI + API + LLM
+# audit pipeline against an emulated AWS account with planted misconfigurations.
+#
+# Start the stack with the AWS emulator:
+#   docker compose -f docker-compose.yml -f docker-compose.emulator.yml up --build
+#
+# Seed the emulator (defaults to http://127.0.0.1:5000, --profile misconfigured):
+#   uv run python scripts/seed_aws_emulator.py
+#   uv run python scripts/seed_aws_emulator.py --profile hardened
+
+services:
+  moto:
+    image: motoserver/moto:latest
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+
+  api:
+    depends_on:
+      - moto
+    environment:
+      - AWS_ENDPOINT_URL=http://moto:5000
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=testing
+      - AWS_SECRET_ACCESS_KEY=testing  # pragma: allowlist secret
