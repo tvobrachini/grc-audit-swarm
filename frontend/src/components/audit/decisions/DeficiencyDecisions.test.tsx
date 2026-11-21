@@ -135,4 +135,45 @@ describe("DeficiencyDecisions", () => {
       )
     );
   });
+
+  it("hides write controls on QA-rejected Phase 3 views", () => {
+    renderWithClient(
+      <ReviewerIdentityProvider>
+        <DeficiencyDecisions
+          session={makeSession({
+            status: "QA_REJECTED_PHASE_3",
+            phase: 3,
+            effective: effectiveWith(baseDeficiency()),
+          })}
+          deficiencyId="DEF-01"
+        />
+      </ReviewerIdentityProvider>
+    );
+
+    expect(screen.queryByPlaceholderText("Your name / ID")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /management response/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^classify$/i })).not.toBeInTheDocument();
+  });
+
+  it("defaults remediation verification date to today's ISO date", async () => {
+    const user = userEvent.setup();
+    renderWithClient(
+      <ReviewerIdentityProvider>
+        <DeficiencyDecisions
+          session={makeSession({
+            status: "COMPLETED",
+            phase: 3,
+            effective: effectiveWith(baseDeficiency()),
+          })}
+          deficiencyId="DEF-01"
+        />
+      </ReviewerIdentityProvider>
+    );
+
+    await user.type(screen.getByPlaceholderText("Your name / ID"), "S. Chen");
+    await user.click(screen.getByRole("button", { name: /verify remediation/i }));
+
+    const today = new Date().toISOString().slice(0, 10);
+    expect(screen.getByLabelText(/verified on/i)).toHaveValue(today);
+  });
 });

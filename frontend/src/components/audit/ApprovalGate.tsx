@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, ClipboardList, Loader2, Undo2 } from "lucide-react";
 import { ApiError, api, describeError } from "@/api/client";
-import type { SessionDetail } from "@/api/client";
+import type { MissingDecision, SessionDetail } from "@/api/client";
 import { useReviewerIdentity } from "@/hooks/useReviewerIdentity";
 
 interface Props {
@@ -37,11 +37,14 @@ const GATE_INFO: Record<
 
 /** Approve, or return for rework with required reviewer notes. */
 export function ApprovalGate({ session }: Props) {
+  return <ApprovalGateInner key={`${session.session_id}:${session.status}`} session={session} />;
+}
+
+function ApprovalGateInner({ session }: Props) {
   const qc = useQueryClient();
-  const [humanId, setHumanId] = useState("");
   const [showReturn, setShowReturn] = useState(false);
   const [notes, setNotes] = useState("");
-  const { token, setToken } = useReviewerIdentity();
+  const { name, setName, token, setToken } = useReviewerIdentity();
   const gateInfo = GATE_INFO[session.status];
   const missing = gateInfo ? session.effective?.missing_for_gate[String(gateInfo.gate)] : undefined;
 
@@ -52,7 +55,7 @@ export function ApprovalGate({ session }: Props) {
 
   const approveMutation = useMutation({
     mutationFn: () =>
-      api.sessions.approve(session.session_id, gateInfo.gate, humanId.trim()),
+      api.sessions.approve(session.session_id, gateInfo.gate, name.trim()),
     onSuccess: () => {
       // Immediately update cache so polling can't flip back to gate state
       // (gate 3 completes the audit; gates 1/2 start the next phase).
@@ -70,7 +73,7 @@ export function ApprovalGate({ session }: Props) {
       api.sessions.returnForRework(
         session.session_id,
         gateInfo.gate,
-        humanId.trim(),
+        name.trim(),
         notes.trim()
       ),
     onSuccess: () => {
@@ -120,25 +123,7 @@ export function ApprovalGate({ session }: Props) {
             {missing.length} decision{missing.length === 1 ? "" : "s"} still needed before this
             gate can be approved
           </p>
-          <ul className="space-y-1">
-            {missing.map((m) => (
-              <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
-                <a
-                  href={`#${anchorId(m)}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    document
-                      .getElementById(anchorId(m))
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  }}
-                  className="text-sky-400 underline hover:text-sky-300"
-                >
-                  {subjectLabel(m)}
-                </a>
-                <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
-              </li>
-            ))}
-          </ul>
+          <MissingDecisionsList items={missing} />
         </div>
       )}
 
@@ -149,8 +134,8 @@ export function ApprovalGate({ session }: Props) {
       <div className="mb-2 flex gap-2">
         <input
           type="text"
-          value={humanId}
-          onChange={(e) => setHumanId(e.target.value)}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
           placeholder="Your name / ID"
           className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] outline-none focus:border-amber-500"
         />
@@ -166,7 +151,7 @@ export function ApprovalGate({ session }: Props) {
       <div className="flex gap-2">
         <button
           onClick={() => approveMutation.mutate()}
-          disabled={!humanId.trim()}
+          disabled={!name.trim()}
           className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
         >
           Approve & Proceed
@@ -197,7 +182,7 @@ export function ApprovalGate({ session }: Props) {
           <div className="mt-2 flex gap-2">
             <button
               onClick={() => returnMutation.mutate()}
-              disabled={!humanId.trim() || !notes.trim()}
+              disabled={!name.trim() || !notes.trim()}
               className="rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
             >
               Return for rework
@@ -215,25 +200,7 @@ export function ApprovalGate({ session }: Props) {
       {error && error instanceof ApiError && error.missingDecisions?.length ? (
         <div role="alert" className="mt-2 rounded-lg border border-red-700/40 bg-red-900/10 p-3">
           <p className="text-xs text-red-400">{describeError(error)}</p>
-          <ul className="mt-1.5 space-y-1">
-            {error.missingDecisions.map((m) => (
-              <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
-                <a
-                  href={`#${anchorId(m)}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    document
-                      .getElementById(anchorId(m))
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  }}
-                  className="text-sky-400 underline hover:text-sky-300"
-                >
-                  {subjectLabel(m)}
-                </a>
-                <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
-              </li>
-            ))}
-          </ul>
+          <MissingDecisionsList items={error.missingDecisions} className="mt-1.5" />
         </div>
       ) : (
         error && (
@@ -243,6 +210,36 @@ export function ApprovalGate({ session }: Props) {
         )
       )}
     </div>
+  );
+}
+
+function MissingDecisionsList({
+  items,
+  className,
+}: {
+  items: MissingDecision[];
+  className?: string;
+}) {
+  return (
+    <ul className={className ? `space-y-1 ${className}` : "space-y-1"}>
+      {items.map((m) => (
+        <li key={`${m.subject_type}-${m.subject_id}`} className="text-[11px]">
+          <a
+            href={`#${anchorId(m)}`}
+            onClick={(e) => {
+              e.preventDefault();
+              document
+                .getElementById(anchorId(m))
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }}
+            className="text-sky-400 underline hover:text-sky-300"
+          >
+            {subjectLabel(m)}
+          </a>
+          <span className="text-[var(--color-text-muted)]"> — {m.reason}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

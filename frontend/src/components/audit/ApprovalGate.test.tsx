@@ -1,8 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, api } from "@/api/client";
-import { renderWithClient, makeSession } from "@/test/testUtils";
+import { renderWithClient, makeSession, newTestQueryClient } from "@/test/testUtils";
+import { ReviewerIdentityProvider } from "@/hooks/ReviewerIdentityProvider";
+import { ReviewerFields } from "./decisions/ReviewerFields";
 import { ApprovalGate } from "./ApprovalGate";
 
 vi.mock("@/api/client", async () => {
@@ -170,5 +173,54 @@ describe("ApprovalGate", () => {
       expect(screen.getByRole("link", { name: /finding CTRL-002/i })).toBeInTheDocument()
     );
     expect(screen.getByText(/Key control not reviewed/)).toBeInTheDocument();
+  });
+
+  it("shares reviewer name with ReviewerIdentityProvider", async () => {
+    const user = userEvent.setup();
+    renderWithClient(
+      <ReviewerIdentityProvider>
+        <ReviewerFields />
+        <ApprovalGate session={makeSession({ status: "WAITING_HUMAN_GATE_1" })} />
+      </ReviewerIdentityProvider>
+    );
+
+    const inputs = screen.getAllByPlaceholderText("Your name / ID");
+    expect(inputs).toHaveLength(2);
+    await user.type(inputs[0], "M. Alvarez");
+    expect(inputs[1]).toHaveValue("M. Alvarez");
+    expect(screen.getByRole("button", { name: /approve & proceed/i })).toBeEnabled();
+  });
+
+  it("resets mutation state when transitioning to a new gate", async () => {
+    const user = userEvent.setup();
+    mockedApi.sessions.approve.mockResolvedValue({
+      session_id: "s1",
+      name: "Test audit",
+      status: "RUNNING_PHASE_2",
+      phase: 2,
+      needs_input: false,
+      created_at: "",
+      prepared_by: "J. Rivera, IT Auditor",
+    });
+
+    const client = newTestQueryClient();
+    const { rerender } = renderWithClient(
+      <ApprovalGate session={makeSession({ status: "WAITING_HUMAN_GATE_1" })} />,
+      client
+    );
+    await user.type(screen.getByPlaceholderText("Your name / ID"), "M. Alvarez");
+    await user.click(screen.getByRole("button", { name: /approve & proceed/i }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /approve & proceed/i })).not.toBeInTheDocument()
+    );
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <ApprovalGate session={makeSession({ status: "WAITING_HUMAN_GATE_2" })} />
+      </QueryClientProvider>
+    );
+    expect(screen.getByText(/Gate 2 — Fieldwork Review/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /approve & proceed/i })).toBeInTheDocument();
   });
 });

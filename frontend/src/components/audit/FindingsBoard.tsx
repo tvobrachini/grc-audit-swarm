@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Quote } from "lucide-react";
 import { clsx } from "clsx";
-import { api, type SessionDetail } from "@/api/client";
+import { api, type FindingView, type SessionDetail } from "@/api/client";
 import { ApprovalGate } from "./ApprovalGate";
 import { FindingDecisions } from "./decisions/FindingDecisions";
 
@@ -105,8 +105,23 @@ function Field({ label, value }: { label: string; value?: string | number | null
   );
 }
 
-function FindingCard({ finding, session }: { finding: AuditFinding; session: SessionDetail }) {
-  const result = finding.result ?? "Not tested";
+function FindingCard({
+  finding,
+  effectiveView,
+  session,
+}: {
+  finding: AuditFinding;
+  effectiveView?: FindingView;
+  session: SessionDetail;
+}) {
+  const result = effectiveView?.effective.result ?? finding.result ?? "Not tested";
+  const draftResult = effectiveView?.draft.result ?? finding.result ?? "Not tested";
+  const todConclusion = effectiveView?.effective.tod_conclusion ?? finding.tod_conclusion;
+  const toeConclusion = effectiveView?.effective.toe_conclusion ?? finding.toe_conclusion;
+  const preliminaryDeficiency = effectiveView
+    ? effectiveView.effective.preliminary_deficiency
+    : !!finding.preliminary_deficiency;
+  const differs = effectiveView?.differs_from_draft ?? false;
   const notTested = result === "Not tested";
   const [open, setOpen] = useState(result !== "No exception");
   const cfg = resultConfig(result);
@@ -117,6 +132,8 @@ function FindingCard({ finding, session }: { finding: AuditFinding; session: Ses
       className={clsx("rounded-xl border overflow-hidden", cfg.border, cfg.bg)}
     >
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-3 px-4 py-3 text-left"
       >
@@ -125,7 +142,7 @@ function FindingCard({ finding, session }: { finding: AuditFinding; session: Ses
           {finding.control_id}
         </span>
         <span className="flex-1" />
-        {finding.preliminary_deficiency && (
+        {preliminaryDeficiency && (
           <span className="shrink-0 rounded bg-red-900/30 px-2 py-0.5 text-[10px] font-semibold text-red-400">
             preliminary deficiency
           </span>
@@ -136,6 +153,11 @@ function FindingCard({ finding, session }: { finding: AuditFinding; session: Ses
             className="shrink-0 rounded bg-[var(--color-bg-base)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
           >
             legacy rating: {finding.legacy_severity}
+          </span>
+        )}
+        {differs && draftResult !== result && (
+          <span className="shrink-0 rounded bg-[var(--color-bg-base)] px-2 py-0.5 text-[10px] italic text-[var(--color-text-muted)]">
+            AI draft: {draftResult}
           </span>
         )}
         <span
@@ -157,8 +179,26 @@ function FindingCard({ finding, session }: { finding: AuditFinding; session: Ses
       {open && (
         <div className="border-t border-[var(--color-border)]/50 px-4 py-3 space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Test of Design (ToD)" value={finding.tod_conclusion} />
-            <Field label="Test of Operating Effectiveness (ToE)" value={finding.toe_conclusion} />
+            <Field
+              label="Test of Design (ToD)"
+              value={
+                differs &&
+                effectiveView &&
+                effectiveView.draft.tod_conclusion !== todConclusion
+                  ? `${todConclusion} (AI draft: ${effectiveView.draft.tod_conclusion})`
+                  : todConclusion
+              }
+            />
+            <Field
+              label="Test of Operating Effectiveness (ToE)"
+              value={
+                differs &&
+                effectiveView &&
+                effectiveView.draft.toe_conclusion !== toeConclusion
+                  ? `${toeConclusion} (AI draft: ${effectiveView.draft.toe_conclusion})`
+                  : toeConclusion
+              }
+            />
           </div>
 
           {finding.toe_basis && (
@@ -225,19 +265,31 @@ const RESULT_ORDER = ["Exception", "Not tested", "No exception"];
 export function FindingsBoard({ session }: Props) {
   const papers = session.working_papers as WorkingPapers | null;
   const findings: AuditFinding[] = papers?.findings ?? [];
+  const effectiveByControl = new Map(
+    (session.effective?.findings ?? []).map((fv) => [fv.control_id, fv])
+  );
+
+  const effectiveResult = (f: AuditFinding) =>
+    effectiveByControl.get(f.control_id)?.effective.result ?? f.result ?? "Not tested";
+  const effectiveToe = (f: AuditFinding) =>
+    effectiveByControl.get(f.control_id)?.effective.toe_conclusion ?? f.toe_conclusion;
+  const effectiveDeficiency = (f: AuditFinding) => {
+    const ev = effectiveByControl.get(f.control_id);
+    return ev ? ev.effective.preliminary_deficiency : !!f.preliminary_deficiency;
+  };
 
   const counts = findings.reduce(
     (acc, f) => {
-      const key = f.result ?? "Not tested";
+      const key = effectiveResult(f);
       acc[key] = (acc[key] ?? 0) + 1;
       return acc;
     },
     {} as Record<string, number>
   );
-  const deficiencyCount = findings.filter((f) => f.preliminary_deficiency).length;
+  const deficiencyCount = findings.filter(effectiveDeficiency).length;
   // "No exception" says nothing about operating effectiveness, so the ToE gap
   // is shown on its own and can't hide behind a clean result.
-  const toeNotTested = findings.filter((f) => f.toe_conclusion === "Not tested").length;
+  const toeNotTested = findings.filter((f) => effectiveToe(f) === "Not tested").length;
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -324,14 +376,21 @@ export function FindingsBoard({ session }: Props) {
             .slice()
             .sort(
               (a, b) =>
-                RESULT_ORDER.indexOf(a.result ?? "Not tested") -
-                RESULT_ORDER.indexOf(b.result ?? "Not tested")
+                RESULT_ORDER.indexOf(effectiveResult(a)) -
+                RESULT_ORDER.indexOf(effectiveResult(b))
             )
-            .map((f, i) => <FindingCard key={i} finding={f} session={session} />)
+            .map((f) => (
+              <FindingCard
+                key={f.control_id}
+                finding={f}
+                effectiveView={effectiveByControl.get(f.control_id)}
+                session={session}
+              />
+            ))
         )}
       </div>
 
-      <ApprovalGate session={session} />
+      <ApprovalGate key={session.status} session={session} />
     </div>
   );
 }
