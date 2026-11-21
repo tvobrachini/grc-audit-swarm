@@ -19,8 +19,14 @@ from swarm.crews._compat import tool
 from swarm.evidence import EvidenceAssuranceProtocol, _redact_account_ids
 from swarm.evidence import app_version as _app_version
 from swarm.tools.aws_checks import (
+    collect_access_key_age,
+    collect_cloudtrail_trails,
+    collect_guardduty_detectors,
+    collect_iam_access_analyzer,
     collect_iam_users_mfa,
+    collect_kms_key_rotation,
     collect_password_policy,
+    collect_root_account_summary,
     collect_s3_public_access,
     describe_error,
 )
@@ -78,7 +84,7 @@ def _register_and_format(
     return f"Vault ID: {vault_record['vault_id']}\nRaw Output: {_redact_account_ids(raw_output)}"
 
 
-def make_aws_tools(session_id: str):
+def make_aws_tools(session_id: str | None):
     @tool("Get IAM Password Policy")
     def get_iam_password_policy(context: str = "") -> str:
         """Fetches the AWS IAM account password policy. Essential for NIST SP 800-53 IA-5(1) password authenticator compliance. If no policy is set, returns a finding saying so."""
@@ -157,7 +163,155 @@ def make_aws_tools(session_id: str):
             raw_output, source, metadata=metadata, session_id=session_id
         )
 
-    return [get_iam_password_policy, list_iam_users_with_mfa, list_public_s3_buckets]
+    @tool("Get AWS Root Account Summary")
+    def get_root_account_summary(context: str = "") -> str:
+        """Checks AWS root account MFA status and active root access keys via iam:GetAccountSummary. Essential for CIS 1.4/1.5 and NIST SP 800-53 IA-2(1)."""
+        region = None
+        try:
+            client = _boto_client("iam")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_root_account_summary(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error fetching root account summary: {describe_error(e)}"
+
+        source = "aws.iam.get_account_summary"
+        metadata = _collection_metadata(
+            "get_root_account_summary",
+            "iam:GetAccountSummary",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("Get IAM Access Key Age")
+    def get_access_key_age(context: str = "") -> str:
+        """Lists IAM user access keys and evaluates key age against the 90-day rotation threshold. Essential for CIS 1.14 and NIST SP 800-53 IA-5(1)/AC-2."""
+        region = None
+        try:
+            client = _boto_client("iam")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_access_key_age(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error checking IAM access key age: {describe_error(e)}"
+
+        source = "aws.iam.list_access_keys"
+        metadata = _collection_metadata(
+            "get_access_key_age",
+            "iam:ListUsers, iam:ListAccessKeys",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("Get CloudTrail Trails")
+    def get_cloudtrail_trails(context: str = "") -> str:
+        """Checks CloudTrail trails for multi-region logging and log file validation. Essential for CIS 3.1/3.2 and NIST SP 800-53 AU-2/AU-9/AU-12."""
+        region = None
+        try:
+            client = _boto_client("cloudtrail")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_cloudtrail_trails(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error checking CloudTrail trails: {describe_error(e)}"
+
+        source = "aws.cloudtrail.describe_trails"
+        metadata = _collection_metadata(
+            "get_cloudtrail_trails",
+            "cloudtrail:DescribeTrails, cloudtrail:GetTrailStatus",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("Get KMS Key Rotation")
+    def get_kms_key_rotation(context: str = "") -> str:
+        """Checks enabled customer-managed symmetric KMS keys for automatic annual key rotation. Essential for CIS 3.6 and NIST SP 800-53 SC-12."""
+        region = None
+        try:
+            client = _boto_client("kms")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_kms_key_rotation(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error checking KMS key rotation: {describe_error(e)}"
+
+        source = "aws.kms.get_key_rotation_status"
+        metadata = _collection_metadata(
+            "get_kms_key_rotation",
+            "kms:ListKeys, kms:DescribeKey, kms:GetKeyRotationStatus",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("Get GuardDuty Detectors")
+    def get_guardduty_detectors(context: str = "") -> str:
+        """Checks AWS GuardDuty detectors to confirm active threat detection is enabled. Essential for NIST SP 800-53 SI-4."""
+        region = None
+        try:
+            client = _boto_client("guardduty")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_guardduty_detectors(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error checking GuardDuty detectors: {describe_error(e)}"
+
+        source = "aws.guardduty.list_detectors"
+        metadata = _collection_metadata(
+            "get_guardduty_detectors",
+            "guardduty:ListDetectors, guardduty:GetDetector",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    @tool("Get IAM Access Analyzer")
+    def get_iam_access_analyzer(context: str = "") -> str:
+        """Checks IAM Access Analyzer status and active external-access findings count. Essential for CIS 1.20 and NIST SP 800-53 AC-2/AC-6."""
+        region = None
+        try:
+            client = _boto_client("accessanalyzer")
+            region = _region_of(client)
+            raw_output = json.dumps(
+                collect_iam_access_analyzer(client), indent=2, default=str
+            )
+        except (ClientError, BotoCoreError) as e:
+            return f"Error checking IAM Access Analyzer: {describe_error(e)}"
+
+        source = "aws.accessanalyzer.list_analyzers"
+        metadata = _collection_metadata(
+            "get_iam_access_analyzer",
+            "access-analyzer:ListAnalyzers, access-analyzer:ListFindings",
+            region=region,
+        )
+        return _register_and_format(
+            raw_output, source, metadata=metadata, session_id=session_id
+        )
+
+    return [
+        get_iam_password_policy,
+        list_iam_users_with_mfa,
+        list_public_s3_buckets,
+        get_root_account_summary,
+        get_access_key_age,
+        get_cloudtrail_trails,
+        get_kms_key_rotation,
+        get_guardduty_detectors,
+        get_iam_access_analyzer,
+    ]
 
 
 # Session-less instances for the tests and the evaluation harness (evals/),
@@ -167,3 +321,9 @@ _test_tools = make_aws_tools(None)
 get_iam_password_policy = _test_tools[0]
 list_iam_users_with_mfa = _test_tools[1]
 list_public_s3_buckets = _test_tools[2]
+get_root_account_summary = _test_tools[3]
+get_access_key_age = _test_tools[4]
+get_cloudtrail_trails = _test_tools[5]
+get_kms_key_rotation = _test_tools[6]
+get_guardduty_detectors = _test_tools[7]
+get_iam_access_analyzer = _test_tools[8]

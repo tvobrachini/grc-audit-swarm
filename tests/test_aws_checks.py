@@ -8,6 +8,7 @@ branches moto does not implement faithfully (see tests/eval/):
 GetBucketPolicyStatus, AccessDenied on individual reads, and IAM pagination.
 """
 
+import datetime
 import os
 import sys
 
@@ -20,7 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from swarm.tools.aws_checks import (  # noqa: E402
     NO_PASSWORD_POLICY_FINDING,
     check_bucket_public_access,
+    collect_access_key_age,
+    collect_cloudtrail_trails,
+    collect_guardduty_detectors,
+    collect_iam_access_analyzer,
     collect_iam_users_mfa,
+    collect_kms_key_rotation,
     collect_password_policy,
     collect_s3_public_access,
     describe_error,
@@ -639,3 +645,427 @@ def test_describe_error_redacts_account_ids():
         "Op",
     )
     assert describe_error(err) == "AccessDenied: arn:aws:iam::[REDACTED]:user/x"
+
+
+# ─── Access key age (fail-closed) ────────────────────────────────────────────
+
+
+class TestAccessKeyAge:
+    def _iam_user(self, name: str) -> dict:
+        return {
+            "UserName": name,
+            "UserId": "AIDA" + "X" * 16,
+            "Arn": f"arn:aws:iam::{ACCOUNT_ID}:user/{name}",
+            "Path": "/",
+            "CreateDate": datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC),
+        }
+
+    def test_access_denied_returns_unknown_not_pass(self):
+        iam = _client("iam")
+        with Stubber(iam) as stub:
+            stub.add_response(
+                "list_users",
+                {"Users": [self._iam_user("alice")], "IsTruncated": False},
+                {},
+            )
+            stub.add_client_error(
+                "list_access_keys",
+                service_error_code="AccessDenied",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/auditor denied",
+                expected_params={"UserName": "alice"},
+            )
+            result = collect_access_key_age(iam)
+        assert result["Verdict"] == "UNKNOWN"
+        assert result["Summary"]["unknown_keys"] == 1
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_fresh_active_key_returns_pass(self):
+        iam = _client("iam")
+        now = datetime.datetime(2026, 6, 1, tzinfo=datetime.UTC)
+        with Stubber(iam) as stub:
+            stub.add_response(
+                "list_users",
+                {"Users": [self._iam_user("alice")], "IsTruncated": False},
+                {},
+            )
+            stub.add_response(
+                "list_access_keys",
+                {
+                    "AccessKeyMetadata": [
+                        {
+                            "UserName": "alice",
+                            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+                            "Status": "Active",
+                            "CreateDate": datetime.datetime(
+                                2026, 5, 1, tzinfo=datetime.UTC
+                            ),
+                        }
+                    ]
+                },
+                {"UserName": "alice"},
+            )
+            result = collect_access_key_age(iam, max_age_days=90, reference_time=now)
+        assert result["Verdict"] == "PASS"
+        assert result["Summary"]["unknown_keys"] == 0
+        assert result["Summary"]["exceeding_max_age"] == 0
+
+    def test_expired_wins_over_unknown(self):
+        iam = _client("iam")
+        now = datetime.datetime(2026, 6, 1, tzinfo=datetime.UTC)
+        with Stubber(iam) as stub:
+            stub.add_response(
+                "list_users",
+                {
+                    "Users": [self._iam_user("alice"), self._iam_user("bob")],
+                    "IsTruncated": False,
+                },
+                {},
+            )
+            stub.add_response(
+                "list_access_keys",
+                {
+                    "AccessKeyMetadata": [
+                        {
+                            "UserName": "alice",
+                            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",  # pragma: allowlist secret
+                            "Status": "Active",
+                            "CreateDate": datetime.datetime(
+                                2025, 1, 1, tzinfo=datetime.UTC
+                            ),
+                        }
+                    ]
+                },
+                {"UserName": "alice"},
+            )
+            stub.add_client_error(
+                "list_access_keys",
+                service_error_code="AccessDenied",
+                expected_params={"UserName": "bob"},
+            )
+            result = collect_access_key_age(iam, max_age_days=90, reference_time=now)
+        assert result["Verdict"] == "FAIL"
+        assert result["Summary"]["exceeding_max_age"] == 1
+        assert result["Summary"]["unknown_keys"] == 1
+
+
+# ─── CloudTrail ──────────────────────────────────────────────────────────────
+
+
+class TestCloudTrailTrails:
+    def test_compliant_multi_region_trail_passes_and_redacts_arn(self):
+        ct = _client("cloudtrail")
+        trail_arn = f"arn:aws:cloudtrail:us-east-1:{ACCOUNT_ID}:trail/org-trail"
+        with Stubber(ct) as stub:
+            stub.add_response(
+                "describe_trails",
+                {
+                    "trailList": [
+                        {
+                            "Name": "org-trail",
+                            "TrailARN": trail_arn,
+                            "HomeRegion": "us-east-1",
+                            "IsMultiRegionTrail": True,
+                            "LogFileValidationEnabled": True,
+                        }
+                    ]
+                },
+                {"includeShadowTrails": False},
+            )
+            stub.add_response(
+                "get_trail_status",
+                {"IsLogging": True},
+                {"Name": trail_arn},
+            )
+            result = collect_cloudtrail_trails(ct)
+            stub.assert_no_pending_responses()
+        assert result["Verdict"] == "PASS"
+        assert result["Summary"]["compliant_trails"] == 1
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_no_trails_or_non_compliant_fails(self):
+        ct = _client("cloudtrail")
+        with Stubber(ct) as stub:
+            stub.add_response(
+                "describe_trails", {"trailList": []}, {"includeShadowTrails": False}
+            )
+            result = collect_cloudtrail_trails(ct)
+        assert result["Verdict"] == "FAIL"
+        assert result["Summary"]["total_trails"] == 0
+
+    def test_describe_trails_access_denied_is_unknown(self):
+        ct = _client("cloudtrail")
+        with Stubber(ct) as stub:
+            stub.add_client_error(
+                "describe_trails",
+                service_error_code="AccessDeniedException",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/auditor denied",
+            )
+            result = collect_cloudtrail_trails(ct)
+        assert result["Verdict"] == "UNKNOWN"
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_get_trail_status_access_denied_is_unknown(self):
+        ct = _client("cloudtrail")
+        trail_arn = f"arn:aws:cloudtrail:us-east-1:{ACCOUNT_ID}:trail/org-trail"
+        with Stubber(ct) as stub:
+            stub.add_response(
+                "describe_trails",
+                {
+                    "trailList": [
+                        {
+                            "Name": "org-trail",
+                            "TrailARN": trail_arn,
+                            "IsMultiRegionTrail": True,
+                            "LogFileValidationEnabled": True,
+                        }
+                    ]
+                },
+                {"includeShadowTrails": False},
+            )
+            stub.add_client_error(
+                "get_trail_status",
+                service_error_code="AccessDeniedException",
+                expected_params={"Name": trail_arn},
+            )
+            result = collect_cloudtrail_trails(ct)
+        assert result["Verdict"] == "UNKNOWN"
+        assert result["Summary"]["unknown_status_trails"] == 1
+
+
+# ─── KMS Key Rotation ────────────────────────────────────────────────────────
+
+
+class TestKmsKeyRotation:
+    def test_enabled_customer_symmetric_key_with_rotation_passes(self):
+        kms = _client("kms")
+        key_id = "11111111-2222-3333-4444-555555555555"
+        with Stubber(kms) as stub:
+            stub.add_response(
+                "list_keys",
+                {"Keys": [{"KeyId": key_id}], "Truncated": False},
+                {},
+            )
+            stub.add_response(
+                "describe_key",
+                {
+                    "KeyMetadata": {
+                        "KeyId": key_id,
+                        "Arn": f"arn:aws:kms:us-east-1:{ACCOUNT_ID}:key/{key_id}",
+                        "KeyManager": "CUSTOMER",
+                        "KeyState": "Enabled",
+                        "KeySpec": "SYMMETRIC_DEFAULT",
+                        "Origin": "AWS_KMS",
+                    }
+                },
+                {"KeyId": key_id},
+            )
+            stub.add_response(
+                "get_key_rotation_status",
+                {"KeyRotationEnabled": True},
+                {"KeyId": key_id},
+            )
+            result = collect_kms_key_rotation(kms)
+            stub.assert_no_pending_responses()
+        assert result["Verdict"] == "PASS"
+        assert result["Summary"]["rotation_enabled"] == 1
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_rotation_disabled_fails_and_skips_aws_managed_keys(self):
+        kms = _client("kms")
+        aws_key = "00000000-0000-0000-0000-000000000001"
+        cust_key = "00000000-0000-0000-0000-000000000002"
+        with Stubber(kms) as stub:
+            stub.add_response(
+                "list_keys",
+                {"Keys": [{"KeyId": aws_key}, {"KeyId": cust_key}], "Truncated": False},
+                {},
+            )
+            stub.add_response(
+                "describe_key",
+                {
+                    "KeyMetadata": {
+                        "KeyId": aws_key,
+                        "KeyManager": "AWS",
+                        "KeyState": "Enabled",
+                    }
+                },
+                {"KeyId": aws_key},
+            )
+            stub.add_response(
+                "describe_key",
+                {
+                    "KeyMetadata": {
+                        "KeyId": cust_key,
+                        "Arn": f"arn:aws:kms:us-east-1:{ACCOUNT_ID}:key/{cust_key}",
+                        "KeyManager": "CUSTOMER",
+                        "KeyState": "Enabled",
+                        "KeySpec": "SYMMETRIC_DEFAULT",
+                    }
+                },
+                {"KeyId": cust_key},
+            )
+            stub.add_response(
+                "get_key_rotation_status",
+                {"KeyRotationEnabled": False},
+                {"KeyId": cust_key},
+            )
+            result = collect_kms_key_rotation(kms)
+            stub.assert_no_pending_responses()
+        assert result["Verdict"] == "FAIL"
+        assert result["Summary"]["evaluated_keys"] == 1
+        assert result["Summary"]["rotation_disabled"] == 1
+
+    def test_list_keys_access_denied_is_unknown(self):
+        kms = _client("kms")
+        with Stubber(kms) as stub:
+            stub.add_client_error(
+                "list_keys",
+                service_error_code="AccessDeniedException",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/auditor denied",
+            )
+            result = collect_kms_key_rotation(kms)
+        assert result["Verdict"] == "UNKNOWN"
+        assert ACCOUNT_ID not in repr(result)
+
+
+# ─── GuardDuty ───────────────────────────────────────────────────────────────
+
+
+class TestGuardDutyDetectors:
+    def test_enabled_detector_passes(self):
+        gd = _client("guardduty")
+        with Stubber(gd) as stub:
+            stub.add_response("list_detectors", {"DetectorIds": ["det-1"]}, {})
+            stub.add_response(
+                "get_detector",
+                {
+                    "ServiceRole": f"arn:aws:iam::{ACCOUNT_ID}:role/gd",
+                    "Status": "ENABLED",
+                    "FindingPublishingFrequency": "FIFTEEN_MINUTES",
+                },
+                {"DetectorId": "det-1"},
+            )
+            result = collect_guardduty_detectors(gd)
+            stub.assert_no_pending_responses()
+        assert result["Verdict"] == "PASS"
+        assert result["Summary"]["enabled_detectors"] == 1
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_no_detectors_fails(self):
+        gd = _client("guardduty")
+        with Stubber(gd) as stub:
+            stub.add_response("list_detectors", {"DetectorIds": []}, {})
+            result = collect_guardduty_detectors(gd)
+        assert result["Verdict"] == "FAIL"
+        assert result["Summary"]["total_detectors"] == 0
+
+    def test_list_detectors_access_denied_is_unknown(self):
+        gd = _client("guardduty")
+        with Stubber(gd) as stub:
+            stub.add_client_error(
+                "list_detectors",
+                service_error_code="AccessDeniedException",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/auditor denied",
+            )
+            result = collect_guardduty_detectors(gd)
+        assert result["Verdict"] == "UNKNOWN"
+        assert ACCOUNT_ID not in repr(result)
+
+
+# ─── IAM Access Analyzer ─────────────────────────────────────────────────────
+
+
+class TestIamAccessAnalyzer:
+    def test_active_analyzer_with_zero_findings_passes_and_redacts_arn(self):
+        aa = _client("accessanalyzer")
+        arn = f"arn:aws:access-analyzer:us-east-1:{ACCOUNT_ID}:analyzer/ConsoleAnalyzer"
+        with Stubber(aa) as stub:
+            stub.add_response(
+                "list_analyzers",
+                {
+                    "analyzers": [
+                        {
+                            "arn": arn,
+                            "name": "ConsoleAnalyzer",
+                            "type": "ACCOUNT",
+                            "status": "ACTIVE",
+                            "createdAt": datetime.datetime(
+                                2025, 1, 1, tzinfo=datetime.UTC
+                            ),
+                        }
+                    ]
+                },
+                {},
+            )
+            stub.add_response(
+                "list_findings",
+                {"findings": []},
+                {"analyzerArn": arn, "filter": {"status": {"eq": ["ACTIVE"]}}},
+            )
+            result = collect_iam_access_analyzer(aa)
+            stub.assert_no_pending_responses()
+        assert result["Verdict"] == "PASS"
+        assert result["Summary"]["active_analyzers"] == 1
+        assert result["Summary"]["active_findings"] == 0
+        assert ACCOUNT_ID not in repr(result)
+
+    def test_active_findings_fails(self):
+        aa = _client("accessanalyzer")
+        arn = f"arn:aws:access-analyzer:us-east-1:{ACCOUNT_ID}:analyzer/ConsoleAnalyzer"
+        with Stubber(aa) as stub:
+            stub.add_response(
+                "list_analyzers",
+                {
+                    "analyzers": [
+                        {
+                            "arn": arn,
+                            "name": "ConsoleAnalyzer",
+                            "type": "ACCOUNT",
+                            "status": "ACTIVE",
+                            "createdAt": datetime.datetime(
+                                2025, 1, 1, tzinfo=datetime.UTC
+                            ),
+                        }
+                    ]
+                },
+                {},
+            )
+            stub.add_response(
+                "list_findings",
+                {
+                    "findings": [
+                        {
+                            "id": "finding-1",
+                            "resourceType": "AWS::S3::Bucket",
+                            "createdAt": datetime.datetime(
+                                2025, 1, 2, tzinfo=datetime.UTC
+                            ),
+                            "analyzedAt": datetime.datetime(
+                                2025, 1, 2, tzinfo=datetime.UTC
+                            ),
+                            "updatedAt": datetime.datetime(
+                                2025, 1, 2, tzinfo=datetime.UTC
+                            ),
+                            "status": "ACTIVE",
+                            "resourceOwnerAccount": ACCOUNT_ID,
+                            "condition": {},
+                        }
+                    ]
+                },
+                {"analyzerArn": arn, "filter": {"status": {"eq": ["ACTIVE"]}}},
+            )
+            result = collect_iam_access_analyzer(aa)
+        assert result["Verdict"] == "FAIL"
+        assert result["Summary"]["active_findings"] == 1
+
+    def test_list_analyzers_access_denied_is_unknown(self):
+        aa = _client("accessanalyzer")
+        with Stubber(aa) as stub:
+            stub.add_client_error(
+                "list_analyzers",
+                service_error_code="AccessDeniedException",
+                service_message=f"arn:aws:iam::{ACCOUNT_ID}:user/auditor denied",
+            )
+            result = collect_iam_access_analyzer(aa)
+        assert result["Verdict"] == "UNKNOWN"
+        assert ACCOUNT_ID not in repr(result)

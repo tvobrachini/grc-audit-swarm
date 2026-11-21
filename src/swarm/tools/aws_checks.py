@@ -36,6 +36,7 @@ import json
 import logging
 from typing import Any
 
+import boto3
 from botocore.exceptions import BotoCoreError, ClientError, OperationNotPageableError
 
 from swarm.evidence import _redact_account_ids
@@ -262,6 +263,12 @@ def collect_access_key_age(
 
     active_keys = [k for k in keys_report if k.get("Status") == "Active"]
     expired_keys = [k for k in active_keys if k.get("ExceedsMaxAge") is True]
+    unknown_keys = [
+        k
+        for k in keys_report
+        if k.get("Status") == "Unknown" or k.get("AgeDays") is None
+    ]
+    verdict = "FAIL" if expired_keys else ("UNKNOWN" if unknown_keys else "PASS")
     return {
         "MaxAgeThresholdDays": max_age_days,
         "AccessKeys": keys_report,
@@ -269,8 +276,9 @@ def collect_access_key_age(
             "total_keys": len(keys_report),
             "active_keys": len(active_keys),
             "exceeding_max_age": len(expired_keys),
+            "unknown_keys": len(unknown_keys),
         },
-        "Verdict": "FAIL" if expired_keys else "PASS",
+        "Verdict": verdict,
     }
 
 
@@ -536,4 +544,398 @@ def collect_s3_public_access(s3, s3control, sts) -> dict:
         },
         "Notes": [S3_SCOPE_NOTE],
         "CallerIdentityArn": caller_arn,
+    }
+
+
+# ─── CloudTrail, KMS, GuardDuty & IAM Access Analyzer ────────────────────────
+
+
+def collect_cloudtrail_trails(ct_client: Any = None) -> dict[str, Any]:
+    """Inspect CloudTrail trails for multi-region logging and log file validation.
+
+    Addresses CIS AWS Foundations Benchmark v3.0/v4.0 controls 3.1 / 3.2 and
+    NIST SP 800-53 AU-2 / AU-9 / AU-12. Fails closed with ``Verdict: "UNKNOWN"``
+    when the AWS API cannot be read.
+    """
+    try:
+        client = ct_client if ct_client is not None else boto3.client("cloudtrail")
+        resp = client.describe_trails(includeShadowTrails=False)
+    except (ClientError, BotoCoreError) as exc:
+        err = describe_error(exc)
+        logger.warning("DescribeTrails failed: %s", err)
+        return {
+            "Trails": [],
+            "Summary": {
+                "total_trails": 0,
+                "multi_region_trails": 0,
+                "logging_trails": 0,
+                "validated_trails": 0,
+                "compliant_trails": 0,
+                "unknown_status_trails": 0,
+            },
+            "Verdict": "UNKNOWN",
+            "Reasons": [f"Unable to describe CloudTrail trails: {err}"],
+            "Error": err,
+        }
+
+    trails_report: list[dict[str, Any]] = []
+    for trail in resp.get("trailList", []):
+        name = str(trail.get("Name", ""))
+        raw_arn = str(trail.get("TrailARN", ""))
+        is_multi_region = bool(trail.get("IsMultiRegionTrail", False))
+        log_file_validation = bool(trail.get("LogFileValidationEnabled", False))
+
+        is_logging: bool | None = None
+        status_error: str | None = None
+        try:
+            status_resp = client.get_trail_status(Name=raw_arn or name)
+            is_logging = bool(status_resp.get("IsLogging", False))
+        except (ClientError, BotoCoreError) as exc:
+            status_error = describe_error(exc)
+            logger.warning("GetTrailStatus failed for trail %s: %s", name, status_error)
+
+        entry: dict[str, Any] = {
+            "Name": name,
+            "TrailARN": _redact_account_ids(raw_arn),
+            "HomeRegion": trail.get("HomeRegion"),
+            "IsMultiRegionTrail": is_multi_region,
+            "IsLogging": is_logging,
+            "LogFileValidationEnabled": log_file_validation,
+        }
+        if status_error is not None:
+            entry["StatusError"] = status_error
+        trails_report.append(entry)
+
+    multi_region = [t for t in trails_report if t["IsMultiRegionTrail"]]
+    logging_trails = [t for t in trails_report if t["IsLogging"] is True]
+    validated_trails = [t for t in trails_report if t["LogFileValidationEnabled"]]
+    unknown_status = [t for t in trails_report if t["IsLogging"] is None]
+    compliant = [
+        t
+        for t in trails_report
+        if t["IsMultiRegionTrail"]
+        and t["IsLogging"] is True
+        and t["LogFileValidationEnabled"]
+    ]
+    unknown_candidates = [
+        t
+        for t in trails_report
+        if t["IsMultiRegionTrail"]
+        and t["LogFileValidationEnabled"]
+        and t["IsLogging"] is None
+    ]
+
+    reasons: list[str] = []
+    if compliant:
+        verdict = "PASS"
+    elif unknown_candidates:
+        verdict = "UNKNOWN"
+        reasons.append(
+            "Unable to verify IsLogging status for multi-region validated trail(s)."
+        )
+    else:
+        verdict = "FAIL"
+        if not trails_report:
+            reasons.append("No CloudTrail trails are configured.")
+        else:
+            reasons.append(
+                "No multi-region CloudTrail trail is actively logging with log file validation enabled."
+            )
+
+    return {
+        "Trails": trails_report,
+        "Summary": {
+            "total_trails": len(trails_report),
+            "multi_region_trails": len(multi_region),
+            "logging_trails": len(logging_trails),
+            "validated_trails": len(validated_trails),
+            "compliant_trails": len(compliant),
+            "unknown_status_trails": len(unknown_status),
+        },
+        "Verdict": verdict,
+        "Reasons": reasons,
+    }
+
+
+def collect_kms_key_rotation(kms_client: Any = None) -> dict[str, Any]:
+    """Inspect enabled customer-managed symmetric KMS keys for annual rotation.
+
+    Addresses CIS AWS Foundations Benchmark v3.0/v4.0 control 3.6 and
+    NIST SP 800-53 SC-12. Fails closed with ``Verdict: "UNKNOWN"`` when key
+    listing, description, or rotation status cannot be read.
+    """
+    try:
+        client = kms_client if kms_client is not None else boto3.client("kms")
+        key_ids: list[str] = []
+        for page in client.get_paginator("list_keys").paginate():
+            key_ids.extend(k["KeyId"] for k in page.get("Keys", []) if "KeyId" in k)
+    except (ClientError, BotoCoreError) as exc:
+        err = describe_error(exc)
+        logger.warning("KMS ListKeys failed: %s", err)
+        return {
+            "Keys": [],
+            "Summary": {
+                "evaluated_keys": 0,
+                "rotation_enabled": 0,
+                "rotation_disabled": 0,
+                "unknown": 0,
+            },
+            "Verdict": "UNKNOWN",
+            "Reasons": [f"Unable to list KMS keys: {err}"],
+            "Error": err,
+        }
+
+    keys_report: list[dict[str, Any]] = []
+    for key_id in sorted(key_ids):
+        try:
+            meta = client.describe_key(KeyId=key_id).get("KeyMetadata", {})
+        except (ClientError, BotoCoreError) as exc:
+            err = describe_error(exc)
+            logger.warning("KMS DescribeKey failed for %s: %s", key_id, err)
+            keys_report.append(
+                {
+                    "KeyId": key_id,
+                    "KeyRotationEnabled": None,
+                    "Error": err,
+                }
+            )
+            continue
+
+        key_manager = meta.get("KeyManager")
+        key_state = meta.get("KeyState")
+        key_spec = (
+            meta.get("KeySpec")
+            or meta.get("CustomerMasterKeySpec")
+            or "SYMMETRIC_DEFAULT"
+        )
+        origin = meta.get("Origin") or "AWS_KMS"
+        if (
+            key_manager != "CUSTOMER"
+            or key_state != "Enabled"
+            or key_spec != "SYMMETRIC_DEFAULT"
+            or origin != "AWS_KMS"
+        ):
+            continue
+
+        entry: dict[str, Any] = {
+            "KeyId": key_id,
+            "Arn": _redact_account_ids(str(meta.get("Arn", ""))),
+            "KeyState": key_state,
+            "KeySpec": key_spec,
+        }
+        try:
+            rot = client.get_key_rotation_status(KeyId=key_id)
+            entry["KeyRotationEnabled"] = bool(rot.get("KeyRotationEnabled", False))
+        except (ClientError, BotoCoreError) as exc:
+            err = describe_error(exc)
+            logger.warning("KMS GetKeyRotationStatus failed for %s: %s", key_id, err)
+            entry["KeyRotationEnabled"] = None
+            entry["Error"] = err
+        keys_report.append(entry)
+
+    enabled = [k for k in keys_report if k.get("KeyRotationEnabled") is True]
+    disabled = [k for k in keys_report if k.get("KeyRotationEnabled") is False]
+    unknown = [k for k in keys_report if k.get("KeyRotationEnabled") is None]
+
+    reasons: list[str] = []
+    if disabled:
+        verdict = "FAIL"
+        reasons.append(
+            f"{len(disabled)} enabled customer-managed symmetric KMS key(s) do not have automatic rotation enabled."
+        )
+    elif unknown:
+        verdict = "UNKNOWN"
+        reasons.append(
+            f"Unable to determine rotation status for {len(unknown)} KMS key(s)."
+        )
+    else:
+        verdict = "PASS"
+
+    return {
+        "Keys": keys_report,
+        "Summary": {
+            "evaluated_keys": len(keys_report),
+            "rotation_enabled": len(enabled),
+            "rotation_disabled": len(disabled),
+            "unknown": len(unknown),
+        },
+        "Verdict": verdict,
+        "Reasons": reasons,
+    }
+
+
+def collect_guardduty_detectors(gd_client: Any = None) -> dict[str, Any]:
+    """Inspect GuardDuty detectors and verify at least one detector is ``ENABLED``.
+
+    Addresses NIST SP 800-53 SI-4 (System Monitoring). Fails closed with
+    ``Verdict: "UNKNOWN"`` on AWS API errors.
+    """
+    try:
+        client = gd_client if gd_client is not None else boto3.client("guardduty")
+        detector_ids: list[str] = []
+        for page in client.get_paginator("list_detectors").paginate():
+            detector_ids.extend(page.get("DetectorIds", []))
+    except (ClientError, BotoCoreError) as exc:
+        err = describe_error(exc)
+        logger.warning("GuardDuty ListDetectors failed: %s", err)
+        return {
+            "Detectors": [],
+            "Summary": {
+                "total_detectors": 0,
+                "enabled_detectors": 0,
+                "disabled_detectors": 0,
+                "unknown_detectors": 0,
+            },
+            "Verdict": "UNKNOWN",
+            "Reasons": [f"Unable to list GuardDuty detectors: {err}"],
+            "Error": err,
+        }
+
+    detectors_report: list[dict[str, Any]] = []
+    for detector_id in sorted(detector_ids):
+        try:
+            resp = client.get_detector(DetectorId=detector_id)
+            detectors_report.append(
+                {
+                    "DetectorId": detector_id,
+                    "Status": str(resp.get("Status", "UNKNOWN")),
+                    "FindingPublishingFrequency": resp.get(
+                        "FindingPublishingFrequency"
+                    ),
+                }
+            )
+        except (ClientError, BotoCoreError) as exc:
+            err = describe_error(exc)
+            logger.warning("GuardDuty GetDetector failed for %s: %s", detector_id, err)
+            detectors_report.append(
+                {
+                    "DetectorId": detector_id,
+                    "Status": "UNKNOWN",
+                    "Error": err,
+                }
+            )
+
+    enabled = [d for d in detectors_report if d["Status"] == "ENABLED"]
+    disabled = [d for d in detectors_report if d["Status"] == "DISABLED"]
+    unknown = [
+        d for d in detectors_report if d["Status"] not in ("ENABLED", "DISABLED")
+    ]
+
+    reasons: list[str] = []
+    if enabled:
+        verdict = "PASS"
+    elif unknown:
+        verdict = "UNKNOWN"
+        reasons.append(
+            f"Unable to determine GuardDuty detector status for {len(unknown)} detector(s)."
+        )
+    else:
+        verdict = "FAIL"
+        reasons.append("No enabled GuardDuty detector found in this region.")
+
+    return {
+        "Detectors": detectors_report,
+        "Summary": {
+            "total_detectors": len(detectors_report),
+            "enabled_detectors": len(enabled),
+            "disabled_detectors": len(disabled),
+            "unknown_detectors": len(unknown),
+        },
+        "Verdict": verdict,
+        "Reasons": reasons,
+    }
+
+
+def collect_iam_access_analyzer(aa_client: Any = None) -> dict[str, Any]:
+    """Inspect IAM Access Analyzers and count active external-access findings.
+
+    Addresses CIS AWS Foundations Benchmark v3.0/v4.0 control 1.20 and
+    NIST SP 800-53 AC-2 / AC-6. Fails closed with ``Verdict: "UNKNOWN"`` on
+    AWS API errors.
+    """
+    try:
+        client = aa_client if aa_client is not None else boto3.client("accessanalyzer")
+        analyzers: list[dict[str, Any]] = []
+        for page in client.get_paginator("list_analyzers").paginate():
+            analyzers.extend(page.get("analyzers", []))
+    except (ClientError, BotoCoreError) as exc:
+        err = describe_error(exc)
+        logger.warning("AccessAnalyzer ListAnalyzers failed: %s", err)
+        return {
+            "Analyzers": [],
+            "Summary": {
+                "total_analyzers": 0,
+                "active_analyzers": 0,
+                "active_findings": 0,
+                "unknown_analyzers": 0,
+            },
+            "Verdict": "UNKNOWN",
+            "Reasons": [f"Unable to list IAM Access Analyzers: {err}"],
+            "Error": err,
+        }
+
+    analyzers_report: list[dict[str, Any]] = []
+    total_active_findings = 0
+    unknown_analyzers = 0
+
+    for analyzer in analyzers:
+        raw_arn = str(analyzer.get("arn", ""))
+        status = str(analyzer.get("status", "UNKNOWN"))
+        entry: dict[str, Any] = {
+            "Name": analyzer.get("name", ""),
+            "Arn": _redact_account_ids(raw_arn),
+            "Type": analyzer.get("type", ""),
+            "Status": status,
+        }
+        if status == "ACTIVE":
+            try:
+                active_count = 0
+                for page in client.get_paginator("list_findings").paginate(
+                    analyzerArn=raw_arn,
+                    filter={"status": {"eq": ["ACTIVE"]}},
+                ):
+                    active_count += len(page.get("findings", []))
+                entry["ActiveFindingsCount"] = active_count
+                total_active_findings += active_count
+            except (ClientError, BotoCoreError) as exc:
+                err = describe_error(exc)
+                logger.warning(
+                    "AccessAnalyzer ListFindings failed for %s: %s",
+                    entry["Arn"],
+                    err,
+                )
+                entry["ActiveFindingsCount"] = None
+                entry["FindingsError"] = err
+                unknown_analyzers += 1
+        analyzers_report.append(entry)
+
+    active_analyzers = [a for a in analyzers_report if a["Status"] == "ACTIVE"]
+
+    reasons: list[str] = []
+    if not active_analyzers:
+        verdict = "FAIL"
+        reasons.append("No active IAM Access Analyzer is configured in this region.")
+    elif total_active_findings > 0:
+        verdict = "FAIL"
+        reasons.append(
+            f"IAM Access Analyzer reports {total_active_findings} active external-access finding(s)."
+        )
+    elif unknown_analyzers > 0:
+        verdict = "UNKNOWN"
+        reasons.append(
+            f"Unable to read findings for {unknown_analyzers} active IAM Access Analyzer(s)."
+        )
+    else:
+        verdict = "PASS"
+
+    return {
+        "Analyzers": analyzers_report,
+        "Summary": {
+            "total_analyzers": len(analyzers_report),
+            "active_analyzers": len(active_analyzers),
+            "active_findings": total_active_findings,
+            "unknown_analyzers": unknown_analyzers,
+        },
+        "Verdict": verdict,
+        "Reasons": reasons,
     }
