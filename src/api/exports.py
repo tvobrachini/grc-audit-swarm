@@ -24,7 +24,7 @@ from __future__ import annotations
 import io
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -815,6 +815,7 @@ def report_markdown(
     trail: list[dict[str, str]],
     ctx: ExportContext,
     view: EffectiveView | None = None,
+    trail_verification: Mapping[str, Any] | None = None,
 ) -> str:
     exec_summary_heading = (
         "## Executive Summary (AI-drafted summary)"
@@ -843,6 +844,16 @@ def report_markdown(
         "## Approval Trail",
         "",
     ]
+    if trail_verification is not None:
+        lines += [
+            sanitize_report(
+                _one_line(
+                    f"> Trail verification at export: {trail_verification['status']} "
+                    f"({trail_verification['detail']})"
+                )
+            ),
+            "",
+        ]
     if not trail:
         lines.append("No approvals recorded.")
     lines += [_trail_line(e) for e in trail]
@@ -860,6 +871,7 @@ def oscal_json(
     prepared_by: str = "",
     view: EffectiveView | None = None,
     decisions: Iterable[ReviewDecision] = (),
+    trail_verification: Mapping[str, Any] | None = None,
 ) -> bytes:
     """The session as an OSCAL Assessment Results document (JSON).
 
@@ -887,5 +899,6 @@ def oscal_json(
         verify_quote=lambda vid, quote: EvidenceAssuranceProtocol.verify_exact_quote(
             vid, quote, session_id=ctx.session_id
         ),
+        trail_verification=trail_verification,
     )
     return json.dumps(document, indent=2, ensure_ascii=False).encode("utf-8")

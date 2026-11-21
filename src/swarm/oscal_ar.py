@@ -46,13 +46,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, NamedTuple
+from typing import Any
 
+from swarm.evidence import (
+    EvidenceMeta as EvidenceMeta,
+)
+from swarm.evidence import (
+    vault_metadata as vault_metadata,
+)
 from swarm.review_decisions import DecisionRef, EffectiveView, FindingView
 from swarm.schema import (
     AuditFindingSchema,
@@ -73,9 +79,6 @@ _METHOD_DESIGN = "EXAMINE"
 _METHOD_OPERATING = "TEST"
 
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_VAULT_ID_RE = re.compile(
-    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-)
 _NOT_TOKEN_CHAR = re.compile(r"[^A-Za-z0-9._-]")
 
 _NIST_800_53_FAMILIES = frozenset(
@@ -166,41 +169,6 @@ def _digest(obj: Any) -> str:
         obj = obj.model_dump(mode="json")
     data = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
-
-
-# ── Evidence vault metadata ──────────────────────────────────────────────────
-
-
-class EvidenceMeta(NamedTuple):
-    collected: str | None
-    source: str
-
-
-def vault_metadata(vault_id: str) -> EvidenceMeta | None:
-    """Collection time and source operation of a vault record (read-only).
-
-    Never returns payload or digest: the export cites evidence, it does not
-    carry it.
-    """
-    from swarm.evidence import EvidenceAssuranceProtocol
-
-    if not _VAULT_ID_RE.fullmatch(vault_id or ""):
-        return None
-    base = os.path.realpath(EvidenceAssuranceProtocol._evidence_dir())
-    path = os.path.realpath(os.path.join(base, f"{vault_id}.json"))
-    if os.path.commonpath([base, path]) != base:
-        return None
-    try:
-        with open(path) as f:
-            record = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(record, dict):
-        return None
-    return EvidenceMeta(
-        collected=oscal_datetime(record.get("timestamp")),
-        source=_line(record.get("mcp_source")),
-    )
 
 
 # ── Builder ──────────────────────────────────────────────────────────────────
@@ -298,42 +266,43 @@ def _methods(tod: str, toe: str) -> list[str]:
     return methods or [_METHOD_DESIGN]
 
 
-def build_assessment_results(
-    *,
-    session_id: str,
-    session_name: str,
-    session_status: str,
-    report_state: str,
-    theme: str,
-    report: FinalReportSchema,
-    papers: WorkingPaperSchema,
-    racm: RiskControlMatrixSchema | None,
-    trail: Sequence[Mapping[str, Any]],
-    prepared_by: str = "",
-    markup: Callable[[str], str] = lambda s: s,
-    verify_quote: Callable[[str, str], bool] | None = None,
-    evidence_lookup: Callable[[str], EvidenceMeta | None] = vault_metadata,
-    view: EffectiveView | None = None,
-    decisions: Sequence[Any] = (),
-) -> dict:
-    """Build the OSCAL AR document (a JSON-ready dict).
+@dataclass
+class _OscalBuildContext:
+    """Shared context passed across OSCAL AR section builders."""
 
-    ``markup`` is applied to every Markdown (markup-line / markup-multiline)
-    field; the API passes its image-stripping sanitiser. ``verify_quote``
-    re-checks each cited quote against the vault, as the working-papers
-    export does. ``view`` is the session's effective view (AI drafts plus
-    active reviewer decisions); ``decisions`` are all recorded decisions,
-    folded into the document version.
-    """
-    sid = session_id
-    approved = session_status == "COMPLETED"
-    parties = _Parties(sid)
-    reviewers: list[str] = []
+    sid: str
+    session_name: str
+    session_status: str
+    report_state: str
+    theme: str
+    approved: bool
+    report: FinalReportSchema
+    papers: WorkingPaperSchema
+    racm: RiskControlMatrixSchema | None
+    trail: Sequence[Mapping[str, Any]]
+    prepared_by: str
+    markup: Callable[[str], str]
+    verify_quote: Callable[[str, str], bool] | None
+    evidence_lookup: Callable[[str], EvidenceMeta | None]
+    view: EffectiveView | None
+    decisions: Sequence[Any]
+    trail_verification: Mapping[str, Any] | None
+    parties: _Parties
+    trail_times: list[str | None]
+    known_times: list[str]
+    last_modified: str
+    gate2_time: str | None
+    component_uuid: str
+    platform_uuid: str
+    keys: list[str]
+    obs_uuid: list[str]
+    obs_by_control: dict[str, list[str]]
+    reviewers: list[str] = field(default_factory=list)
 
-    def _decided_props(ref: DecisionRef | None, prefix: str = "") -> list[dict]:
+    def decided_props(self, ref: DecisionRef | None, prefix: str = "") -> list[dict]:
         if ref is None:
             return []
-        reviewers.append(_line(ref.decided_by))
+        self.reviewers.append(_line(ref.decided_by))
         return _props(
             (f"{prefix}decided-by", ref.decided_by),
             (f"{prefix}decided-at", oscal_datetime(ref.decided_at) or ""),
@@ -341,7 +310,7 @@ def build_assessment_results(
             (f"{prefix}decision-id", ref.decision_id),
         )
 
-    def _reviewer_origin(ref: DecisionRef | None) -> list[dict]:
+    def reviewer_origin(self, ref: DecisionRef | None) -> list[dict]:
         if ref is None:
             return []
         return [
@@ -349,48 +318,39 @@ def build_assessment_results(
                 "actors": [
                     {
                         "type": "party",
-                        "actor-uuid": parties.uuid_for(ref.decided_by),
+                        "actor-uuid": self.parties.uuid_for(ref.decided_by),
                         "role-id": "reviewer",
                     }
                 ]
             }
         ]
 
-    # ── Timestamps from recorded facts, never the clock ──────────────────────
-    trail_times = [oscal_datetime(e.get("timestamp")) for e in trail]
-    known_times = [t for t in trail_times if t]
-    sar = report.oscal_sar
-    last_modified = (
-        max(known_times, key=datetime.fromisoformat)
-        if known_times
-        else (oscal_datetime(sar.metadata.last_modified) if sar else None)
-    ) or datetime.now(UTC).isoformat()
-    gate2_time = next(
-        (
-            oscal_datetime(e.get("timestamp"))
-            for e in reversed(trail)
-            if e.get("action") == "gate_approval"
-            and e.get("artifact") == "working_papers"
-        ),
-        None,
-    )
 
-    # ── Evidence → back-matter resources ─────────────────────────────────────
+def _build_resources(
+    ctx: _OscalBuildContext,
+) -> tuple[
+    list[dict],
+    str,
+    dict[str, str],
+    dict[str, EvidenceMeta | None],
+    list[str],
+]:
+    """Build back-matter resources for cited vault records and the RACM stand-in."""
     resources: list[dict] = []
     evidence_uuid: dict[str, str] = {}
     evidence_meta: dict[str, EvidenceMeta | None] = {}
-    for f in papers.findings:
+    for f in ctx.papers.findings:
         vid = _line(f.vault_id_reference)
         if not vid or vid in evidence_uuid:
             continue
-        meta = evidence_lookup(vid)
+        meta = ctx.evidence_lookup(vid)
         evidence_meta[vid] = meta
-        evidence_uuid[vid] = element_uuid(sid, "evidence", vid)
+        evidence_uuid[vid] = element_uuid(ctx.sid, "evidence", vid)
         resources.append(
             {
                 "uuid": evidence_uuid[vid],
-                "title": markup(f"Evidence vault record {vid}"),
-                "description": markup(
+                "title": ctx.markup(f"Evidence vault record {vid}"),
+                "description": ctx.markup(
                     "Raw evidence collected by a read-only tool and stored in "
                     "the project's evidence vault with an integrity digest. "
                     "The payload is not embedded in this document."
@@ -411,14 +371,15 @@ def build_assessment_results(
         key=datetime.fromisoformat,
     )
 
-    # ── The RACM stands in for the (absent) assessment plan ──────────────────
-    plan_uuid = element_uuid(sid, "assessment-plan-reference")
+    plan_uuid = element_uuid(ctx.sid, "assessment-plan-reference")
     resources.insert(
         0,
         {
             "uuid": plan_uuid,
-            "title": markup(f"Audit programme (RACM) — {_line(theme) or 'audit'}"),
-            "description": markup(
+            "title": ctx.markup(
+                f"Audit programme (RACM) — {_line(ctx.theme) or 'audit'}"
+            ),
+            "description": ctx.markup(
                 "No OSCAL assessment plan exists for this engagement. The Risk "
                 "and Control Matrix approved at Gate 1 (Planning) served as "
                 "the plan: the risks, the controls in scope and their test "
@@ -426,23 +387,24 @@ def build_assessment_results(
             ),
             "rlinks": [
                 {
-                    "href": f"/api/sessions/{sid}/export/racm.xlsx",
+                    "href": f"/api/sessions/{ctx.sid}/export/racm.xlsx",
                     "media-type": _XLSX,
                 }
             ],
         },
     )
+    return resources, plan_uuid, evidence_uuid, evidence_meta, evidence_times
 
-    # ── Subject and platform (result-local definitions) ──────────────────────
-    component_uuid = element_uuid(sid, "component", "audit-scope")
-    platform_uuid = element_uuid(sid, "assessment-platform")
-    local_definitions = {
+
+def _build_local_definitions(ctx: _OscalBuildContext) -> dict[str, Any]:
+    """Build result-local component and assessment-platform definitions."""
+    return {
         "components": [
             {
-                "uuid": component_uuid,
+                "uuid": ctx.component_uuid,
                 "type": "this-system",
-                "title": markup(f"Audit scope: {_line(theme) or 'not stated'}"),
-                "description": markup(
+                "title": ctx.markup(f"Audit scope: {_line(ctx.theme) or 'not stated'}"),
+                "description": ctx.markup(
                     "The environment in scope for this audit, as described by "
                     "the audit theme. No system security plan was imported, so "
                     "the component is described only by the audit scope."
@@ -456,8 +418,8 @@ def build_assessment_results(
         "assessment-assets": {
             "assessment-platforms": [
                 {
-                    "uuid": platform_uuid,
-                    "title": markup("GRC Audit Swarm"),
+                    "uuid": ctx.platform_uuid,
+                    "title": ctx.markup("GRC Audit Swarm"),
                     "props": _props(
                         (
                             "platform-description",
@@ -469,9 +431,13 @@ def build_assessment_results(
             ]
         },
     }
+
+
+def _build_objectives(ctx: _OscalBuildContext) -> list[dict[str, Any]]:
+    """Build document-level objectives-and-methods from RACM controls."""
     objectives_and_methods: list[dict[str, Any]] = []
     seen_obj_ctrl: set[str] = set()
-    for r in racm.risks if racm else []:
+    for r in ctx.racm.risks if ctx.racm else []:
         for c in getattr(r, "controls", []) or []:
             cid = getattr(c, "control_id", "")
             if not cid or cid in seen_obj_ctrl:
@@ -482,13 +448,13 @@ def build_assessment_results(
             )
             obj_entry: dict[str, Any] = {
                 "control-id": token(cid),
-                "description": markup(desc_text),
+                "description": ctx.markup(desc_text),
                 "parts": [
                     {
                         "id": token(cid),
                         "name": "assessment-objective",
                         "ns": PROJECT_NS,
-                        "prose": markup(desc_text),
+                        "prose": ctx.markup(desc_text),
                     }
                 ],
             }
@@ -506,24 +472,23 @@ def build_assessment_results(
             if obj_props:
                 obj_entry["props"] = obj_props
             objectives_and_methods.append(obj_entry)
+    return objectives_and_methods
 
-    # ── Deficiency evaluations → risks ───────────────────────────────────────
-    keys = _occurrence_keys(papers.findings)
-    obs_uuid = [element_uuid(sid, "observation", k) for k in keys]
-    obs_by_control: dict[str, list[str]] = {}
-    for f, u in zip(papers.findings, obs_uuid):
-        obs_by_control.setdefault(f.control_id, []).append(u)
 
-    scale = _line(report.deficiency_scale)
+def _build_risks(
+    ctx: _OscalBuildContext,
+) -> tuple[list[dict], dict[str, list[str]]]:
+    """Build OSCAL risks from deficiency evaluations and reviewer decisions."""
+    scale = _line(ctx.report.deficiency_scale)
     risks: list[dict] = []
     risks_by_control: dict[str, list[str]] = {}
     seen_def: dict[str, int] = {}
-    for e in report.deficiency_evaluations:
+    for e in ctx.report.deficiency_evaluations:
         seen_def[e.deficiency_id] = seen_def.get(e.deficiency_id, 0) + 1
         risk_uuid = element_uuid(
-            sid, "risk", f"{e.deficiency_id}#{seen_def[e.deficiency_id]}"
+            ctx.sid, "risk", f"{e.deficiency_id}#{seen_def[e.deficiency_id]}"
         )
-        dv = view.deficiency(e.deficiency_id) if view else None
+        dv = ctx.view.deficiency(e.deficiency_id) if ctx.view else None
         ref = dv.classification_decision if dv else None
         classification = dv.effective.classification if dv else str(e.classification)
         likelihood = dv.effective.likelihood if dv else str(e.likelihood)
@@ -534,7 +499,7 @@ def build_assessment_results(
                 f"({ref.identity_source} identity) on {_line(ref.decided_at)[:10]}"
                 + (
                     "; the report was approved at Gate 3."
-                    if approved
+                    if ctx.approved
                     else "; the report awaits Gate 3 approval."
                 )
             )
@@ -555,7 +520,7 @@ def build_assessment_results(
             state = (
                 "Proposed by the reporting crew and approved with the report at "
                 "Gate 3; see the assessment log."
-                if approved
+                if ctx.approved
                 else "DRAFT proposed by the reporting crew for the auditor's "
                 "judgement at Gate 3 — not a final conclusion."
             )
@@ -564,8 +529,10 @@ def build_assessment_results(
                 f"Proposed classification: {e.classification} ({scale or 'scale not stated'}). "
                 f"Rationale: {e.rationale}"
             )
-            classification_state = "approved-with-report" if approved else "draft"
-        related_obs = [u for c in e.related_findings for u in obs_by_control.get(c, [])]
+            classification_state = "approved-with-report" if ctx.approved else "draft"
+        related_obs = [
+            u for c in e.related_findings for u in ctx.obs_by_control.get(c, [])
+        ]
         for c in e.related_findings:
             risks_by_control.setdefault(c, []).append(risk_uuid)
         description = (
@@ -605,12 +572,12 @@ def build_assessment_results(
                     ("ai-draft-likelihood", e.likelihood),
                     ("ai-draft-magnitude", e.magnitude),
                 )
-            props += _decided_props(ref)
+            props += ctx.decided_props(ref)
         risk: dict[str, Any] = {
             "uuid": risk_uuid,
-            "title": markup(_line(e.title) or e.deficiency_id),
-            "description": markup(description),
-            "statement": markup(statement),
+            "title": ctx.markup(_line(e.title) or e.deficiency_id),
+            "description": ctx.markup(description),
+            "statement": ctx.markup(statement),
             "props": props
             + [_prop("racm-risk-id", r) for r in e.related_risks if _line(r)],
             "status": "open",
@@ -619,10 +586,13 @@ def build_assessment_results(
             risk["origins"] = [
                 {
                     "actors": [
-                        {"type": "assessment-platform", "actor-uuid": platform_uuid}
+                        {
+                            "type": "assessment-platform",
+                            "actor-uuid": ctx.platform_uuid,
+                        }
                     ]
                 }
-            ] + _reviewer_origin(ref)
+            ] + ctx.reviewer_origin(ref)
         response = dv.management_response if dv else None
         if response is not None and response.values.get("target_date"):
             deadline = oscal_datetime(response.values["target_date"])
@@ -632,12 +602,12 @@ def build_assessment_results(
         if writeup is not None and _line(writeup.values.get("recommendation")):
             remediations.append(
                 {
-                    "uuid": element_uuid(sid, "recommendation", risk_uuid),
+                    "uuid": element_uuid(ctx.sid, "recommendation", risk_uuid),
                     "lifecycle": "recommendation",
-                    "title": markup("Auditor's recommendation"),
-                    "description": markup(writeup.values["recommendation"]),
-                    "props": _decided_props(writeup),
-                    "origins": _reviewer_origin(writeup),
+                    "title": ctx.markup("Auditor's recommendation"),
+                    "description": ctx.markup(writeup.values["recommendation"]),
+                    "props": ctx.decided_props(writeup),
+                    "origins": ctx.reviewer_origin(writeup),
                 }
             )
         if response is not None:
@@ -657,10 +627,10 @@ def build_assessment_results(
             if v.get("agreement") in ("agree", "partial"):
                 remediations.append(
                     {
-                        "uuid": element_uuid(sid, "action-plan", risk_uuid),
+                        "uuid": element_uuid(ctx.sid, "action-plan", risk_uuid),
                         "lifecycle": "planned",
-                        "title": markup("Management action plan"),
-                        "description": markup(v.get("text", "")),
+                        "title": ctx.markup("Management action plan"),
+                        "description": ctx.markup(v.get("text", "")),
                         "props": response_props,
                     }
                 )
@@ -678,12 +648,12 @@ def build_assessment_results(
             risk["risk-log"] = {
                 "entries": [
                     {
-                        "uuid": element_uuid(sid, "management-response", risk_uuid),
-                        "title": markup("Management response"),
-                        "description": markup(log_description),
+                        "uuid": element_uuid(ctx.sid, "management-response", risk_uuid),
+                        "title": ctx.markup("Management response"),
+                        "description": ctx.markup(log_description),
                         "start": oscal_datetime(v.get("received_on"))
                         or oscal_datetime(response.decided_at)
-                        or last_modified,
+                        or ctx.last_modified,
                         "props": response_props,
                     }
                 ]
@@ -698,7 +668,7 @@ def build_assessment_results(
                 ("remediation-status", rem_status),
                 ("remediation-verified-on", rv.get("verified_on")),
                 ("remediation-evidence-vault-id", rv.get("evidence_vault_id")),
-            ) + _decided_props(remediation_ver, "remediation-")
+            ) + ctx.decided_props(remediation_ver, "remediation-")
             risk["props"] += rem_props
             rem_desc = (
                 f"Remediation verification ({rem_status}), verified on "
@@ -708,12 +678,14 @@ def build_assessment_results(
             )
             risk.setdefault("risk-log", {}).setdefault("entries", []).append(
                 {
-                    "uuid": element_uuid(sid, "remediation-verification", risk_uuid),
-                    "title": markup("Remediation verification"),
-                    "description": markup(rem_desc),
+                    "uuid": element_uuid(
+                        ctx.sid, "remediation-verification", risk_uuid
+                    ),
+                    "title": ctx.markup("Remediation verification"),
+                    "description": ctx.markup(rem_desc),
                     "start": oscal_datetime(rv.get("verified_on"))
                     or oscal_datetime(remediation_ver.decided_at)
-                    or last_modified,
+                    or ctx.last_modified,
                     "props": rem_props,
                 }
             )
@@ -726,12 +698,22 @@ def build_assessment_results(
                 {"observation-uuid": u} for u in dict.fromkeys(related_obs)
             ]
         risks.append(risk)
+    return risks, risks_by_control
 
-    # ── Working papers → observations and findings ───────────────────────────
-    narratives = _llm_narratives(report)
+
+def _build_observations_and_findings(
+    ctx: _OscalBuildContext,
+    *,
+    evidence_uuid: Mapping[str, str],
+    evidence_meta: Mapping[str, EvidenceMeta | None],
+    evidence_times: Sequence[str],
+    risks_by_control: Mapping[str, list[str]],
+) -> tuple[list[dict], list[dict]]:
+    """Build OSCAL observations and findings from working-paper findings."""
+    narratives = _llm_narratives(ctx.report)
     observations: list[dict] = []
     findings: list[dict] = []
-    for f, key, o_uuid in zip(papers.findings, keys, obs_uuid):
+    for f, key, o_uuid in zip(ctx.papers.findings, ctx.keys, ctx.obs_uuid):
         vid = _line(f.vault_id_reference)
         meta = evidence_meta.get(vid) if vid else None
         exact_collected = meta.collected if meta else None
@@ -740,12 +722,12 @@ def build_assessment_results(
             collected = exact_collected
         else:
             collected = (
-                gate2_time
+                ctx.gate2_time
                 or (evidence_times[-1] if evidence_times else None)
-                or last_modified
+                or ctx.last_modified
             )
             collected_is_fallback = True
-        fv: FindingView | None = view.finding(f.control_id) if view else None
+        fv: FindingView | None = ctx.view.finding(f.control_id) if ctx.view else None
         tod = fv.effective.tod_conclusion if fv else str(f.tod_conclusion)
         toe = fv.effective.toe_conclusion if fv else str(f.toe_conclusion)
         result_of_record = fv.effective.result if fv else str(f.result)
@@ -781,10 +763,10 @@ def build_assessment_results(
                     ("reviewed-at", oscal_datetime(fv.review.decided_at) or ""),
                     ("reviewer-identity-source", fv.review.identity_source),
                 )
-                reviewers.append(_line(fv.review.decided_by))
+                ctx.reviewers.append(_line(fv.review.decided_by))
             if fv.scope_limitation is not None:
                 review_props += _props(("scope-limitation", "true"))
-                reviewers.append(_line(fv.scope_limitation.decided_by))
+                ctx.reviewers.append(_line(fv.scope_limitation.decided_by))
             props += review_props
         remarks = []
         if collected_is_fallback:
@@ -824,32 +806,35 @@ def build_assessment_results(
             )
         obs: dict[str, Any] = {
             "uuid": o_uuid,
-            "title": markup(f"{_line(f.control_id)} — ToD {tod}; ToE {toe}"),
-            "description": markup(f.test_conclusion),
+            "title": ctx.markup(f"{_line(f.control_id)} — ToD {tod}; ToE {toe}"),
+            "description": ctx.markup(f.test_conclusion),
             "props": props,
             "methods": _methods(tod, toe),
             "types": ["control-objective"],
             "origins": [
                 {
                     "actors": [
-                        {"type": "assessment-platform", "actor-uuid": platform_uuid}
+                        {
+                            "type": "assessment-platform",
+                            "actor-uuid": ctx.platform_uuid,
+                        }
                     ]
                 }
             ],
-            "subjects": [{"subject-uuid": component_uuid, "type": "component"}],
+            "subjects": [{"subject-uuid": ctx.component_uuid, "type": "component"}],
             "collected": collected,
         }
         if vid:
             verified = (
-                verify_quote(vid, f.exact_quote_from_evidence)
-                if verify_quote and f.exact_quote_from_evidence
+                ctx.verify_quote(vid, f.exact_quote_from_evidence)
+                if ctx.verify_quote and f.exact_quote_from_evidence
                 else None
             )
             quote = _line(f.exact_quote_from_evidence)
             obs["relevant-evidence"] = [
                 {
                     "href": f"#{evidence_uuid[vid]}",
-                    "description": markup(
+                    "description": ctx.markup(
                         f"Evidence vault record {vid}"
                         + (f" ({meta.source})" if meta and meta.source else "")
                         + (f". Quoted in the working paper: “{quote}”" if quote else "")
@@ -861,7 +846,7 @@ def build_assessment_results(
                 }
             ]
         if remarks:
-            obs["remarks"] = markup("\n\n".join(remarks))
+            obs["remarks"] = ctx.markup("\n\n".join(remarks))
         observations.append(obs)
 
         if result_of_record in (FindingResult.NOT_TESTED, "None", ""):
@@ -872,14 +857,14 @@ def build_assessment_results(
             "reason": "pass" if satisfied else "fail",
         }
         if satisfied and toe == OperatingConclusion.NOT_TESTED:
-            status["remarks"] = markup(
+            status["remarks"] = ctx.markup(
                 "Design and implementation only: operating effectiveness over "
                 "the period was not tested."
             )
         finding: dict[str, Any] = {
-            "uuid": element_uuid(sid, "finding", key),
-            "title": markup(f"{_line(f.control_id)}: {result_of_record}"),
-            "description": markup(f.test_conclusion),
+            "uuid": element_uuid(ctx.sid, "finding", key),
+            "title": ctx.markup(f"{_line(f.control_id)}: {result_of_record}"),
+            "description": ctx.markup(f.test_conclusion),
             "props": _props(
                 ("result", result_of_record),
                 ("preliminary-deficiency", _yes_no(preliminary)),
@@ -888,7 +873,7 @@ def build_assessment_results(
             "target": {
                 "type": "objective-id",
                 "target-id": token(f.control_id),
-                "title": markup(f"RACM control {_line(f.control_id)}"),
+                "title": ctx.markup(f"RACM control {_line(f.control_id)}"),
                 "status": status,
             },
             "related-observations": [{"observation-uuid": o_uuid}],
@@ -898,29 +883,30 @@ def build_assessment_results(
                 {"risk-uuid": u} for u in dict.fromkeys(risks_by_control[f.control_id])
             ]
         findings.append(finding)
+    return observations, findings
 
-    # ── Reviewed controls ────────────────────────────────────────────────────
+
+def _build_reviewed_controls(ctx: _OscalBuildContext) -> dict[str, Any]:
+    """Build reviewed-controls with context-aware NIST SP 800-53 catalog links."""
     control_ids = [
-        c.control_id for r in (racm.risks if racm else []) for c in r.controls
+        c.control_id for r in (ctx.racm.risks if ctx.racm else []) for c in r.controls
     ]
-    control_ids += [f.control_id for f in papers.findings]
+    control_ids += [f.control_id for f in ctx.papers.findings]
     include = []
 
-    # Does the engagement cite NIST SP 800-53 in its regulatory context?
     all_mappings = [
         str(m).lower()
-        for r in (racm.risks if racm else [])
+        for r in (ctx.racm.risks if ctx.racm else [])
         for m in (r.regulatory_mapping or [])
     ]
-    theme_text = racm.theme.lower() if racm and racm.theme else ""
+    theme_text = ctx.racm.theme.lower() if ctx.racm and ctx.racm.theme else ""
     cites_nist_800_53 = (
         any("800-53" in m for m in all_mappings) or "800-53" in theme_text
     )
 
     for c in dict.fromkeys(control_ids):
         t = token(c)
-        ctrl_ref = {"control-id": t}
-        # Check if control ID explicitly cites NIST or matches a valid NIST 800-53 family
+        ctrl_ref: dict[str, Any] = {"control-id": t}
         c_explicit_nist = bool(re.search(r"800-53|nist", c, re.IGNORECASE))
         norm_c = re.sub(
             r"^(?:NIST\s+(?:SP\s+)?800-53(?:\s+r(?:ev)?\d+)?\s+|NIST[._-])",
@@ -947,8 +933,8 @@ def build_assessment_results(
 
     if not include:
         raise ValueError("no controls to report: the RACM and working papers are empty")
-    reviewed_controls = {
-        "description": markup(
+    return {
+        "description": ctx.markup(
             "Controls in the engagement's Risk and Control Matrix (RACM). Where "
             "control IDs match verified NIST 800-53 families and the engagement cites "
             "NIST SP 800-53, standard framework catalog links are attached for interoperability."
@@ -956,23 +942,31 @@ def build_assessment_results(
         "control-selections": [{"include-controls": include}],
     }
 
-    # ── Approval trail → assessment log, roles and parties ──────────────────
-    preparer = _line(prepared_by) or next(
-        (_line(e.get("human")) for e in trail if e.get("action") == "audit_created"),
+
+def _build_assessment_log(
+    ctx: _OscalBuildContext,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Build assessment-log entries, roles, and responsible-parties from the trail."""
+    preparer = _line(ctx.prepared_by) or next(
+        (
+            _line(e.get("human"))
+            for e in ctx.trail
+            if e.get("action") == "audit_created"
+        ),
         "",
     )
     if preparer:
-        parties.uuid_for(preparer)
+        ctx.parties.uuid_for(preparer)
     log_entries: list[dict] = []
     gate_approvers: list[str] = []
     report_approvers: list[str] = []
-    for i, e in enumerate(trail):
+    for i, e in enumerate(ctx.trail):
         human = _line(e.get("human"))
-        start = trail_times[i] or last_modified
+        start = ctx.trail_times[i] or ctx.last_modified
         action = _line(e.get("action"))
         entry: dict[str, Any] = {
-            "uuid": element_uuid(sid, "log", str(i)),
-            "title": markup(_line(e.get("gate")) or action or "Trail entry"),
+            "uuid": element_uuid(ctx.sid, "log", str(i)),
+            "title": ctx.markup(_line(e.get("gate")) or action or "Trail entry"),
             "start": start,
             "props": _props(
                 ("trail-action", action),
@@ -1001,11 +995,11 @@ def build_assessment_results(
             )
             if _line(e.get(k))
         ]
-        entry["description"] = markup(
+        entry["description"] = ctx.markup(
             "\n\n".join([f"{action or 'action'} by {human or 'unknown'}", *details])
         )
         if human:
-            entry["logged-by"] = [{"party-uuid": parties.uuid_for(human)}]
+            entry["logged-by"] = [{"party-uuid": ctx.parties.uuid_for(human)}]
             if action == "gate_approval":
                 gate_approvers.append(human)
                 if e.get("artifact") == "final_report":
@@ -1021,7 +1015,10 @@ def build_assessment_results(
             return
         roles.append({"id": role_id, "title": title})
         responsible.append(
-            {"role-id": role_id, "party-uuids": [parties.uuid_for(n) for n in names]}
+            {
+                "role-id": role_id,
+                "party-uuids": [ctx.parties.uuid_for(n) for n in names],
+            }
         )
 
     _role("prepared-by", "Preparer (created the audit)", [preparer])
@@ -1031,23 +1028,185 @@ def build_assessment_results(
         gate_approvers,
     )
     _role("content-approver", "Report approver (Gate 3)", report_approvers)
-    conclusion = view.engagement_conclusion if view else None
+    conclusion = ctx.view.engagement_conclusion if ctx.view else None
     if conclusion is not None:
-        reviewers.append(_line(conclusion.decided_by))
+        ctx.reviewers.append(_line(conclusion.decided_by))
     _role(
         "reviewer",
         "Recorded reviewer decisions (or transcribed a management response)",
-        reviewers,
+        ctx.reviewers,
+    )
+    return log_entries, roles, responsible
+
+
+def _build_metadata(
+    ctx: _OscalBuildContext,
+    *,
+    roles: list[dict],
+    responsible: list[dict],
+) -> dict[str, Any]:
+    """Build top-level OSCAL AR metadata."""
+    sar = ctx.report.oscal_sar
+    title = _line(sar.metadata.title) if sar else ""
+    metadata: dict[str, Any] = {
+        "title": ctx.markup(title or f"Audit results — {_line(ctx.session_name)}"),
+        "last-modified": ctx.last_modified,
+        "version": "sha256-"
+        + _digest(
+            [ctx.report, ctx.papers, ctx.racm]
+            + (
+                [
+                    d.model_dump(mode="json") if hasattr(d, "model_dump") else d
+                    for d in ctx.decisions
+                ]
+                if ctx.decisions
+                else []
+            )
+        )[:16],
+        "oscal-version": OSCAL_VERSION,
+        "props": _props(
+            ("session-id", ctx.sid),
+            ("session-status", ctx.session_status),
+            ("report-state", ctx.report_state),
+        ),
+    }
+    if roles:
+        metadata["roles"] = roles
+    if ctx.parties.by_name:
+        metadata["parties"] = ctx.parties.as_oscal(_identity_sources_by_name(ctx.trail))
+    if responsible:
+        metadata["responsible-parties"] = responsible
+    metadata["remarks"] = ctx.markup(
+        f"Report state: {ctx.report_state}. Generated by GRC Audit Swarm from the "
+        "gate-reviewed RACM, working papers and report of this session. The "
+        "content was drafted by LLM agents and reviewed by the people recorded "
+        "in the assessment log. last-modified is the time of the latest "
+        "approval-trail entry, not the export time; version is a digest of the "
+        "source artifacts."
+    )
+    return metadata
+
+
+def build_assessment_results(
+    *,
+    session_id: str,
+    session_name: str,
+    session_status: str,
+    report_state: str,
+    theme: str,
+    report: FinalReportSchema,
+    papers: WorkingPaperSchema,
+    racm: RiskControlMatrixSchema | None,
+    trail: Sequence[Mapping[str, Any]],
+    prepared_by: str = "",
+    markup: Callable[[str], str] = lambda s: s,
+    verify_quote: Callable[[str, str], bool] | None = None,
+    evidence_lookup: Callable[[str], EvidenceMeta | None] = vault_metadata,
+    view: EffectiveView | None = None,
+    decisions: Sequence[Any] = (),
+    trail_verification: Mapping[str, Any] | None = None,
+) -> dict:
+    """Build the OSCAL AR document (a JSON-ready dict).
+
+    ``markup`` is applied to every Markdown (markup-line / markup-multiline)
+    field; the API passes its image-stripping sanitiser. ``verify_quote``
+    re-checks each cited quote against the vault, as the working-papers
+    export does. ``view`` is the session's effective view (AI drafts plus
+    active reviewer decisions); ``decisions`` are all recorded decisions,
+    folded into the document version. ``trail_verification``, when provided
+    (e.g. the dict returned by :func:`swarm.trail.verify_trail`), attaches a
+    ``trail-verification-status`` prop directly to ``results[0]`` without
+    requiring callers to re-parse the serialized JSON.
+    """
+    trail_times = [oscal_datetime(e.get("timestamp")) for e in trail]
+    known_times = [t for t in trail_times if t]
+    sar = report.oscal_sar
+    last_modified = (
+        max(known_times, key=datetime.fromisoformat)
+        if known_times
+        else (oscal_datetime(sar.metadata.last_modified) if sar else None)
+    ) or datetime.now(UTC).isoformat()
+    gate2_time = next(
+        (
+            oscal_datetime(e.get("timestamp"))
+            for e in reversed(trail)
+            if e.get("action") == "gate_approval"
+            and e.get("artifact") == "working_papers"
+        ),
+        None,
+    )
+    keys = _occurrence_keys(papers.findings)
+    obs_uuid = [element_uuid(session_id, "observation", k) for k in keys]
+    obs_by_control: dict[str, list[str]] = {}
+    for f, u in zip(papers.findings, obs_uuid):
+        obs_by_control.setdefault(f.control_id, []).append(u)
+
+    ctx = _OscalBuildContext(
+        sid=session_id,
+        session_name=session_name,
+        session_status=session_status,
+        report_state=report_state,
+        theme=theme,
+        approved=session_status == "COMPLETED",
+        report=report,
+        papers=papers,
+        racm=racm,
+        trail=trail,
+        prepared_by=prepared_by,
+        markup=markup,
+        verify_quote=verify_quote,
+        evidence_lookup=evidence_lookup,
+        view=view,
+        decisions=decisions,
+        trail_verification=trail_verification,
+        parties=_Parties(session_id),
+        trail_times=trail_times,
+        known_times=known_times,
+        last_modified=last_modified,
+        gate2_time=gate2_time,
+        component_uuid=element_uuid(session_id, "component", "audit-scope"),
+        platform_uuid=element_uuid(session_id, "assessment-platform"),
+        keys=keys,
+        obs_uuid=obs_uuid,
+        obs_by_control=obs_by_control,
     )
 
+    resources, plan_uuid, evidence_uuid, evidence_meta, evidence_times = (
+        _build_resources(ctx)
+    )
+    local_definitions = _build_local_definitions(ctx)
+    objectives_and_methods = _build_objectives(ctx)
+    risks, risks_by_control = _build_risks(ctx)
+    observations, findings = _build_observations_and_findings(
+        ctx,
+        evidence_uuid=evidence_uuid,
+        evidence_meta=evidence_meta,
+        evidence_times=evidence_times,
+        risks_by_control=risks_by_control,
+    )
+    reviewed_controls = _build_reviewed_controls(ctx)
+    log_entries, roles, responsible = _build_assessment_log(ctx)
+
     # ── Result ───────────────────────────────────────────────────────────────
+    scale = _line(report.deficiency_scale)
+    conclusion = view.engagement_conclusion if view else None
     result_props = _props(("deficiency-scale", scale))
     if conclusion is not None:
         result_props += _props(
             ("engagement-conclusion", conclusion.values.get("conclusion"))
-        ) + _decided_props(conclusion, "engagement-conclusion-")
+        ) + ctx.decided_props(conclusion, "engagement-conclusion-")
+    if trail_verification is not None:
+        tv_status = _line(trail_verification.get("status"))
+        if tv_status:
+            result_props.append(
+                _prop(
+                    "trail-verification-status",
+                    tv_status,
+                    remarks=_line(trail_verification.get("detail")) or tv_status,
+                )
+            )
     result: dict[str, Any] = {
-        "uuid": element_uuid(sid, "result"),
+        "uuid": element_uuid(session_id, "result"),
         "title": markup(f"Audit results — {_line(theme) or _line(session_name)}"),
         "description": markup(report.executive_summary),
         "start": (evidence_times[0] if evidence_times else None)
@@ -1066,19 +1225,19 @@ def build_assessment_results(
                 "responsible-parties": [
                     {
                         "role-id": "reviewer",
-                        "party-uuids": [parties.uuid_for(conclusion.decided_by)],
+                        "party-uuids": [ctx.parties.uuid_for(conclusion.decided_by)],
                     }
                 ],
                 "parts": [
                     {
-                        "uuid": element_uuid(sid, "engagement-conclusion"),
+                        "uuid": element_uuid(session_id, "engagement-conclusion"),
                         "name": "engagement-conclusion",
                         "ns": PROJECT_NS,
                         "title": markup(
                             "Engagement conclusion: "
                             + _line(conclusion.values.get("conclusion"))
                         ),
-                        "props": _decided_props(conclusion),
+                        "props": ctx.decided_props(conclusion),
                         "prose": markup(
                             f"{conclusion.values.get('conclusion')} — the "
                             f"reviewer's conclusion on the engagement, recorded "
@@ -1115,47 +1274,10 @@ def build_assessment_results(
         )
     )
 
-    # ── Metadata ─────────────────────────────────────────────────────────────
-    title = _line(sar.metadata.title) if sar else ""
-    metadata: dict[str, Any] = {
-        "title": markup(title or f"Audit results — {_line(session_name)}"),
-        "last-modified": last_modified,
-        "version": "sha256-"
-        + _digest(
-            [report, papers, racm]
-            + (
-                [
-                    d.model_dump(mode="json") if hasattr(d, "model_dump") else d
-                    for d in decisions
-                ]
-                if decisions
-                else []
-            )
-        )[:16],
-        "oscal-version": OSCAL_VERSION,
-        "props": _props(
-            ("session-id", sid),
-            ("session-status", session_status),
-            ("report-state", report_state),
-        ),
-    }
-    if roles:
-        metadata["roles"] = roles
-    if parties.by_name:
-        metadata["parties"] = parties.as_oscal(_identity_sources_by_name(trail))
-    if responsible:
-        metadata["responsible-parties"] = responsible
-    metadata["remarks"] = markup(
-        f"Report state: {report_state}. Generated by GRC Audit Swarm from the "
-        "gate-reviewed RACM, working papers and report of this session. The "
-        "content was drafted by LLM agents and reviewed by the people recorded "
-        "in the assessment log. last-modified is the time of the latest "
-        "approval-trail entry, not the export time; version is a digest of the "
-        "source artifacts."
-    )
+    metadata = _build_metadata(ctx, roles=roles, responsible=responsible)
 
     ar_body: dict[str, Any] = {
-        "uuid": element_uuid(sid, "assessment-results"),
+        "uuid": element_uuid(session_id, "assessment-results"),
         "metadata": metadata,
         "import-ap": {
             "href": f"#{plan_uuid}",
@@ -1185,14 +1307,21 @@ def evaluate_oscal_drift(
     against a target OSCAL AR and returns:
     - ``regressed_controls``: controls that were ``satisfied`` in baseline and are
       ``not-satisfied`` in target.
+    - ``dropped_controls``: controls present in baseline findings that are absent
+      in target findings (e.g., became ``Not tested``), surfacing coverage
+      regressions instead of silently omitting them.
     - ``improved_controls``: controls that were ``not-satisfied`` in baseline and
       are ``satisfied`` in target.
     - ``remediated_risks``: deficiency IDs that were ``open`` in baseline and are
       ``closed`` in target.
     - ``new_open_risks``: deficiency IDs that are ``open`` in target and were not
       ``open`` in baseline.
-    - ``passed``: True if and only if ``regressed_controls`` and ``new_open_risks``
-      are both empty.
+    - ``passed``: True if and only if ``regressed_controls``,
+      ``dropped_controls``, and ``new_open_risks`` are all empty.
+
+    On duplicate ``target-id`` or ``deficiency-id`` entries within a document,
+    worst-case aggregation is used (``not-satisfied`` beats ``satisfied``;
+    ``open`` beats ``closed``).
     """
 
     def _findings_map(doc: Mapping[str, Any]) -> dict[str, str]:
@@ -1204,7 +1333,7 @@ def evaluate_oscal_drift(
             tgt = f.get("target", {})
             tid = str(tgt.get("target-id", ""))
             state = str(tgt.get("status", {}).get("state", ""))
-            if tid and state:
+            if tid and state and out.get(tid) != "not-satisfied":
                 out[tid] = state
         return out
 
@@ -1217,7 +1346,7 @@ def evaluate_oscal_drift(
             props = {p.get("name"): p.get("value") for p in r.get("props", [])}
             def_id = str(props.get("deficiency-id") or r.get("title") or "")
             status = str(r.get("status", "open"))
-            if def_id:
+            if def_id and out.get(def_id) != "open":
                 out[def_id] = status
         return out
 
@@ -1229,6 +1358,7 @@ def evaluate_oscal_drift(
         for cid, b_state in base_f.items()
         if b_state == "satisfied" and targ_f.get(cid) == "not-satisfied"
     )
+    dropped_controls = sorted(cid for cid in base_f if cid not in targ_f)
     improved_controls = sorted(
         cid
         for cid, b_state in base_f.items()
@@ -1250,8 +1380,13 @@ def evaluate_oscal_drift(
     )
 
     return {
-        "passed": len(regressed_controls) == 0 and len(new_open_risks) == 0,
+        "passed": (
+            len(regressed_controls) == 0
+            and len(dropped_controls) == 0
+            and len(new_open_risks) == 0
+        ),
         "regressed_controls": regressed_controls,
+        "dropped_controls": dropped_controls,
         "improved_controls": improved_controls,
         "remediated_risks": remediated_risks,
         "new_open_risks": new_open_risks,

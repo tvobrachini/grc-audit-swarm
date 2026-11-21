@@ -157,7 +157,7 @@ def _rich_report(with_sar: bool = True) -> FinalReportSchema:
         metadata=OSCAL_SAR_Metadata(
             title="S3 audit\nresults", last_modified="yesterday", version="v1"
         ),
-        import_ap=OSCAL_SAR_ImportAP(href="S3 audit theme"),
+        import_ap=OSCAL_SAR_ImportAP(href="S3 audit theme", remarks=""),
         results=[
             OSCAL_SAR_Result(
                 assessment_result_id="r1",
@@ -954,3 +954,129 @@ def test_withdrawn_conclusion_and_disagreement(monkeypatch, validator):
         in (risk["risk-log"]["entries"][0]["description"])
     )
     assert "attestations" not in result
+
+
+# ── Trail verification prop, drift worst-case & dropped_controls ─────────────
+
+
+class TestOscalHardening:
+    def test_build_assessment_results_attaches_trail_verification_prop(self, validator):
+        rec = EvidenceAssuranceProtocol.register_evidence("BlockPublicAcls: true", "op")
+        doc = build_assessment_results(
+            session_id=SID,
+            session_name="n",
+            session_status="COMPLETED",
+            report_state="Approved at Gate 3",
+            theme="AWS S3",
+            report=_rich_report(),
+            papers=_rich_papers(rec["vault_id"]),
+            racm=make_racm(),
+            trail=_trail(),
+            trail_verification={
+                "status": "ok",
+                "detail": "Chain intact (sha256); head not anchored.",
+            },
+        )
+        assert_valid(validator, doc)
+        props = _ar(doc)["results"][0]["props"]
+        tv_props = [p for p in props if p["name"] == "trail-verification-status"]
+        assert len(tv_props) == 1
+        assert tv_props[0]["value"] == "ok"
+        assert tv_props[0]["ns"] == PROJECT_NS
+        assert "Chain intact" in tv_props[0]["remarks"]
+
+    def test_oscal_ar_reexports_evidence_meta_and_vault_metadata(self):
+        from swarm import evidence, oscal_ar
+
+        assert oscal_ar.EvidenceMeta is evidence.EvidenceMeta
+        assert oscal_ar.vault_metadata is evidence.vault_metadata
+
+    def test_evaluate_oscal_drift_worst_case_aggregation_on_duplicates(self):
+        from swarm.oscal_ar import evaluate_oscal_drift
+
+        def _doc(findings, risks):
+            return {
+                "assessment-results": {
+                    "results": [{"findings": findings, "risks": risks}]
+                }
+            }
+
+        def _finding(tid, state):
+            return {"target": {"target-id": tid, "status": {"state": state}}}
+
+        def _risk(did, status):
+            return {
+                "props": [{"name": "deficiency-id", "value": did}],
+                "status": status,
+            }
+
+        baseline = _doc(
+            findings=[_finding("CTRL-01", "satisfied")],
+            risks=[_risk("DEF-01", "closed")],
+        )
+        # Duplicate entries in target: not-satisfied appears BEFORE satisfied,
+        # and open appears BEFORE closed — worst-case must win, not last-wins.
+        target = _doc(
+            findings=[
+                _finding("CTRL-01", "not-satisfied"),
+                _finding("CTRL-01", "satisfied"),
+            ],
+            risks=[
+                _risk("DEF-01", "open"),
+                _risk("DEF-01", "closed"),
+            ],
+        )
+        drift = evaluate_oscal_drift(baseline, target)
+        assert drift["passed"] is False
+        assert drift["regressed_controls"] == ["CTRL-01"]
+        assert drift["new_open_risks"] == ["DEF-01"]
+        assert drift["dropped_controls"] == []
+
+    def test_evaluate_oscal_drift_detects_dropped_controls(self):
+        from swarm.oscal_ar import evaluate_oscal_drift
+
+        baseline = {
+            "assessment-results": {
+                "results": [
+                    {
+                        "findings": [
+                            {
+                                "target": {
+                                    "target-id": "CTRL-01",
+                                    "status": {"state": "satisfied"},
+                                }
+                            },
+                            {
+                                "target": {
+                                    "target-id": "CTRL-02",
+                                    "status": {"state": "satisfied"},
+                                }
+                            },
+                        ],
+                        "risks": [],
+                    }
+                ]
+            }
+        }
+        # CTRL-02 became Not tested (absent from findings in target)
+        target = {
+            "assessment-results": {
+                "results": [
+                    {
+                        "findings": [
+                            {
+                                "target": {
+                                    "target-id": "CTRL-01",
+                                    "status": {"state": "satisfied"},
+                                }
+                            }
+                        ],
+                        "risks": [],
+                    }
+                ]
+            }
+        }
+        drift = evaluate_oscal_drift(baseline, target)
+        assert drift["dropped_controls"] == ["CTRL-02"]
+        assert drift["regressed_controls"] == []
+        assert drift["passed"] is False
