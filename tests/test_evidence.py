@@ -350,6 +350,8 @@ class TestEncryptedVaultKeyedDigest:
         from swarm.evidence import _get_fernet
 
         self._enable_encryption(tmp_path, monkeypatch)
+        fernet = _get_fernet()
+        assert fernet is not None
         payload = "legacy evidence payload"
         vault_id = str(uuid.uuid4())
         (tmp_path / f"{vault_id}.json").write_text(
@@ -359,9 +361,7 @@ class TestEncryptedVaultKeyedDigest:
                     "sha256": hashlib.sha256(payload.encode()).hexdigest(),
                     "mcp_source": "op",
                     "timestamp": "2026-01-01T00:00:00+00:00",
-                    "raw_payload": _get_fernet()
-                    .encrypt(payload.encode())
-                    .decode("ascii"),
+                    "raw_payload": fernet.encrypt(payload.encode()).decode("ascii"),
                     "encrypted": True,
                 }
             )
@@ -399,6 +399,8 @@ class TestMigrateLegacyDigests:
 
         from swarm.evidence import _get_fernet
 
+        fernet = _get_fernet()
+        assert fernet is not None
         vault_id = str(uuid.uuid4())
         (tmp_path / f"{vault_id}.json").write_text(
             json.dumps(
@@ -408,9 +410,7 @@ class TestMigrateLegacyDigests:
                     or hashlib.sha256(payload.encode()).hexdigest(),
                     "mcp_source": "op",
                     "timestamp": "2026-01-01T00:00:00+00:00",
-                    "raw_payload": _get_fernet()
-                    .encrypt(payload.encode())
-                    .decode("ascii"),
+                    "raw_payload": fernet.encrypt(payload.encode()).decode("ascii"),
                     "encrypted": True,
                 }
             )
@@ -636,3 +636,46 @@ class TestAtomicVaultWrite:
         with pytest.raises(OSError):
             EvidenceAssuranceProtocol.register_evidence("payload", "op")
         assert list(tmp_path.iterdir()) == []
+
+    def test_migrate_legacy_digests_writes_atomically_with_0600_mode(
+        self, tmp_path, monkeypatch
+    ):
+        import stat
+
+        TestMigrateLegacyDigests._enable_encryption(tmp_path, monkeypatch)
+        vault_id = TestMigrateLegacyDigests._write_legacy_record(
+            tmp_path, "sensitive payload for mode check"
+        )
+        counts = EvidenceAssuranceProtocol.migrate_legacy_digests()
+        assert counts["migrated"] == 1
+        migrated_path = tmp_path / f"{vault_id}.json"
+        if os.name == "posix":
+            mode = stat.S_IMODE(migrated_path.stat().st_mode)
+            assert mode == 0o600
+        assert not list(tmp_path.glob("*.tmp"))
+
+
+class TestVaultMetadata:
+    def test_vault_metadata_returns_collected_and_source(self, tmp_path, monkeypatch):
+        from swarm.evidence import EvidenceMeta, vault_metadata
+
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        rec = EvidenceAssuranceProtocol.register_evidence(
+            '{"Secret": "do-not-return"}',  # pragma: allowlist secret
+            "aws.s3.get_public_access_block",
+        )
+        meta = vault_metadata(rec["vault_id"])
+        assert isinstance(meta, EvidenceMeta)
+        assert meta.source == "aws.s3.get_public_access_block"
+        assert meta.collected is not None
+        assert meta.collected.endswith("+00:00")
+
+    def test_vault_metadata_rejects_invalid_and_missing_ids(
+        self, tmp_path, monkeypatch
+    ):
+        from swarm.evidence import vault_metadata
+
+        monkeypatch.setenv("EVIDENCE_VAULT_PATH", str(tmp_path))
+        assert vault_metadata("") is None
+        assert vault_metadata("../etc/passwd") is None
+        assert vault_metadata("00000000-0000-0000-0000-000000000000") is None

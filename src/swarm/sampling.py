@@ -1,10 +1,17 @@
 """
 Deterministic AICPA / PCAOB AS 2201 / AS 1215 Audit Sampling & IPE Hash Engine.
 
-Provides 0-token, cryptographically reproducible sample sizing and selection:
-  1. ``recommended_sample_size``: AICPA Audit Guide / Big Four sample-size lookup
-     by control frequency, control nature, and inherent risk rating.
-  2. ``deterministic_sample_selection``: Computes the SHA-256 digest of the IPE
+Single authoritative source for AICPA / Big Four audit sampling rules:
+  1. ``minimum_sample_size`` / ``AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY``:
+     Absolute AICPA / Big Four minimum floor enforced by deterministic linters
+     (Rule D7) for manual and IT-dependent manual controls. Continuous and
+     event-driven controls have a minimum floor of 1 (a single event or test
+     may be the entire population when not using full-population testing).
+  2. ``recommended_sample_size``: Standard AICPA Audit Guide / Big Four
+     planning sample-size lookup by control frequency, control nature, and
+     inherent risk rating (typically higher than the D7 minimum floor for
+     high-risk, continuous, or event-driven controls).
+  3. ``deterministic_sample_selection``: Computes the SHA-256 digest of the IPE
      population (`population_sha256`) and selects a reproducible random sample
      seeded by ``HMAC-SHA256(session_id, control_id)`` so any reviewer can
      re-perform the exact sample selection (PCAOB AS 1215).
@@ -26,7 +33,20 @@ from swarm.schema import (
     SamplingMethod,
 )
 
-# (low_or_medium_risk_n, high_risk_n) per AICPA / Big Four standard audit tables
+# Absolute AICPA / Big Four minimum sample-size floor by control frequency
+# (enforced by deterministic linter Rule D7 for manual / ITDM controls).
+AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY: dict[ControlFrequency, int] = {
+    ControlFrequency.ANNUAL: 1,
+    ControlFrequency.QUARTERLY: 2,
+    ControlFrequency.MONTHLY: 2,
+    ControlFrequency.WEEKLY: 5,
+    ControlFrequency.DAILY: 20,
+    ControlFrequency.MULTIPLE_TIMES_PER_DAY: 25,
+    ControlFrequency.CONTINUOUS: 1,
+    ControlFrequency.EVENT_DRIVEN: 1,
+}
+
+# (low_or_medium_risk_n, high_risk_n) per AICPA / Big Four standard planning tables
 _SAMPLE_TABLE: dict[ControlFrequency, tuple[int, int]] = {
     ControlFrequency.ANNUAL: (1, 1),
     ControlFrequency.QUARTERLY: (2, 2),
@@ -54,13 +74,24 @@ class SampleSelectionReceipt:
     selected_items: list[str]
 
 
+def minimum_sample_size(frequency: ControlFrequency | str) -> int:
+    """Return the AICPA minimum sample-size floor for a manual/ITDM control frequency.
+
+    Used by deterministic linter Rule D7 to reject under-sampled manual/ITDM
+    controls. For planning a sample size that also accounts for control nature
+    and inherent risk rating, use :func:`recommended_sample_size`.
+    """
+    freq = ControlFrequency(frequency)
+    return AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY[freq]
+
+
 def recommended_sample_size(
     frequency: ControlFrequency | str,
     nature: ControlNature | str,
     *,
     risk_rating: RiskRating | str = RiskRating.MEDIUM,
 ) -> int:
-    """Return the standard AICPA / Big Four sample size for ToE testing."""
+    """Return the standard AICPA / Big Four planning sample size for ToE testing."""
     nat = ControlNature(nature)
     if nat == ControlNature.AUTOMATED:
         return 1

@@ -23,8 +23,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from swarm.evidence import EvidenceAssuranceProtocol
-from swarm.oscal_ar import vault_metadata
+from swarm.evidence import EvidenceAssuranceProtocol, vault_metadata
+from swarm.sampling import (
+    AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY as AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY,
+)
+from swarm.sampling import minimum_sample_size
 from swarm.schema import (
     SCALE_CLASSIFICATIONS,
     AuditFindingSchema,
@@ -53,18 +56,6 @@ class EvidenceHierarchyTier(StrEnum):
     TIER_3_INTERNAL_DOCUMENTARY = "Tier 3: Internal documentary / Policy / Ticket"
     TIER_4_INQUIRY_OBSERVATION = "Tier 4: Management inquiry / Uncorroborated statement"
 
-
-# AICPA / Big Four standard minimum sample sizes by control frequency (PCAOB AS 2201 / AICPA Audit Guide)
-AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY: dict[ControlFrequency, int] = {
-    ControlFrequency.ANNUAL: 1,
-    ControlFrequency.QUARTERLY: 2,
-    ControlFrequency.MONTHLY: 2,
-    ControlFrequency.WEEKLY: 5,
-    ControlFrequency.DAILY: 20,
-    ControlFrequency.MULTIPLE_TIMES_PER_DAY: 25,
-    ControlFrequency.CONTINUOUS: 1,
-    ControlFrequency.EVENT_DRIVEN: 1,
-}
 
 # Auditing standards govern the auditor, not the audited entity's controls (D13)
 _AUDITING_STANDARD_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -336,11 +327,11 @@ def lint_racm(
 
             if (
                 ctrl.nature in (ControlNature.MANUAL, ControlNature.IT_DEPENDENT_MANUAL)
-                and ctrl.frequency in AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY
+                and ctrl.frequency is not None
                 and tp.sampling_method != SamplingMethod.FULL_POPULATION
                 and tp.sample_size is not None
             ):
-                min_n = AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY[ctrl.frequency]
+                min_n = minimum_sample_size(ctrl.frequency)
                 if tp.sample_size < min_n:
                     report.violations.append(
                         LintViolation(

@@ -292,16 +292,15 @@ class TestAnchorStore:
     def test_anchor_saved_next_to_sessions_file(self, tmp_path):
         assert session_manager.save_trail_anchor("s1", _chain(2)) is True
         assert (tmp_path / "trail_anchors.json").exists()
-        assert session_manager.get_trail_anchor("s1")["count"] == 2
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor is not None and anchor["count"] == 2
 
     def test_anchor_never_moves_backwards(self):
         trail = _chain(3)
         session_manager.save_trail_anchor("s1", trail)
         assert session_manager.save_trail_anchor("s1", trail[:2]) is False
-        assert (
-            session_manager.get_trail_anchor("s1")["head_hash"]
-            == trail[2]["entry_hash"]
-        )
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor is not None and anchor["head_hash"] == trail[2]["entry_hash"]
 
     def test_anchor_moves_forward_along_the_same_chain(self):
         trail = _chain(2)
@@ -309,7 +308,7 @@ class TestAnchorStore:
         t.append_entry(trail, _entry(3))
         assert session_manager.save_trail_anchor("s1", trail) is True
         anchor = session_manager.get_trail_anchor("s1")
-        assert anchor["count"] == 3
+        assert anchor is not None and anchor["count"] == 3
         assert t.verify_trail(trail, anchor)["status"] == "ok"
 
     def test_truncated_then_extended_trail_does_not_move_anchor(self):
@@ -321,7 +320,7 @@ class TestAnchorStore:
         t.append_entry(forged, {**_entry(3), "human": "someone-else"})
         assert session_manager.save_trail_anchor("s1", forged) is False
         anchor = session_manager.get_trail_anchor("s1")
-        assert anchor["head_hash"] == anchored_head
+        assert anchor is not None and anchor["head_hash"] == anchored_head
         result = t.verify_trail(forged, anchor)
         assert result["ok"] is False
         assert result["status"] == "anchor_mismatch"
@@ -335,7 +334,7 @@ class TestAnchorStore:
             t.append_entry(forged, _entry(i))
         assert session_manager.save_trail_anchor("s1", forged) is False
         anchor = session_manager.get_trail_anchor("s1")
-        assert anchor["count"] == 3
+        assert anchor is not None and anchor["count"] == 3
         assert t.verify_trail(forged, anchor)["status"] == "anchor_mismatch"
 
     def test_broken_chain_does_not_move_anchor(self):
@@ -344,7 +343,8 @@ class TestAnchorStore:
         t.append_entry(trail, _entry(3))
         trail[2]["human"] = "edited"  # entry 2 no longer matches its hash
         assert session_manager.save_trail_anchor("s1", trail) is False
-        assert session_manager.get_trail_anchor("s1")["count"] == 2
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor is not None and anchor["count"] == 2
 
     def test_repository_save_does_not_move_anchor_onto_forged_trail(self):
         from swarm.audit_flow import AuditFlow
@@ -354,7 +354,8 @@ class TestAnchorStore:
         flow = AuditFlow()
         flow.state.approval_trail = _chain(3)
         FlowRepository().save("s1", flow)
-        assert session_manager.get_trail_anchor("s1")["count"] == 3
+        anchor = session_manager.get_trail_anchor("s1")
+        assert anchor is not None and anchor["count"] == 3
         forged = copy.deepcopy(flow.state.approval_trail[:2])
         t.append_entry(forged, {**_entry(3), "human": "someone-else"})
         flow.state.approval_trail = forged
@@ -374,3 +375,13 @@ class TestAnchorStore:
     def test_unreadable_anchor_file_reads_as_none(self, tmp_path):
         (tmp_path / "trail_anchors.json").write_text("{not json")
         assert session_manager.get_trail_anchor("s1") is None
+
+
+class TestAppendDefensiveChaining:
+    def test_append_chains_from_last_chained_entry_when_trailing_unchained_exists(self):
+        trail = _chain(2)
+        last_chained_hash = trail[1]["entry_hash"]
+        # Simulate an unchained trailing entry appended outside append_entry
+        trail.append(_entry(3))
+        appended = t.append_entry(trail, _entry(4))
+        assert appended["prev_hash"] == last_chained_hash

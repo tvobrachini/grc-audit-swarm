@@ -148,7 +148,7 @@ def append_entry(trail: list[dict[str, str]], entry: dict[str, str]) -> dict:
     if last_chained is None:
         prev = _legacy_seal(trail, alg, key)
     else:
-        prev = str(trail[-1].get("entry_hash", ""))
+        prev = str(trail[last_chained].get("entry_hash", ""))
     stored["hash_alg"] = alg
     stored["prev_hash"] = prev
     stored["entry_hash"] = _digest(canonical_entry(stored), alg, key)

@@ -9,6 +9,7 @@ import re
 import tempfile
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -331,7 +332,7 @@ class EvidenceAssuranceProtocol:
             return False
 
         try:
-            with open(filepath, "r") as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 evidence_record = json.load(f)
 
             payload = evidence_record["raw_payload"]
@@ -423,7 +424,7 @@ class EvidenceAssuranceProtocol:
                 continue
             filepath = os.path.join(evidence_dir, name)
             try:
-                with open(filepath, "r") as f:
+                with open(filepath, "r", encoding="utf-8") as f:
                     record = json.load(f)
 
                 if not record.get("encrypted"):
@@ -449,16 +450,7 @@ class EvidenceAssuranceProtocol:
 
                 del record["sha256"]
                 record["hmac_sha256"] = _keyed_digest(digest_input, key_b64)
-                tmp_path = f"{filepath}.tmp"
-                try:
-                    with open(tmp_path, "w") as f:
-                        json.dump(record, f, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp_path, filepath)
-                finally:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
+                _write_record_atomically(filepath, record)
                 counts["migrated"] += 1
             except (
                 KeyError,
@@ -471,6 +463,56 @@ class EvidenceAssuranceProtocol:
                 counts["failed"] += 1
 
         return counts
+
+
+@dataclass(frozen=True)
+class EvidenceMeta:
+    """Read-only collection metadata for a vault record (never includes payload or digest)."""
+
+    collected: str | None
+    source: str
+
+
+def _single_line(value: Any) -> str:
+    return "" if value is None else " ".join(str(value).split())
+
+
+def _normalize_iso_utc(value: Any) -> str | None:
+    text = _single_line(value)
+    if not text:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.UTC)
+    return parsed.astimezone(datetime.UTC).isoformat()
+
+
+def vault_metadata(vault_id: str) -> EvidenceMeta | None:
+    """Collection time and source operation of a vault record (read-only).
+
+    Never returns payload or digest: exports and linters cite evidence metadata
+    without loading raw payloads.
+    """
+    if not _UUID_RE.fullmatch(vault_id or ""):
+        return None
+    base = os.path.realpath(EvidenceAssuranceProtocol._evidence_dir())
+    path = os.path.realpath(os.path.join(base, f"{vault_id}.json"))
+    if os.path.commonpath([base, path]) != base:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    return EvidenceMeta(
+        collected=_normalize_iso_utc(record.get("timestamp")),
+        source=_single_line(record.get("mcp_source")),
+    )
 
 
 _NOT_TESTED = "not tested"
