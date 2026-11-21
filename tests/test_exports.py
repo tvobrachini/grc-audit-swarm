@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import uuid
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -76,7 +77,7 @@ def _open(content: bytes):
     return load_workbook(io.BytesIO(content))
 
 
-def _rows(ws):
+def _rows(ws) -> list[list[Any]]:
     return [list(r) for r in ws.iter_rows(values_only=True)]
 
 
@@ -339,7 +340,8 @@ def _chained_session(*, cache: bool = True) -> tuple[str, AuditFlow]:
         )
     session_manager.save_session(sid, "S3 audit", "ctx")
     FlowRepository().save(sid, flow)
-    assert session_manager.get_trail_anchor(sid)["count"] == 3
+    anchor = session_manager.get_trail_anchor(sid)
+    assert anchor is not None and anchor["count"] == 3
     if cache:
         set_flow(sid, flow)
     else:
@@ -427,3 +429,31 @@ class TestTrailVerificationAtExport:
         r = client.get(f"/api/sessions/{sid}/export/report.md", headers=AUTH)
         assert r.status_code == 409
         assert "artifact_changed" in r.json()["detail"]
+
+    def test_report_markdown_renders_trail_verification_directly(self):
+        from api.exports import ExportContext, report_markdown
+
+        report = make_report()
+        report.detailed_report = "Body mentioning\n\n## Approval Trail\n\nin text."
+        ctx = ExportContext("sess-1234", "S3 audit", "COMPLETED")
+        trail = [
+            {
+                "gate": "Gate 1 (Planning)",
+                "human": "alice",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "action": "gate_approval",
+            }
+        ]
+        md = report_markdown(
+            report,
+            trail,
+            ctx,
+            trail_verification={"status": "ok", "detail": "1 entry verified"},
+        )
+        _, approval_section = md.rsplit("\n## Approval Trail\n\n", 1)
+        assert approval_section.startswith(
+            "> Trail verification at export: ok (1 entry verified)\n\n"
+            "- **Gate 1 (Planning)** — alice"
+        )
+        md_without = report_markdown(report, trail, ctx)
+        assert "Trail verification at export:" not in md_without

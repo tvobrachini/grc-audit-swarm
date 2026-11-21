@@ -13,7 +13,6 @@ report (a line under "Approval Trail") and the OSCAL document (a
 ``trail-verification-status`` prop on each result).
 """
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -26,13 +25,11 @@ from api.exports import (
     oscal_json,
     racm_xlsx,
     report_markdown,
-    sanitize_report,
     working_papers_xlsx,
 )
 from api.job_store import get_flow
 from api.routers.sessions import _repo, _require_session
 from swarm.audit_flow import AuditFlow
-from swarm.oscal_ar import PROJECT_NS
 from swarm.session_manager import get_trail_anchor
 from swarm.trail import TAMPER_STATUSES
 
@@ -51,40 +48,6 @@ def _verified_trail(session_id: str, flow: AuditFlow) -> dict[str, Any]:
             ),
         )
     return verification
-
-
-def _one_line(text: Any) -> str:
-    return " ".join(str(text).split())
-
-
-def _with_trail_line(markdown: str, verification: dict[str, Any]) -> str:
-    """Insert the verification line right under the "## Approval Trail" heading."""
-    heading = "\n## Approval Trail\n\n"
-    line = sanitize_report(
-        _one_line(
-            f"> Trail verification at export: {verification['status']} "
-            f"({verification['detail']})"
-        )
-    )
-    if heading in markdown:
-        head, tail = markdown.rsplit(heading, 1)
-        return f"{head}{heading}{line}\n\n{tail}"
-    return f"{markdown.rstrip()}\n\n## Approval Trail\n\n{line}\n"
-
-
-def _with_trail_prop(body: bytes, verification: dict[str, Any]) -> bytes:
-    """Add a ``trail-verification-status`` prop to each OSCAL result."""
-    document = json.loads(body)
-    for result in document.get("assessment-results", {}).get("results", []):
-        result.setdefault("props", []).append(
-            {
-                "name": "trail-verification-status",
-                "ns": PROJECT_NS,
-                "value": verification["status"],
-                "remarks": _one_line(verification["detail"]) or verification["status"],
-            }
-        )
-    return json.dumps(document, indent=2, ensure_ascii=False).encode("utf-8")
 
 
 def _load(session_id: str) -> tuple[AuditFlow, ExportContext, dict[str, Any]]:
@@ -153,9 +116,12 @@ def export_report(session_id: str) -> Response:
     report = flow.state.final_report
     if report is None:
         raise _missing("Final report")
-    body = _with_trail_line(
-        report_markdown(report, flow.state.approval_trail, ctx, flow.effective_view()),
-        verification,
+    body = report_markdown(
+        report,
+        flow.state.approval_trail,
+        ctx,
+        flow.effective_view(),
+        trail_verification=verification,
     ).encode("utf-8")
     return _download(
         body, "text/markdown; charset=utf-8", export_filename(ctx, "report", "md")
@@ -181,11 +147,12 @@ def export_oscal(session_id: str) -> Response:
             prepared_by=state.prepared_by,
             view=flow.effective_view(),
             decisions=state.review_decisions,
+            trail_verification=verification,
         )
     except ValueError:
         raise _missing("OSCAL assessment results") from None
     return _download(
-        _with_trail_prop(body, verification),
+        body,
         "application/json",
         export_filename(ctx, "oscal-sar", "json"),
     )
