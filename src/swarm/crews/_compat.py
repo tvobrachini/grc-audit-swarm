@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -23,6 +23,8 @@ from swarm.model_routing import (
     ModelSpec,
     detect_model_family,
 )
+
+T = TypeVar("T", bound=BaseModel)
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_\-]*)\}")
 
@@ -66,9 +68,6 @@ def tool(name: str) -> Callable[[Callable[..., Any]], NativeTool]:
     return _decorator
 
 
-native_tool = tool
-
-
 class LLM:
     """Zero-framework LLM configuration holder compatible with ``llm_factory.py``."""
 
@@ -91,9 +90,6 @@ class LLM:
             effort=effort,
             temperature=self.temperature,
         )
-
-
-NativeLLM = LLM
 
 
 class Agent:
@@ -121,9 +117,6 @@ class Agent:
         self.kwargs = kwargs
 
 
-NativeAgent = Agent
-
-
 class Task:
     """Zero-framework Task specification."""
 
@@ -143,11 +136,8 @@ class Task:
         self.name = name
         self.agent = agent
         self.output_pydantic = output_pydantic
-        self.context = list(context) if context is not None else []
+        self.context: list[Task] | None = list(context) if context is not None else None
         self.kwargs = kwargs
-
-
-NativeTask = Task
 
 
 class Process:
@@ -155,7 +145,15 @@ class Process:
     hierarchical = "hierarchical"
 
 
-NativeProcess = Process
+class TokenUsage(dict[str, int]):
+    """Token usage mapping that also exposes ``.model_dump()`` for eval harness compatibility."""
+
+    def model_dump(self) -> dict[str, int]:
+        return dict(self)
+
+
+def _empty_token_usage() -> dict[str, int]:
+    return TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
 
 @dataclass
@@ -175,6 +173,11 @@ class NativeCrewOutput:
     raw: str = ""
     pydantic: BaseModel | None = None
     tasks_output: list[NativeTaskOutput] = field(default_factory=list)
+    token_usage: dict[str, int] = field(default_factory=_empty_token_usage)
+
+
+class _TextEnvelope(BaseModel):
+    content: str
 
 
 class Crew:
@@ -201,9 +204,54 @@ class Crew:
         self.gateway = gateway or ZeroFrameworkLLMGateway()
         self.kwargs = kwargs
 
+    def _invoke_agent_llm(
+        self,
+        *,
+        agent: Any,
+        role: str,
+        desc: str,
+        expected: str,
+        context_str: str,
+        response_model: type[T],
+        default_temperature: float,
+    ) -> T:
+        llm_obj = getattr(agent, "llm", None)
+        llm_kwargs = getattr(llm_obj, "kwargs", None) or {}
+        model_id = getattr(llm_obj, "model", "gemini/gemini-2.5-flash")
+        temp = float(getattr(llm_obj, "temperature", default_temperature))
+        api_key = llm_kwargs.get("api_key", getattr(llm_obj, "api_key", None))
+        base_url = llm_kwargs.get("base_url", getattr(llm_obj, "base_url", None))
+        raw_timeout = llm_kwargs.get("timeout", getattr(llm_obj, "timeout", 120.0))
+        timeout = float(raw_timeout) if raw_timeout is not None else 120.0
+        spec = ModelSpec(
+            model_id=model_id,
+            family=detect_model_family(model_id),
+            temperature=temp,
+        )
+        sys_prompt = (
+            f"Role: {getattr(agent, 'role', 'Auditor')}\n"
+            f"Goal: {getattr(agent, 'goal', '')}\n"
+            f"Backstory: {getattr(agent, 'backstory', '')}"
+        ).strip()
+        user_prompt = f"{desc}\n\nExpected Output:\n{expected}" + (
+            f"\n\n{context_str}" if context_str else ""
+        )
+        return self.gateway.invoke_structured(
+            phase=0,
+            role=role,
+            spec=spec,
+            system_prompt=sys_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+        )
+
     def kickoff(self, inputs: dict[str, Any] | None = None) -> NativeCrewOutput:
         """Execute tasks sequentially using deterministic tools + ZeroFrameworkLLMGateway."""
         inp = dict(inputs or {})
+        receipt_start = len(self.gateway.receipts)
         completed_by_name: dict[str, NativeTaskOutput] = {}
         outputs: list[NativeTaskOutput] = []
 
@@ -213,15 +261,20 @@ class Crew:
             desc = interpolate_only(getattr(task, "description", ""), inp)
             expected = interpolate_only(getattr(task, "expected_output", ""), inp)
 
-            # Gather upstream context from explicit task.context
-            ctx_tasks = getattr(task, "context", None) or []
+            # Gather upstream context: None -> auto-chain previous task; [] -> explicitly no context
+            ctx_tasks = getattr(task, "context", None)
             ctx_blobs: list[str] = []
-            for ct in ctx_tasks:
-                ct_name = getattr(ct, "name", "")
-                if ct_name in completed_by_name:
-                    ctx_blobs.append(
-                        f"=== Context from {ct_name} ===\n{completed_by_name[ct_name].raw}"
-                    )
+            if ctx_tasks is None:
+                if outputs:
+                    prev = outputs[-1]
+                    ctx_blobs.append(f"=== Context from {prev.name} ===\n{prev.raw}")
+            else:
+                for ct in ctx_tasks:
+                    ct_name = getattr(ct, "name", "")
+                    if ct_name in completed_by_name:
+                        ctx_blobs.append(
+                            f"=== Context from {ct_name} ===\n{completed_by_name[ct_name].raw}"
+                        )
             context_str = "\n\n".join(ctx_blobs)
 
             tools = getattr(agent, "tools", None) or []
@@ -242,62 +295,28 @@ class Crew:
                     name=t_name, raw=raw_text, pydantic=None, description=desc
                 )
             elif out_model is not None:
-                llm_obj = getattr(agent, "llm", None)
-                model_id = getattr(llm_obj, "model", "gemini/gemini-2.5-flash")
-                temp = float(getattr(llm_obj, "temperature", 0.0))
-                spec = ModelSpec(
-                    model_id=model_id,
-                    family=detect_model_family(model_id),
-                    temperature=temp,
-                )
-                sys_prompt = (
-                    f"Role: {getattr(agent, 'role', 'Auditor')}\n"
-                    f"Goal: {getattr(agent, 'goal', '')}\n"
-                    f"Backstory: {getattr(agent, 'backstory', '')}"
-                ).strip()
-                user_prompt = f"{desc}\n\nExpected Output:\n{expected}" + (
-                    f"\n\n{context_str}" if context_str else ""
-                )
-                parsed = self.gateway.invoke_structured(
-                    phase=0,
+                parsed = self._invoke_agent_llm(
+                    agent=agent,
                     role=t_name,
-                    spec=spec,
-                    system_prompt=sys_prompt,
-                    user_prompt=user_prompt,
+                    desc=desc,
+                    expected=expected,
+                    context_str=context_str,
                     response_model=out_model,
+                    default_temperature=0.0,
                 )
                 raw_text = parsed.model_dump_json(indent=2)
                 task_out = NativeTaskOutput(
                     name=t_name, raw=raw_text, pydantic=parsed, description=desc
                 )
             else:
-                # Non-Pydantic intermediate memo/markdown task
-                class _TextEnvelope(BaseModel):
-                    content: str
-
-                llm_obj = getattr(agent, "llm", None)
-                model_id = getattr(llm_obj, "model", "gemini/gemini-2.5-flash")
-                temp = float(getattr(llm_obj, "temperature", 0.1))
-                spec = ModelSpec(
-                    model_id=model_id,
-                    family=detect_model_family(model_id),
-                    temperature=temp,
-                )
-                sys_prompt = (
-                    f"Role: {getattr(agent, 'role', 'Auditor')}\n"
-                    f"Goal: {getattr(agent, 'goal', '')}\n"
-                    f"Backstory: {getattr(agent, 'backstory', '')}"
-                ).strip()
-                user_prompt = f"{desc}\n\nExpected Output:\n{expected}" + (
-                    f"\n\n{context_str}" if context_str else ""
-                )
-                parsed_env = self.gateway.invoke_structured(
-                    phase=0,
+                parsed_env = self._invoke_agent_llm(
+                    agent=agent,
                     role=t_name,
-                    spec=spec,
-                    system_prompt=sys_prompt,
-                    user_prompt=user_prompt,
+                    desc=desc,
+                    expected=expected,
+                    context_str=context_str,
                     response_model=_TextEnvelope,
+                    default_temperature=0.1,
                 )
                 task_out = NativeTaskOutput(
                     name=t_name,
@@ -317,12 +336,19 @@ class Crew:
             completed_by_name[t_name] = task_out
             outputs.append(task_out)
 
+        kickoff_receipts = self.gateway.receipts[receipt_start:]
+        prompt_tokens = sum(r.input_tokens for r in kickoff_receipts)
+        completion_tokens = sum(r.output_tokens for r in kickoff_receipts)
+        token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+
         last = outputs[-1] if outputs else NativeTaskOutput(name="empty")
         return NativeCrewOutput(
             raw=last.raw,
             pydantic=last.pydantic,
             tasks_output=outputs,
+            token_usage=token_usage,
         )
-
-
-NativeCrew = Crew
