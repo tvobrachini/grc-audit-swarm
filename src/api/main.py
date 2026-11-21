@@ -18,6 +18,7 @@ from api.origin_check import (
 from api.routers import config, evidence, exports, imports, phases, sessions
 from api.scope_document import MAX_UPLOAD_BYTES
 from swarm.demo import demo_mode_enabled
+from swarm.evidence import app_version
 from swarm.tools.findings_checks import MAX_PROWLER_FILE_BYTES
 
 logger = logging.getLogger(__name__)
@@ -35,22 +36,23 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "DEMO_MODE is on: phase crews are replaced with fixed demo artifacts."
         )
-    if reviewer_tokens.reviewer_tokens_mandatory():
-        path = reviewer_tokens.configured_path()
-        if path is None:
-            raise reviewer_tokens.ReviewerTokensError(
-                "REVIEWER_TOKENS_FILE must be configured when reviewer tokens are "
-                "mandatory (ENVIRONMENT is production/staging or "
-                "REVIEWER_TOKENS_MANDATORY is set). Reviewer identity cannot be "
-                "unauthenticated in this environment."
-            )
+    path = reviewer_tokens.configured_path()
+    if reviewer_tokens.reviewer_tokens_mandatory() and path is None:
+        raise reviewer_tokens.ReviewerTokensError(
+            "REVIEWER_TOKENS_FILE must be configured when reviewer tokens are "
+            "mandatory (ENVIRONMENT is production/staging or "
+            "REVIEWER_TOKENS_MANDATORY is set). Reviewer identity cannot be "
+            "unauthenticated in this environment."
+        )
+    if path is not None:
+        reviewer_tokens.load_registry(path)
     set_main_loop(asyncio.get_running_loop())
     init_executor()
     yield
     shutdown_executor()
 
 
-app = FastAPI(title="GRC Audit Swarm API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="GRC Audit Swarm API", version=app_version(), lifespan=lifespan)
 
 # The API is credentialed (bearer token), so a wildcard origin is invalid per
 # the CORS spec when allow_credentials=True — browsers reject that combination.

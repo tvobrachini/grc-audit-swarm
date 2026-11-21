@@ -73,6 +73,16 @@ class TestIsRequestAllowed:
             {"sec-fetch-site": "cross-site"},
             {"sec-fetch-site": "same-site"},
             {"origin": "http://api.example:8000", "host": "api.example"},
+            {
+                "origin": "http://app.example.com",
+                "host": "app.example.com",
+                "sec-fetch-site": "cross-site",
+            },
+            {
+                "origin": "http://app.example.com",
+                "host": "app.example.com",
+                "sec-fetch-site": "same-site",
+            },
         ],
     )
     def test_cross_site_refused(self, headers):
@@ -84,6 +94,8 @@ class TestIsRequestAllowed:
         [
             {"origin": "http://localhost:5173"},
             {"origin": "HTTP://LOCALHOST:5173/"},
+            {"origin": "http://localhost:5173", "sec-fetch-site": "cross-site"},
+            {"origin": "http://localhost:5173", "sec-fetch-site": "same-site"},
             {"origin": "http://localhost:3000", "host": "localhost:3000"},
             {"origin": "http://localhost:3000", "sec-fetch-site": "same-origin"},
             {"sec-fetch-site": "same-origin"},
@@ -134,6 +146,13 @@ class TestMiddleware:
     def test_same_host_origin_passes(self, client):
         # TestClient sends Host: testserver.
         assert _import(client, {"Origin": "http://testserver"}).status_code == 201
+
+    def test_same_host_with_cross_site_fetch_metadata_refused(self, client):
+        resp = _import(
+            client, {"Origin": "http://testserver", "Sec-Fetch-Site": "cross-site"}
+        )
+        assert resp.status_code == 403
+        assert resp.json()["code"] == ORIGIN_NOT_ALLOWED
 
     def test_same_origin_fetch_metadata_passes(self, client):
         headers = {"Origin": "http://localhost:3000", "Sec-Fetch-Site": "same-origin"}

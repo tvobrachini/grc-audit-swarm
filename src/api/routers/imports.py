@@ -109,7 +109,10 @@ def import_prowler_findings_file(
         },
     }
     vault_record = EvidenceAssuranceProtocol.register_evidence(
-        summary, "prowler.findings_import.api_upload", metadata=metadata
+        summary,
+        "prowler.findings_import.api_upload",
+        metadata=metadata,
+        session_id=session_id,
     )
     logger.info(
         "Prowler findings imported for session %s by %r (%s): vault %s",

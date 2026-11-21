@@ -10,9 +10,10 @@ preflight, so CORS alone does not stop them from being *sent*.
 This check closes that gap. For ``POST`` / ``PUT`` / ``PATCH`` / ``DELETE``:
 
 * an ``Origin`` header, when present, must be in the configured allow-list
-  (``CORS_ALLOWED_ORIGINS``, the same list CORS uses), or name the same
-  host the request was sent to, or come with ``Sec-Fetch-Site:
-  same-origin``; ``Origin: null`` (sandboxed frames, local files) is refused;
+  (``CORS_ALLOWED_ORIGINS``, the same list CORS uses), or come with
+  ``Sec-Fetch-Site: same-origin``, or (when ``Sec-Fetch-Site`` is not
+  ``cross-site`` or ``same-site``) name the same host the request was sent
+  to; ``Origin: null`` (sandboxed frames, local files) is refused;
 * with no ``Origin``, a ``Sec-Fetch-Site`` of ``cross-site`` or
   ``same-site`` is refused (``same-origin`` and ``none`` are allowed);
 * a request with neither header (curl, scripts, server-to-server clients,
@@ -64,6 +65,8 @@ def is_request_allowed(
             return False
         if fetch_site == "same-origin":
             return True
+        if fetch_site in ("cross-site", "same-site"):
+            return False
         host = (headers.get("host") or "").strip().lower()
         try:
             origin_host = urlsplit(normalised).netloc
