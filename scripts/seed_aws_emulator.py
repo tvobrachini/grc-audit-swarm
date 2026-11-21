@@ -35,7 +35,7 @@ _ALL_BPA_ON = {
     "RestrictPublicBuckets": True,
 }
 
-_WEAK_PASSWORD_POLICY: dict[str, Any] = {
+_WEAK_ACCOUNT_POLICY: dict[str, Any] = {
     "MinimumPasswordLength": 6,
     "RequireSymbols": False,
     "RequireNumbers": False,
@@ -47,7 +47,7 @@ _WEAK_PASSWORD_POLICY: dict[str, Any] = {
     "HardExpiry": False,
 }
 
-_STRONG_PASSWORD_POLICY: dict[str, Any] = {
+_STRONG_ACCOUNT_POLICY: dict[str, Any] = {
     "MinimumPasswordLength": 14,
     "RequireSymbols": True,
     "RequireNumbers": True,
@@ -194,7 +194,7 @@ def _ensure_access_key(iam: Any, username: str) -> str:
 
 def _seed_iam(iam: Any, profile: str) -> dict[str, Any]:
     policy = (
-        _WEAK_PASSWORD_POLICY if profile == "misconfigured" else _STRONG_PASSWORD_POLICY
+        _WEAK_ACCOUNT_POLICY if profile == "misconfigured" else _STRONG_ACCOUNT_POLICY
     )
     iam.update_account_password_policy(**policy)
 
@@ -218,8 +218,9 @@ def _seed_iam(iam: Any, profile: str) -> dict[str, Any]:
             }
         )
 
+    min_length = 6 if profile == "misconfigured" else 14
     return {
-        "password_policy_min_length": policy["MinimumPasswordLength"],
+        "account_policy_min_length": min_length,
         "users": users_summary,
     }
 
