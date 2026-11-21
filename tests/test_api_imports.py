@@ -85,8 +85,15 @@ class TestSuccessfulImport:
         vault_id = resp.json()["vault_id"]
         vault_path = Path(os.environ["EVIDENCE_VAULT_PATH"]) / f"{vault_id}.json"
         record = json.loads(vault_path.read_text())
+        assert record["metadata"]["session_id"] == "sess-1"
         assert record["metadata"]["parameters"]["session_id"] == "sess-1"
         assert record["metadata"]["parameters"]["source_filename"] == "prowler.json"
+        assert EvidenceAssuranceProtocol.verify_exact_quote(
+            vault_id, "s3_bucket_level_public_access_block", session_id="sess-1"
+        )
+        assert not EvidenceAssuranceProtocol.verify_exact_quote(
+            vault_id, "s3_bucket_level_public_access_block", session_id="other-sess"
+        )
 
 
 class TestRejections:

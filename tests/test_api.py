@@ -89,11 +89,14 @@ class TestJobStore:
 
     def test_set_job_completed(self):
         set_job("job-2", "completed")
-        assert get_job("job-2")["status"] == "completed"
+        job = get_job("job-2")
+        assert job is not None
+        assert job["status"] == "completed"
 
     def test_set_job_failed_with_error(self):
         set_job("job-3", "failed", "something broke")
         result = get_job("job-3")
+        assert result is not None
         assert result["status"] == "failed"
         assert result["error"] == "something broke"
 
@@ -398,3 +401,119 @@ class TestAuthNonAsciiToken:
         with pytest.raises(HTTPException) as exc_info:
             require_api_auth(authorization=None, x_api_token="éééééé")
         assert exc_info.value.status_code == 401
+
+
+class TestAppVersionAndLifespan:
+    def test_app_version_matches_package_version(self):
+        from api.main import app
+        from swarm.evidence import app_version
+
+        assert app.version == app_version()
+
+    def test_lifespan_fails_fast_on_missing_reviewer_tokens_file(
+        self, monkeypatch, tmp_path
+    ):
+        from api import reviewer_tokens as rt
+        from api.main import app
+
+        monkeypatch.setenv(rt.ENV_VAR, str(tmp_path / "does_not_exist.json"))
+        with pytest.raises(rt.ReviewerTokensError):
+            with TestClient(app):
+                pass
+
+    def test_lifespan_fails_fast_on_corrupt_reviewer_tokens_file(
+        self, monkeypatch, tmp_path
+    ):
+        from api import reviewer_tokens as rt
+        from api.main import app
+
+        corrupt = tmp_path / "corrupt_tokens.json"
+        corrupt.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setenv(rt.ENV_VAR, str(corrupt))
+        with pytest.raises(rt.ReviewerTokensError):
+            with TestClient(app):
+                pass
+
+    def test_lifespan_succeeds_with_valid_reviewer_tokens_file(
+        self, monkeypatch, tmp_path
+    ):
+        from api import reviewer_tokens as rt
+        from api.main import app
+
+        valid = tmp_path / "reviewer_tokens.json"
+        rt.add_reviewer(valid, "A. Chen")
+        monkeypatch.setenv(rt.ENV_VAR, str(valid))
+        with TestClient(app) as c:
+            assert c.get("/health").status_code == 200
+
+
+class TestRunPhaseAndErrorSanitization:
+    @pytest.mark.parametrize(
+        ("phase", "method_name", "expected_artifact"),
+        [
+            (1, "generate_planning", "racm_plan"),
+            (2, "generate_fieldwork", "working_papers"),
+            (3, "generate_reporting", "final_report"),
+        ],
+    )
+    def test_run_phase_dispatches_and_completes(
+        self, phase, method_name, expected_artifact
+    ):
+        from api.routers.sessions import _run_phase
+
+        sid = f"sess-phase-{phase}"
+        jid = f"job-phase-{phase}"
+        mock_flow = _make_mock_flow(f"WAITING_HUMAN_GATE_{phase}")
+        with (
+            patch("api.routers.sessions._get_or_load_flow", return_value=mock_flow),
+            patch("api.routers.sessions._repo") as mock_repo,
+        ):
+            _run_phase(sid, jid, phase)
+
+        getattr(mock_flow, method_name).assert_called_once()
+        mock_repo.save.assert_called_once_with(sid, mock_flow)
+        assert get_job(jid) == {"status": "completed", "error": None}
+        q = get_queue(sid)
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        assert events[0] == {"type": "status", "status": f"RUNNING_PHASE_{phase}"}
+        assert events[-1] == {
+            "type": "complete",
+            "status": f"WAITING_HUMAN_GATE_{phase}",
+            "artifact": expected_artifact,
+        }
+
+    def test_run_phase_sanitizes_error_for_sse_and_job_store(self):
+        from api.routers.sessions import _run_phase
+
+        sid = "sess-phase-err"
+        jid = "job-phase-err"
+        mock_flow = _make_mock_flow("RUNNING_PHASE_1")
+        mock_flow.generate_planning.side_effect = RuntimeError(
+            "Failed reading /home/alice/.aws/credentials for account "
+            "123456789012 with key sk-secret1234567890"
+        )
+        with (
+            patch("api.routers.sessions._get_or_load_flow", return_value=mock_flow),
+            patch("api.routers.sessions._repo"),
+        ):
+            _run_phase(sid, jid, 1)
+
+        job = get_job(jid)
+        assert job is not None
+        assert job["status"] == "failed"
+        reason = job["error"]
+        assert reason is not None
+        assert reason.startswith("RuntimeError: ")
+        assert "123456789012" not in reason
+        assert "/home/alice/.aws/credentials" not in reason
+        assert "sk-secret1234567890" not in reason
+        assert "<path>" in reason
+        assert "[REDACTED]" in reason
+
+        q = get_queue(sid)
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        assert events[-1] == {"type": "error", "reason": reason}

@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -47,6 +48,7 @@ from swarm.audit_flow import (
     PhaseArtifactMissingError,
     ReviewBlockedError,
 )
+from swarm.evidence import _redact_account_ids
 from swarm.review_decisions import (
     DecisionContext,
     EffectiveView,
@@ -335,72 +337,66 @@ def _build_detail(session_id: str, data: dict[str, Any]) -> SessionDetail:
     )
 
 
-def _run_phase_1(session_id: str, job_id: str) -> None:
+_UNIX_PATH_RE = re.compile(r"(?<![:\w])/(?:[\w.-]+/)+[\w.-]*")
+_WIN_PATH_RE = re.compile(r"\b[A-Za-z]:\\[^\s'\"]+")
+_SECRET_RE = re.compile(
+    r"(?:(?:AKIA|ASIA)[0-9A-Z]{16}|(?:sk-|gsk_|nvapi-)[A-Za-z0-9_-]{10,}|AIza[0-9A-Za-z_-]{20,}|Bearer\s+\S+)"
+)
+_MAX_ERROR_REASON_LEN = 200
+
+_PHASE_SPEC: dict[int, tuple[str, str, str]] = {
+    1: ("RUNNING_PHASE_1", "generate_planning", "racm_plan"),
+    2: ("RUNNING_PHASE_2", "generate_fieldwork", "working_papers"),
+    3: ("RUNNING_PHASE_3", "generate_reporting", "final_report"),
+}
+
+
+def _safe_error_reason(exc: Exception) -> str:
+    """Concise, sanitized error message safe for SSE events and job status."""
+    text = _redact_account_ids(str(exc))
+    text = _SECRET_RE.sub("[REDACTED]", text)
+    text = _UNIX_PATH_RE.sub("<path>", text)
+    text = _WIN_PATH_RE.sub("<path>", text)
+    text = " ".join(text.split())
+    if len(text) > _MAX_ERROR_REASON_LEN:
+        text = text[: _MAX_ERROR_REASON_LEN - 3].rstrip() + "..."
+    name = type(exc).__name__
+    return f"{name}: {text}" if text else name
+
+
+def _run_phase(session_id: str, job_id: str, phase: int) -> None:
     flow = _get_or_load_flow(session_id)
     if not flow:
         set_job(job_id, "failed", "flow not found")
         return
+    running_status, method_name, artifact = _PHASE_SPEC[phase]
     try:
-        push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_1"})
-        flow.generate_planning(event_callback=_make_event_callback(session_id))
+        push_event(session_id, {"type": "status", "status": running_status})
+        getattr(flow, method_name)(event_callback=_make_event_callback(session_id))
         push_event(session_id, {"type": "status", "status": flow.state.status})
         push_event(
             session_id,
-            {"type": "complete", "status": flow.state.status, "artifact": "racm_plan"},
+            {"type": "complete", "status": flow.state.status, "artifact": artifact},
         )
         _repo.save(session_id, flow)
         set_job(job_id, "completed")
     except Exception as exc:
-        push_event(session_id, {"type": "error", "reason": str(exc)})
-        set_job(job_id, "failed", str(exc))
+        logger.exception("Phase %d failed for session %s", phase, session_id)
+        reason = _safe_error_reason(exc)
+        push_event(session_id, {"type": "error", "reason": reason})
+        set_job(job_id, "failed", reason)
+
+
+def _run_phase_1(session_id: str, job_id: str) -> None:
+    _run_phase(session_id, job_id, 1)
 
 
 def _run_phase_2(session_id: str, job_id: str) -> None:
-    flow = _get_or_load_flow(session_id)
-    if not flow:
-        set_job(job_id, "failed", "flow not found")
-        return
-    try:
-        push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_2"})
-        flow.generate_fieldwork(event_callback=_make_event_callback(session_id))
-        push_event(session_id, {"type": "status", "status": flow.state.status})
-        push_event(
-            session_id,
-            {
-                "type": "complete",
-                "status": flow.state.status,
-                "artifact": "working_papers",
-            },
-        )
-        _repo.save(session_id, flow)
-        set_job(job_id, "completed")
-    except Exception as exc:
-        push_event(session_id, {"type": "error", "reason": str(exc)})
-        set_job(job_id, "failed", str(exc))
+    _run_phase(session_id, job_id, 2)
 
 
 def _run_phase_3(session_id: str, job_id: str) -> None:
-    flow = _get_or_load_flow(session_id)
-    if not flow:
-        set_job(job_id, "failed", "flow not found")
-        return
-    try:
-        push_event(session_id, {"type": "status", "status": "RUNNING_PHASE_3"})
-        flow.generate_reporting(event_callback=_make_event_callback(session_id))
-        push_event(session_id, {"type": "status", "status": flow.state.status})
-        push_event(
-            session_id,
-            {
-                "type": "complete",
-                "status": flow.state.status,
-                "artifact": "final_report",
-            },
-        )
-        _repo.save(session_id, flow)
-        set_job(job_id, "completed")
-    except Exception as exc:
-        push_event(session_id, {"type": "error", "reason": str(exc)})
-        set_job(job_id, "failed", str(exc))
+    _run_phase(session_id, job_id, 3)
 
 
 @router.post("", response_model=SessionSummary, status_code=201)
