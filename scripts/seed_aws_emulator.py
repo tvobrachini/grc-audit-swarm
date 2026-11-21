@@ -528,6 +528,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _print_report(summary: dict[str, Any]) -> None:
+    """Print a fixed-label seed report without echoing raw resource data."""
+    print(f"Seeded profile: {summary['profile']}")
+    print(f"Endpoint: {summary['endpoint_url']}")
+    print(f"Region: {summary['region']}")
+    print("Expected verdicts:")
+    for check, verdict in sorted(summary["expected_verdicts"].items()):
+        print(f"  {check.replace('_', ' ')}: {verdict}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     summary = seed_emulator(
@@ -535,7 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         region=args.region,
         profile=args.profile,
     )
-    print(json.dumps(summary, indent=2, default=str))
+    _print_report(summary)
     return 0
 
 
