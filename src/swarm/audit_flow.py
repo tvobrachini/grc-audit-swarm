@@ -1,10 +1,7 @@
-import hashlib
 import logging
-import re
-import uuid
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from swarm import trail as audit_trail
@@ -15,14 +12,32 @@ from swarm.crews.result_adapter import CrewResultAdapter
 from swarm.demo import (
     DemoCrew,
     demo_mode_enabled,
-    demo_mode_requested,
     demo_reject_phase,
 )
 from swarm.evidence import (
-    app_version as evidence_app_version,
-)
-from swarm.evidence import (
     unverified_findings,
+)
+from swarm.prompt_inputs import (  # noqa: F401 (re-exported for backwards compat)
+    deficiency_scale_for_scope,
+    deficiency_scale_guidance,
+    effective_working_papers,
+    fieldwork_inputs,
+    findings_index,
+    planning_inputs,
+    racm_summary,
+    racm_test_plan,
+    reporting_inputs,
+    scope_string,
+)
+from swarm.provenance import (  # noqa: F401 (re-exported for backwards compat)
+    latest_run_for_phase,
+    prompt_fingerprint,
+    run_provenance_extra,
+    runtime_version,
+    start_generation_run,
+)
+from swarm.provenance import (  # noqa: F401 (re-exported for backwards compat)
+    runtime_version as _runtime_version,
 )
 from swarm.review_decisions import (
     DecisionConflictError,
@@ -41,11 +56,7 @@ from swarm.review_policy import (
     sod_violation,
 )
 from swarm.schema import (
-    DeficiencyScale,
-    DesignConclusion,
-    FindingResult,
     IdentitySource,
-    OperatingConclusion,
     ReviewDecision,
     WorkingPaperSchema,
 )
@@ -154,68 +165,6 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-# ── Generation provenance (see DECISIONS.md, ADR-010) ──────────────────────
-
-_CONFIG_DIR = Path(__file__).parent / "config"
-# Per phase: the agent/task YAML files whose content is fingerprinted.
-_PHASE_CONFIG_FILES: dict[int, tuple[str, str]] = {
-    1: ("planning_agents.yaml", "planning_tasks.yaml"),
-    2: ("fieldwork_agents.yaml", "fieldwork_tasks.yaml"),
-    3: ("reporting_agents.yaml", "reporting_tasks.yaml"),
-}
-
-
-def prompt_fingerprint(phase: int, skill_context: list[Any]) -> str:
-    """Deterministic SHA-256 fingerprint of the prompts a phase run used.
-
-    Covers the phase's agent and task YAML config files (raw bytes, as
-    loaded by the crew) and the specialist prompt text injected into an
-    agent's backstory for any active domain skill (``skill_loader
-    .get_specialist_prompt``), in that order. The same config files plus the
-    same active skills always hash to the same value; a change to either
-    changes it. Each part is length-prefixed before hashing so that
-    concatenating differently split content can never collide.
-
-    Only the *prompt* fingerprint changes on a skill toggle or a config edit;
-    a difference does not by itself mean the model call itself was
-    different — see ADR-010 for what this can and cannot prove.
-    """
-    parts: list[bytes] = [
-        (_CONFIG_DIR / name).read_bytes() for name in _PHASE_CONFIG_FILES[phase]
-    ]
-    if skill_context:
-        from swarm.skill_loader import get_specialist_prompt
-
-        parts.append(get_specialist_prompt(skill_context).encode("utf-8"))
-    digest = hashlib.sha256()
-    for part in parts:
-        digest.update(len(part).to_bytes(8, "big"))
-        digest.update(part)
-    return digest.hexdigest()
-
-
-def _runtime_version() -> str:
-    """Version label of the agent runtime recorded with each generation run.
-
-    The runtime is the in-repo zero-framework layer (ADR-013), so it is
-    labelled with the app version. The run field is still named
-    ``crewai_version`` so stored runs and API clients keep working.
-    """
-    return f"zero-framework-{evidence_app_version()}"
-
-
-# Fixed at import time: it cannot change while the process is running.
-_RUNTIME_VERSION = _runtime_version()
-_APP_VERSION = evidence_app_version()
-
-# Crew / QA temperatures, matching the crews' Agent construction
-# (swarm.crews.*_crew): base agents at 0.1, QA reviewers at 0.0. Recorded
-# here so a generation run states the temperature it used without having to
-# re-derive it from the crew classes.
-_CREW_TEMPERATURE = 0.1
-_QA_TEMPERATURE = 0.0
-
-
 def _require_text(value: str, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{what} is required")
@@ -231,151 +180,6 @@ def _identity_source(value: str) -> str:
             "identity_source must be one of: "
             + ", ".join(s.value for s in IdentitySource)
         ) from exc
-
-
-def _control_attributes(control: Any) -> str:
-    """Compact ``key; Automated; Preventive; Daily; owner …`` tag for a control."""
-    parts: list[str] = []
-    if control.key_control is not None:
-        parts.append("key" if control.key_control else "non-key")
-    for value in (control.nature, control.control_type, control.frequency):
-        if value is not None:
-            parts.append(str(value))
-    if control.control_owner:
-        parts.append(f"owner {control.control_owner}")
-    return "; ".join(parts)
-
-
-def racm_summary(racm: Any) -> str:
-    """One line per risk and control — IDs, ratings, attributes and mappings;
-    no test procedures."""
-    if racm is None:
-        return "(no RACM available)"
-    lines: list[str] = []
-    for risk in racm.risks:
-        mapping = ", ".join(risk.regulatory_mapping)
-        rating = ""
-        if risk.likelihood or risk.impact:
-            rating = (
-                f" (likelihood {risk.likelihood or '?'}, impact {risk.impact or '?'})"
-            )
-        lines.append(f"{risk.risk_id}: {risk.description}{rating} [{mapping}]")
-        for control in risk.controls:
-            attrs = _control_attributes(control)
-            tag = f" [{attrs}]" if attrs else ""
-            lines.append(f"  - {control.control_id}{tag}: {control.description}")
-    return "\n".join(lines) or "(RACM contains no risks)"
-
-
-def _numbered_steps(steps: Any) -> str:
-    return " ".join(
-        f"{i}. {s.step_description} -> expect: {s.expected_result}"
-        for i, s in enumerate(steps or [], 1)
-    )
-
-
-def racm_test_plan(racm: Any) -> str:
-    """Compact per-control test plan for Fieldwork: attributes, ToD / ToE /
-    substantive steps and the ToE test design (population, sample, period).
-
-    Plain text rather than the RACM JSON: every fieldwork agent needs it, and
-    JSON keys and nulls would roughly double its size in each prompt.
-    """
-    if racm is None:
-        return "(no RACM available)"
-    lines: list[str] = []
-    for risk in racm.risks:
-        for c in risk.controls:
-            tp = c.testing_procedures
-            lines.append(
-                f"Control {c.control_id} (risk {risk.risk_id}): {c.description}"
-            )
-            attrs = _control_attributes(c)
-            extra = []
-            if c.assertions:
-                extra.append("objectives: " + ", ".join(c.assertions))
-            if c.ipe:
-                extra.append("IPE: " + ", ".join(c.ipe))
-            detail = "; ".join(x for x in [attrs, *extra] if x)
-            if detail:
-                lines.append(f"  Attributes: {detail}")
-            lines.append(f"  ToD: {_numbered_steps(tp.test_of_design) or '(none)'}")
-            design: list[str] = []
-            if tp.population is not None:
-                design.append(
-                    f"population: {tp.population.source} "
-                    f"(completeness: {tp.population.completeness_procedure})"
-                )
-            if tp.sample_size is not None or tp.sampling_method is not None:
-                size = tp.sample_size if tp.sample_size is not None else "?"
-                method = f", {tp.sampling_method}" if tp.sampling_method else ""
-                design.append(f"sample: {size}{method}")
-            if tp.period_of_reliance:
-                design.append(f"period: {tp.period_of_reliance}")
-            toe = _numbered_steps(tp.test_of_effectiveness) or "(none)"
-            lines.append(
-                f"  ToE: {toe}" + (f" | {'; '.join(design)}" if design else "")
-            )
-            if tp.substantive_testing:
-                lines.append(
-                    f"  Substantive: {_numbered_steps(tp.substantive_testing)}"
-                )
-    return "\n".join(lines) or "(RACM contains no controls)"
-
-
-def findings_index(papers: Any) -> str:
-    """``control_id | result (ToD …; ToE …) | vault_id`` per finding, for OSCAL
-    mapping."""
-    if papers is None or not papers.findings:
-        return "(no findings)"
-    return "\n".join(
-        f"{f.control_id} | {f.result} (ToD {f.tod_conclusion}; ToE "
-        f"{f.toe_conclusion}) | {f.vault_id_reference or '(no evidence)'}"
-        for f in papers.findings
-    )
-
-
-# Scope terms that make an engagement an ICFR / SOX one, so deficiencies are
-# classified on the control deficiency / significant deficiency / material
-# weakness scale instead of a risk rating. Deliberately not matched: "PCAOB"
-# and "COSO" (in the API's default framework list for every session) and
-# SOC 1 / ISAE 3402 (service-auditor reports, which use a different model).
-_ICFR_SCOPE = re.compile(
-    r"\b(sox|sarbanes|icfr|internal control over financial reporting"
-    r"|financial reporting|financial statements?|section 404)\b",
-    re.IGNORECASE,
-)
-
-
-def deficiency_scale_for_scope(
-    theme: str, business_context: str, frameworks: list[str]
-) -> DeficiencyScale:
-    """ICFR scale for SOX / financial-reporting scopes, else a risk rating."""
-    text = " ".join([theme or "", business_context or "", *frameworks])
-    if _ICFR_SCOPE.search(text):
-        return DeficiencyScale.ICFR
-    return DeficiencyScale.RISK_RATING
-
-
-def deficiency_scale_guidance(scale: DeficiencyScale) -> str:
-    """Prompt text telling the deficiency evaluator which scale to use."""
-    if scale == DeficiencyScale.ICFR:
-        return (
-            f"deficiency_scale = '{scale}' (the scope is ICFR / SOX). Classify "
-            "each deficiency as 'Control Deficiency', 'Significant Deficiency' "
-            "or 'Material Weakness' (or 'Not a deficiency'). A Material Weakness "
-            "needs a reasonable possibility (likelihood Medium/High) that a "
-            "material misstatement (magnitude High) is not prevented or detected "
-            "on a timely basis; a Significant Deficiency is less severe but "
-            "merits the attention of those charged with governance; otherwise "
-            "it is a Control Deficiency."
-        )
-    return (
-        f"deficiency_scale = '{scale}' (the scope is not ICFR). Rate each "
-        "deficiency 'Low', 'Medium' or 'High' from likelihood x magnitude (or "
-        "'Not a deficiency'). Do NOT use SOX terms (significant deficiency, "
-        "material weakness) for this scope."
-    )
 
 
 class AuditFlow:
@@ -474,112 +278,16 @@ class AuditFlow:
     # ── Generation provenance ────────────────────────────────────────────────
 
     def _start_generation_run(self, phase: int) -> GenerationRun:
-        """Begin recording generation provenance for one phase run.
-
-        Appended to ``state.generation_runs`` immediately (``outcome`` starts
-        as ``"running"``) so a run is recorded even if the crew never
-        returns; ``_run_crew_with_qa`` fills in ``attempts``, ``ended_at``
-        and the final ``outcome`` as the run progresses.
-
-        Uses ``demo_mode_requested`` (never raises) rather than
-        ``demo_mode_enabled`` (raises when DEMO_MODE is set in a blocked
-        environment): that guard's raise must surface from inside the crew
-        build/kickoff try/except in ``_run_crew_with_qa`` exactly as before,
-        not here, before a run record even exists.
-        """
-        demo = demo_mode_requested()
-        if demo:
-            crew_info = {"provider": "demo", "model": "fixed-content"}
-            qa_info = {"provider": "demo", "model": "fixed-content"}
-            drafter_family = "demo"
-            qa_family = "demo"
-            cross_family = False
-            cascade_tier = "tier_0_deterministic"
-        else:
-            from swarm.llm_factory import describe_crew_llm, describe_qa_llm
-            from swarm.model_routing import (
-                ModelFamily,
-                assert_disjoint_family,
-                detect_model_family,
-            )
-
-            try:
-                crew_info = describe_crew_llm()
-            except Exception:
-                # No provider configured: the crew build that follows raises
-                # the same error and is handled there (_fail_phase). This
-                # run record still gets stamped so the failed attempt has one.
-                crew_info = {"provider": "unknown", "model": "unknown"}
-            try:
-                qa_info = describe_qa_llm()
-            except Exception:
-                qa_info = {"provider": "unknown", "model": "unknown"}
-
-            dfam = detect_model_family(
-                f"{crew_info['provider']}/{crew_info['model']}"
-                if crew_info["provider"] not in ("unknown", "custom")
-                else crew_info["model"]
-            )
-            qfam = detect_model_family(
-                f"{qa_info['provider']}/{qa_info['model']}"
-                if qa_info["provider"] not in ("unknown", "custom")
-                else qa_info["model"]
-            )
-            drafter_family = dfam.value
-            qa_family = qfam.value
-            cross_family = (
-                dfam != ModelFamily.OTHER and qfam != ModelFamily.OTHER and dfam != qfam
-            )
-            cascade_tier = "tier_2_cross_family" if cross_family else "tier_1_system1"
-            import os as _os
-
-            if _os.environ.get("AUDIT_ENFORCE_CROSS_FAMILY", "").strip() == "1":
-                assert_disjoint_family(
-                    f"{crew_info['provider']}/{crew_info['model']}",
-                    f"{qa_info['provider']}/{qa_info['model']}",
-                )
-        run = GenerationRun(
-            run_id=str(uuid.uuid4()),
-            phase=phase,
-            provider=crew_info["provider"],
-            model=crew_info["model"],
-            qa_provider=qa_info["provider"],
-            qa_model=qa_info["model"],
-            temperature=0.0 if demo else _CREW_TEMPERATURE,
-            qa_temperature=0.0 if demo else _QA_TEMPERATURE,
-            crewai_version=_RUNTIME_VERSION,
-            app_version=_APP_VERSION,
-            prompt_fingerprint=prompt_fingerprint(phase, self._skill_context),
-            started_at=_now(),
-            demo_mode=demo,
-            drafter_family=drafter_family,
-            qa_family=qa_family,
-            cross_family_verified=cross_family,
-            cascade_tier=cascade_tier,
-        )
+        """Begin recording generation provenance for one phase run."""
+        run = start_generation_run(phase, self._skill_context)
         self.state.generation_runs.append(run)
         return run
 
     def _latest_run_for_phase(self, phase: int) -> GenerationRun | None:
-        for run in reversed(self.state.generation_runs):
-            if run.phase == phase:
-                return run
-        return None
+        return latest_run_for_phase(self.state.generation_runs, phase)
 
     def _run_provenance_extra(self, phase: int) -> dict[str, str]:
-        """Trail-entry fields tying an action to the generation run it acted
-        on: the run id, its prompt fingerprint, and its provider/model —
-        enough to say exactly what was reviewed (see ADR-010). Empty when no
-        run has been recorded yet for this phase (e.g. a snapshot from
-        before this field existed)."""
-        run = self._latest_run_for_phase(phase)
-        if run is None:
-            return {}
-        return {
-            "generation_run_id": run.run_id,
-            "generation_prompt_fingerprint": run.prompt_fingerprint,
-            "generation_model": f"{run.provider}/{run.model}",
-        }
+        return run_provenance_extra(self.state.generation_runs, phase)
 
     def verify_trail(self, anchor: dict[str, Any] | None = None) -> dict[str, Any]:
         """Verify the approval trail's hash chain (see :mod:`swarm.trail`).
@@ -1158,6 +866,7 @@ class AuditFlow:
         """
         from swarm.linters import (
             LintReport,
+            LintViolation,
             lint_racm,
             lint_report,
             lint_working_papers,
@@ -1195,6 +904,24 @@ class AuditFlow:
                         expected_scale=expected_scale,
                     )
         except Exception as exc:
+            if os.environ.get("AUDIT_STRICT_LINTER", "").strip() == "1":
+                logger.exception(
+                    "Deterministic linter failed for phase %d (strict mode — failing closed)",
+                    phase,
+                )
+                return LintReport(
+                    violations=[
+                        LintViolation(
+                            rule_id="LINTER_ERROR",
+                            subject_id=f"PHASE_{phase}",
+                            message=(
+                                "Deterministic linter raised an unexpected error "
+                                f"({type(exc).__name__}: {exc}); strict mode fails closed."
+                            ),
+                            severity="error",
+                        )
+                    ]
+                )
             logger.debug("Deterministic linter skipped for phase %d: %s", phase, exc)
         return LintReport()
 
@@ -1226,6 +953,8 @@ class AuditFlow:
         seeded_feedback = str(inputs.get(feedback_key, "") or "")
         rejection: str | None = None
         qa_rejected = False
+        evidence_rejected = False
+        linter_rejected = False
         artifact: Any = None
         # Generation provenance for this attempted run (ADR-010): started
         # now, filled in as the run progresses, and never removed even if
@@ -1252,17 +981,18 @@ class AuditFlow:
             lint_result = self.lint_phase_artifact(phase, artifact)
             gen_run.linter_passed = lint_result.passed
             gen_run.linter_violations = [v.rule_id for v in lint_result.errors]
-            import os as _os
 
             linter_reason = (
                 lint_result.to_feedback()
                 if (
                     not lint_result.passed
-                    and _os.environ.get("AUDIT_STRICT_LINTER", "").strip() == "1"
+                    and os.environ.get("AUDIT_STRICT_LINTER", "").strip() == "1"
                 )
                 else None
             )
             qa_rejected = qa_reason is not None
+            evidence_rejected = evidence_reason is not None
+            linter_rejected = linter_reason is not None
             reasons = [r for r in (qa_reason, evidence_reason, linter_reason) if r]
             rejection = " ".join(reasons) if reasons else None
             if rejection is None:
@@ -1299,10 +1029,17 @@ class AuditFlow:
             self.machine.reject_phase(phase)
             self._commit_status()
             self.state.qa_rejection_reason = rejection
+            by_parts: list[str] = []
+            if qa_rejected:
+                by_parts.append("rejected by the QA reviewer")
+            if evidence_rejected:
+                by_parts.append("failed the deterministic evidence check")
+            if linter_rejected:
+                by_parts.append("failed the deterministic audit linter")
             by = (
-                "rejected by the QA reviewer"
-                if qa_rejected
-                else "failed the deterministic evidence check"
+                " and ".join(by_parts)
+                if by_parts
+                else "rejected by the phase quality gate"
             )
             self.state.current_human_dossier = (
                 f"{label} draft {by} after one automatic retry: {rejection} "
@@ -1367,91 +1104,33 @@ class AuditFlow:
     # checks all three crews).
 
     def _scope_string(self) -> str:
-        return (
-            f"Theme: {self.state.theme}. "
-            f"Business context: {self.state.business_context}. "
-            f"Frameworks: {', '.join(self.state.frameworks) or 'n/a'}."
+        return scope_string(
+            self.state.theme, self.state.business_context, self.state.frameworks
         )
 
     def _planning_inputs(self) -> dict[str, Any]:
-        return {
-            "theme": self.state.theme,
-            "business_context": self.state.business_context,
-            "frameworks": ", ".join(self.state.frameworks),
-            "qa_feedback": "",
-        }
+        return planning_inputs(
+            self.state.theme, self.state.business_context, self.state.frameworks
+        )
 
     def _fieldwork_inputs(self) -> dict[str, Any]:
-        return {
-            # The working papers' theme field.
-            "theme": self.state.theme,
-            # Compact per-control test plan (attributes, steps, population,
-            # sample, period) shared by the collector, evaluator and QA.
-            "test_plan": racm_test_plan(self.state.racm_plan),
-            "qa_feedback": "",
-        }
+        return fieldwork_inputs(self.state.theme, self.state.racm_plan)
 
     def effective_working_papers(self) -> WorkingPaperSchema | None:
-        """Working papers overlaid with active Gate 2 reviewer decisions (`D5`).
-
-        Never mutates ``self.state.working_papers`` (preserving ADR-011's
-        append-only draft immutability). When no reviewer ``challenge`` is
-        active on any finding, returns ``self.state.working_papers`` directly.
-        """
+        """Working papers overlaid with active Gate 2 reviewer decisions (`D5`)."""
         papers = self.state.working_papers
-        if papers is None:
-            return None
-        if not self.state.review_decisions:
+        if papers is None or not self.state.review_decisions:
             return papers
-        view = self.effective_view()
-        changed = {fv.control_id: fv for fv in view.findings if fv.differs_from_draft}
-        if not changed:
-            return papers
-        overlaid_findings = []
-        for f in papers.findings:
-            fv = changed.get(f.control_id)
-            if fv is None:
-                overlaid_findings.append(f)
-            else:
-                eff = fv.effective
-                overlaid_findings.append(
-                    f.model_copy(
-                        update={
-                            "tod_conclusion": DesignConclusion(eff.tod_conclusion),
-                            "toe_conclusion": OperatingConclusion(eff.toe_conclusion),
-                            "result": FindingResult(eff.result),
-                            "preliminary_deficiency": eff.preliminary_deficiency,
-                        }
-                    )
-                )
-        return papers.model_copy(update={"findings": overlaid_findings})
+        return effective_working_papers(papers, self.effective_view())
 
     def _reporting_inputs(self) -> dict[str, Any]:
-        papers = self.effective_working_papers()
-        return {
-            "theme": self.state.theme,
-            "scope_string": self._scope_string(),
-            # Compact RACM (risks → controls, no test steps): the writer needs
-            # the control universe, not the procedures, and the full RACM plus
-            # the working papers would overflow low-TPM providers.
-            "racm_summary": racm_summary(self.state.racm_plan),
-            "working_papers_string": (
-                papers.model_dump_json(exclude_none=True) if papers else ""
-            ),
-            # Small control_id → vault_id index for the OSCAL mapper, which
-            # otherwise only sees the narrative draft via task context.
-            "findings_index": findings_index(papers),
-            # Which classification scale the engagement-level deficiency
-            # evaluation uses (ICFR vs risk rating), decided from the scope.
-            "deficiency_scale_guidance": deficiency_scale_guidance(
-                deficiency_scale_for_scope(
-                    self.state.theme,
-                    self.state.business_context,
-                    self.state.frameworks,
-                )
-            ),
-            "tone_qa_feedback": "",
-        }
+        return reporting_inputs(
+            self.state.theme,
+            self.state.business_context,
+            self.state.frameworks,
+            self.state.racm_plan,
+            self.effective_working_papers(),
+        )
 
     # ── Phase runners ────────────────────────────────────────────────────────
 

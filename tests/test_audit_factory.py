@@ -591,6 +591,22 @@ class TestNewAwsChecksAndSeededSampling:
         assert len(r1.selected_items) == 5
         assert r1.selected_items != r3.selected_items
 
+    def test_minimum_sample_size_is_single_source_of_truth(self):
+        from swarm import linters, sampling
+
+        assert (
+            linters.AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY
+            is sampling.AICPA_MIN_SAMPLE_SIZE_BY_FREQUENCY
+        )
+        assert sampling.minimum_sample_size(ControlFrequency.ANNUAL) == 1
+        assert sampling.minimum_sample_size(ControlFrequency.QUARTERLY) == 2
+        assert sampling.minimum_sample_size(ControlFrequency.MONTHLY) == 2
+        assert sampling.minimum_sample_size(ControlFrequency.WEEKLY) == 5
+        assert sampling.minimum_sample_size(ControlFrequency.DAILY) == 20
+        assert sampling.minimum_sample_size("Multiple times per day") == 25
+        assert sampling.minimum_sample_size(ControlFrequency.CONTINUOUS) == 1
+        assert sampling.minimum_sample_size(ControlFrequency.EVENT_DRIVEN) == 1
+
 
 # ── 8. Full End-to-End Audit Factory Pipeline (Phase 1 -> Gate 3 -> Exports) ─
 
@@ -793,7 +809,7 @@ class TestEndToEndAuditFactoryPipeline:
                         last_modified="2026-10-24",
                         version="1.0",
                     ),
-                    import_ap=OSCAL_SAR_ImportAP(href="RACM"),
+                    import_ap=OSCAL_SAR_ImportAP(href="RACM", remarks=""),
                     results=[],
                 )
             if response_model is FinalReportSchema:
