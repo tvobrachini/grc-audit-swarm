@@ -206,15 +206,13 @@ def _seed_iam(iam: Any, profile: str) -> dict[str, Any]:
             if _error_code(exc) != "EntityAlreadyExists":
                 raise
         mfa_enabled = _ensure_user_mfa(iam, username, want_mfa)
-        access_key_suffix: str | None = None
         if want_key:
-            key_id = _ensure_access_key(iam, username)
-            access_key_suffix = key_id[-4:] if len(key_id) >= 4 else key_id
+            _ensure_access_key(iam, username)
         users_summary.append(
             {
                 "username": username,
                 "mfa_enabled": mfa_enabled,
-                "access_key_suffix": access_key_suffix,
+                "has_access_key": want_key,
             }
         )
 
