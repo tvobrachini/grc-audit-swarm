@@ -24,6 +24,18 @@ Gemini model names are retired regularly; set `GEMINI_MODEL` if the default stop
 | `QA_LLM_MODEL` | Optional `provider/model` string (for example `openai/gpt-4o-mini`) for the QA reviewer agents. Unset: QA uses the same provider as the other agents. |
 | `QA_LLM_API_KEY`, `QA_LLM_BASE_URL` | Optional key and endpoint passed only to the QA model's client. |
 | `ENFORCE_DISJOINT_QA_FAMILY` | `1` (or `true`, `yes`) refuses to configure a QA model from the same model family as the primary drafting model (`src/swarm/llm_factory.py`). |
+| `AUDIT_ENFORCE_CROSS_FAMILY` | `1` makes generation provenance raise an error when the drafting model and the QA model are in the same family (`src/swarm/provenance.py`). Unset: the same-family case is recorded in the provenance record but not blocked. |
+
+## System-1 decision engine (optional)
+
+These variables select the scorer behind the optional `Jev`/`Kev` library primitives in `src/swarm/decision_engine.py`. The default phases do not call it. `get_decision_engine()` picks the first one that is configured.
+
+| Variable | Purpose |
+|---|---|
+| `TYPESAFE_API_KEY` | Selects the `JevDecisionEngine` (TypeSafe AI `jev-latest`). It uses the `typesafe` SDK when that package is installed. |
+| `KEV_API_URL` | Endpoint for the `KevDecisionEngine`. Used when `TYPESAFE_API_KEY` is unset. |
+
+If neither variable is set, the engine falls back to a local heuristic scorer.
 
 ## Other settings
 
