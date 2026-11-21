@@ -169,7 +169,7 @@ uv run python run_monitor.py --phase1-only   # Planning only
 uv run python run_monitor.py --skip-aws      # mock working papers instead of the Fieldwork crew
 ```
 
-The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evidence-layer evaluation in `tests/eval/`). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, the OSCAL export against the vendored NIST schema, generation provenance, and the API (gates, retry and override, exports, scope upload, DEMO_MODE, and a 404 for streaming an unknown session's event stream, which also fixes unbounded queue growth for ids nobody created). At the time of writing: 980 Python tests (96% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 39 frontend tests (Vitest and React Testing Library).
+The tests use mocked crews, LLMs and AWS clients (MagicMock, botocore Stubber, and moto for the evidence-layer evaluation in `tests/eval/`). They cover the state machine and gates, QA fail-closed behavior and retries, prompt wiring, the evidence vault and redaction, the AWS tools, the LLM factory, session persistence, the OSCAL export against the vendored NIST schema, generation provenance, and the API (gates, retry and override, exports, scope upload, DEMO_MODE, and a 404 for streaming an unknown session's event stream, which also fixes unbounded queue growth for ids nobody created). At the time of writing: 1076 Python tests (94% line coverage of `src/`), including the offline LLM-evaluation harness tests, and 44 frontend tests (Vitest and React Testing Library).
 
 ### Evidence-layer evaluation
 
