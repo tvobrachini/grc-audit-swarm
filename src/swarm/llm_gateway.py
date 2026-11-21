@@ -22,6 +22,7 @@ import datetime
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable, Sequence
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, TypeVar
 
+import httpx
 from pydantic import BaseModel
 
 from swarm.model_routing import (
@@ -182,8 +184,79 @@ class LLMCallReceipt:
     timestamp: str
 
 
+_PROVIDER_CONFIG: dict[str, tuple[str, tuple[str, ...]]] = {
+    "openai": ("https://api.openai.com/v1/chat/completions", ("OPENAI_API_KEY",)),
+    "anthropic": ("https://api.anthropic.com/v1/messages", ("ANTHROPIC_API_KEY",)),
+    "gemini": (
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        ("GEMINI_API_KEY",),
+    ),
+    "nvidia_nim": (
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
+    ),
+    "openrouter": (
+        "https://openrouter.ai/api/v1/chat/completions",
+        ("OPENROUTER_API_KEY",),
+    ),
+    "ollama": ("http://localhost:11434/v1/chat/completions", ()),
+    "groq": ("https://api.groq.com/openai/v1/chat/completions", ("GROQ_API_KEY",)),
+}
+
+
+def _resolve_provider_and_model(model_id: str) -> tuple[str, str]:
+    """Split a prefixed model string into ``(provider, stripped_model_name)``."""
+    raw = (model_id or "").strip()
+    for prefix in _PROVIDER_CONFIG:
+        token = f"{prefix}/"
+        if raw.startswith(token):
+            return prefix, raw[len(token) :]
+    return "openai", raw
+
+
+def _resolve_endpoint_url(provider: str, base_url: str | None) -> str:
+    if base_url:
+        base = base_url.rstrip("/")
+        if provider == "anthropic":
+            if base.endswith("/messages"):
+                return base
+            if base.endswith("/v1"):
+                return f"{base}/messages"
+            return f"{base}/v1/messages"
+        if base.endswith("/chat/completions"):
+            return base
+        if provider == "ollama" and not base.endswith("/v1"):
+            return f"{base}/v1/chat/completions"
+        return f"{base}/chat/completions"
+    return _PROVIDER_CONFIG[provider][0]
+
+
+def _resolve_api_key(provider: str, api_key: str | None) -> str | None:
+    if api_key:
+        return api_key
+    for env_var in _PROVIDER_CONFIG[provider][1]:
+        val = os.environ.get(env_var)
+        if val:
+            return val
+    return None
+
+
+def _extract_json_text(content: Any) -> str:
+    if not isinstance(content, str):
+        return json.dumps(content)
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
 class ZeroFrameworkLLMGateway:
-    """Lightweight (~100-line) typed JSON-Schema LLM gateway with receipt logging."""
+    """Lightweight typed JSON-Schema LLM gateway with direct httpx transport and receipt logging."""
 
     def __init__(
         self,
@@ -202,6 +275,9 @@ class ZeroFrameworkLLMGateway:
         system_prompt: str,
         user_prompt: str,
         response_model: type[T],
+        api_key: str | None = None,
+        base_url: str | None = None,
+        timeout: float = 120.0,
     ) -> T:
         """Call ``spec.model_id`` enforcing ``response_model`` JSON schema and record an LLMCallReceipt."""
         t0 = time.monotonic()
@@ -233,24 +309,17 @@ class ZeroFrameworkLLMGateway:
                 raw_json_str = str(result)
                 parsed = response_model.model_validate_json(raw_json_str)
         else:
-            import litellm  # type: ignore[import-not-found]
-
-            resp = litellm.completion(
-                model=spec.model_id,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=spec.temperature,
-                response_format=response_model,
+            raw_json_str, in_tok, out_tok = self._invoke_httpx(
+                spec=spec,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema_json=schema_json,
+                default_in_tok=in_tok,
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,
             )
-            content = resp.choices[0].message.content
-            raw_json_str = content if isinstance(content, str) else json.dumps(content)
             parsed = response_model.model_validate_json(raw_json_str)
-            usage = getattr(resp, "usage", None)
-            if usage:
-                in_tok = int(getattr(usage, "prompt_tokens", in_tok))
-                out_tok = int(getattr(usage, "completion_tokens", 0))
 
         if out_tok == 0:
             out_tok = max(1, len(raw_json_str) // 4)
@@ -280,6 +349,85 @@ class ZeroFrameworkLLMGateway:
         )
         self.receipts.append(receipt)
         return parsed
+
+    def _invoke_httpx(
+        self,
+        *,
+        spec: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        schema_json: str,
+        default_in_tok: int,
+        api_key: str | None,
+        base_url: str | None,
+        timeout: float,
+    ) -> tuple[str, int, int]:
+        provider, model_name = _resolve_provider_and_model(spec.model_id)
+        url = _resolve_endpoint_url(provider, base_url)
+        resolved_key = _resolve_api_key(provider, api_key)
+        schema_system = (
+            f"{system_prompt}\n\n"
+            f"Respond ONLY with valid JSON matching this JSON Schema:\n{schema_json}"
+        ).strip()
+
+        if provider == "anthropic":
+            headers: dict[str, str] = {
+                "content-type": "application/json",
+                "anthropic-version": "2023-06-01",
+            }
+            if resolved_key:
+                headers["x-api-key"] = resolved_key
+            payload: dict[str, Any] = {
+                "model": model_name,
+                "max_tokens": 8192,
+                "temperature": spec.temperature,
+                "system": schema_system,
+                "messages": [{"role": "user", "content": user_prompt}],
+            }
+            resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            blocks = data.get("content") or []
+            text_parts = [
+                b.get("text", "")
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            raw_content: Any = "\n".join(text_parts) if text_parts else blocks
+            raw_json_str = _extract_json_text(raw_content)
+            usage = data.get("usage") or {}
+            in_tok = int(
+                usage.get("input_tokens")
+                or usage.get("prompt_tokens")
+                or default_in_tok
+            )
+            out_tok = int(
+                usage.get("output_tokens") or usage.get("completion_tokens") or 0
+            )
+            return raw_json_str, in_tok, out_tok
+
+        headers = {"content-type": "application/json"}
+        if resolved_key:
+            headers["Authorization"] = f"Bearer {resolved_key}"
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": schema_system},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": spec.temperature,
+            "response_format": {"type": "json_object"},
+        }
+        resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        choices = data.get("choices") or []
+        message = choices[0].get("message", {}) if choices else {}
+        raw_json_str = _extract_json_text(message.get("content", ""))
+        usage = data.get("usage") or {}
+        in_tok = int(usage.get("prompt_tokens") or default_in_tok)
+        out_tok = int(usage.get("completion_tokens") or 0)
+        return raw_json_str, in_tok, out_tok
 
 
 def merge_surgical_finding_retries(

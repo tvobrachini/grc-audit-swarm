@@ -58,12 +58,16 @@ class PlanningCrew:
             **self.tasks_config["context_task"], name="context_task", agent=orchestrator
         )
         crosswalk_task = Task(
-            **self.tasks_config["crosswalk_task"], name="crosswalk_task", agent=analyst
+            **self.tasks_config["crosswalk_task"],
+            name="crosswalk_task",
+            agent=analyst,
+            context=[context_task],
         )
         weighting_task = Task(
             **self.tasks_config["weighting_task"],
             name="weighting_task",
             agent=specialist,
+            context=[context_task, crosswalk_task],
         )
 
         # Pydantic Enforcement.
