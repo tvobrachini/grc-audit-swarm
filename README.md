@@ -56,15 +56,29 @@ Optional demo settings: `DEMO_QA_REJECT_PHASE=1|2|3` makes the demo QA reviewer 
 
 To run a real audit, set one LLM provider (see [Configuration](docs/CONFIGURATION.md)) and, for live evidence, AWS credentials with the read-only policy in [Security and data handling](docs/SECURITY-AND-DATA.md). Leave `DEMO_MODE` unset.
 
+### Try with the local AWS emulator (no AWS account)
+
+To run real LLM agents against a local [moto](https://github.com/getmoto/moto) AWS emulator instead of a live AWS account, layer `docker-compose.emulator.yml` on top of the base Compose file and seed the emulator with planted misconfigurations:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.emulator.yml up --build
+# In another terminal, seed the emulator (defaults to http://127.0.0.1:5000, --profile misconfigured):
+uv run python scripts/seed_aws_emulator.py
+# Or seed a clean baseline:
+uv run python scripts/seed_aws_emulator.py --profile hardened
+```
+
+The emulator overlay points the API container at `AWS_ENDPOINT_URL=http://moto:5000` with dummy credentials, so no real AWS account is touched.
+
 ---
 
 ## What it does
 
-Three zero-framework phase pipelines run in sequence — **Planning** drafts a Risk and Control Matrix (RACM), **Fieldwork** tests those controls against read-only AWS evidence and writes working papers, **Reporting** writes the draft report and deficiency evaluation. Each phase runs a **3-tier Audit Factory cascade**: deterministic Python audit-methodology linters (`D1`–`D4` and `D6`–`D14`; rule `D5`, the Gate 2 to Phase 3 handoff, is enforced in `audit_flow.py`, distortion traps, and anti-slop checks), System-1 `Jev`/`Kev` logprob primitives (`Noul`, `Choice`, `Score`), and a cross-AI-family QA reviewer (`PoLL`) that fails closed and gets a surgical retry with its rejection reason. Each phase then stops at a **human gate**, where a named reviewer can **approve** (starts the next phase), **return for rework** with required notes, or **approve despite a QA rejection** with a written override reason. The preparer of an audit cannot approve, return or override its own gates, and the Gate 3 approver must differ from the Gate 2 approver (segregation of duties, by declared name, or by per-reviewer token if configured — see [Limitations](docs/LIMITATIONS.md)).
+Three phase pipelines run in sequence over a direct `httpx` structured LLM gateway (`src/swarm/llm_gateway.py`, no `crewai` or `litellm`) — **Planning** drafts a Risk and Control Matrix (RACM), **Fieldwork** tests those controls against read-only AWS evidence and writes working papers, **Reporting** writes the draft report and deficiency evaluation. Each phase runs deterministic Python audit-methodology linters (`D1`–`D4` and `D6`–`D14` in `src/swarm/linters.py`; rule `D5`, the Gate 2 to Phase 3 handoff, is enforced in `src/swarm/audit_flow.py`), distortion-trap and anti-slop checks, and a fail-closed QA reviewer (optionally on a disjoint model family via `QA_LLM_MODEL` and `ENFORCE_DISJOINT_QA_FAMILY`) with one automatic retry carrying its rejection reason. Optional library primitives for System-1 `Jev`/`Kev` logprob scoring (`src/swarm/decision_engine.py`), deterministic HMAC-SHA256 audit sampling (`src/swarm/sampling.py`), and Panel-of-LLM (`PoLL`) jury aggregation (`src/swarm/model_routing.py`) are also included for custom or research workflows and do not run unconditionally on every default phase. Each phase stops at a **human gate**, where a named reviewer can **approve** (starts the next phase), **return for rework** with required notes, or **approve despite a QA rejection** with a written override reason. The preparer of an audit cannot approve, return or override its own gates, and the Gate 3 approver must differ from the Gate 2 approver (segregation of duties, by declared name, or by per-reviewer token if configured — see [Limitations](docs/LIMITATIONS.md)).
 
 At Gates 2 and 3 the reviewer records their own decisions beside the AI draft (sign-off or challenge per finding, a scope limitation for untested key controls, a classification and five-part write-up per deficiency, management's response, an engagement conclusion, and post-issuance **remediation verification** per IIA GIAS Standard 15.2); the gate will not open until the required ones exist, and exports show the reviewer's **conclusion of record** next to the AI draft where they differ ([ADR-011](DECISIONS.md), [ADR-013](DECISIONS.md)).
 
-Besides its own read-only AWS reads (IAM password policy, user MFA, root account summary, access key age/rotation, S3 Block Public Access, CloudTrail multi-region trails, KMS key rotation, and GuardDuty detectors) and deterministic HMAC-SHA256 audit sampling (`src/swarm/sampling.py`), Fieldwork can import Prowler JSON exports and AWS Security Hub findings as point-in-time evidence ([docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)).
+Live read-only AWS collection covers 9 checks — IAM password policy, IAM user MFA, IAM root account summary, IAM access key age/rotation, S3 Block Public Access, CloudTrail multi-region trails, KMS CMK rotation, GuardDuty detectors, and IAM Access Analyzer (wired in both `src/swarm/tools/aws_tools.py` and `src/swarm/mcp_server.py`). Fieldwork can also import Prowler JSON exports and AWS Security Hub findings as point-in-time evidence ([docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)).
 
 Every finding's quoted evidence is checked in code, not by a model, against a redacted evidence vault, and shown in the UI as verified or not. Every gate action is appended to a hash-chained approval trail, along with which model family, prompt fingerprint, deterministic linter outcome, and run produced the artifact under review. Exports include a real, schema-validated **OSCAL 1.2.1 Assessment Results** document (including `local-definitions.objectives-and-methods` and deterministic drift evaluation) alongside RACM/working-papers spreadsheets (with a `"RACM Crosswalk"` worksheet) and the Markdown report.
 
@@ -130,7 +144,7 @@ More screenshots (QA rejection / retry / override, control attributes, return-fo
 - **QA is another LLM,** run at temperature 0 to reduce (not remove) variance. A QA approval does not show the output is correct.
 - **Reviewer identity is self-declared by default,** compared as typed names against one shared API token. Optional per-reviewer tokens (`REVIEWER_TOKENS_FILE`) tie each action to an issued token instead; that is not SSO and has no MFA — see [Security and data handling](docs/SECURITY-AND-DATA.md#per-reviewer-tokens).
 - **The approval trail is tamper-evident, not tamper-proof.** Its hash chain detects edits and reordering; detecting entries cut from the end depends on where you keep a separate anchor file, which this repository does not configure for you.
-- **AWS evidence coverage is focused on core cloud security & ITGCs:** IAM password policy, IAM user MFA, IAM root account summary, IAM access key age/rotation, S3 Block Public Access, CloudTrail multi-region trails, KMS CMK rotation, and GuardDuty detectors — plus imported Prowler and AWS Security Hub findings.
+- **AWS evidence coverage is focused on core cloud security & ITGCs:** IAM password policy, IAM user MFA, IAM root account summary, IAM access key age/rotation, S3 Block Public Access, CloudTrail multi-region trails, KMS CMK rotation, GuardDuty detectors, and IAM Access Analyzer — plus imported Prowler and AWS Security Hub findings.
 
 Full list, including OSCAL's remaining limits and generation-provenance caveats: [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 

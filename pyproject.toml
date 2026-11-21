@@ -1,7 +1,7 @@
 [project]
 name = "grc-audit-swarm"
-version = "0.1.0"
-description = "Zero-framework, deterministic-first Audit Factory AI: drafts a RACM, working papers and OSCAL 1.2.1 report with System-1 (Jev/Kev) cascades, cross-family PoLL review, three human gates, read-only AWS evidence and a hashed evidence vault"
+version = "0.2.0"
+description = "IT audit workflow engine: drafts a RACM, working papers and OSCAL 1.2.1 report over a direct httpx LLM gateway, with deterministic methodology linters, fail-closed QA review, three human gates, read-only AWS evidence and a hashed evidence vault"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Tiago Brachini" }]
