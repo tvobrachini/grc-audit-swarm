@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Local quality gate, run by ~/.config/agents/hooks/quality-gate before an AI agent may finish
+# a turn with uncommitted changes. Mirrors .github/workflows/ci.yml, minus the slow or
+# CI-only parts (coverage threshold, Python matrix, docker, dependency audit): CI is still the final gate.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 2
+fail=0
+step() { echo "== $*"; "$@" || { echo "FAILED: $*"; fail=1; }; }
+
+mapfile -t changed < <( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | while read -r f; do [ -f "$f" ] && echo "$f"; done)
+[ ${#changed[@]} -gt 0 ] && step uv run --frozen pre-commit run --files "${changed[@]}"
+step uv run --frozen pyright src/ evals/
+step uv run --frozen pytest tests/ -q -x -p no:cacheprovider
+if printf "%s\n" "${changed[@]}" | grep -q "^frontend/"; then
+  if pushd frontend >/dev/null; then
+    step npm run --silent lint
+    step npm test --silent
+    popd >/dev/null
+  else
+    echo "FAILED: frontend/ missing"; fail=1
+  fi
+fi
+exit $fail
